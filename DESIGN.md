@@ -46,11 +46,10 @@
          │                          │
          ▼                          ▼
    ┌──────────┐           ┌──────────────────┐
-   │  Source  │           │  Repository Root │
-   │  Files   │◀─symlink──│  ├─ .links/       │
-   │  (任意   │           │  ├─ data/         │
-   │   路径)  │────copy──▶│  ├─ .env          │
-   └──────────┘           │  └─ .git/         │
+    │  Source  │           │  Repository Root │
+    │  Files   │◀─symlink──│  ├─ .links/       │
+    │  (任意   │           │  ├─ data/         │
+    │   路径)  │────copy──▶│  └─ .git/         │
                           └──────────────────┘
 ```
 
@@ -109,17 +108,6 @@ type UpdateConfigRequest struct {
     GitUserEmail       *string `json:"git_user_email,omitempty"`
 }
 ```
-
-**.env 同步策略：**
-
-| 配置项 | .env Key | 同步动作 |
-|--------|----------|----------|
-| remote_url | GIT_REMOTE_URL | git remote set-url origin |
-| branch | GIT_BRANCH | 仅记录 |
-| git_user_name | GIT_USER_NAME | git config user.name |
-| git_user_email | GIT_USER_EMAIL | git config user.email |
-| auto_backup | AUTO_BACKUP | 触发调度器注册/注销 |
-| auto_backup_interval | AUTO_BACKUP_INTERVAL | 更新调度器条目 |
 
 ### 3.3 路径安全校验（★ P0-2 修复）
 
@@ -284,7 +272,7 @@ CREATE TABLE symlinks (
 
 ### 应用配置
 
-路径: `~/.backup-manager/config.json`
+路径: `~/.config/backup-manager/config.json`
 ```json
 {
   "port": 9800,
@@ -357,13 +345,13 @@ backup-manager/
 
 | 评审问题 | 修复方案 |
 |----------|----------|
-| **P0-1** 缺少仓库配置编辑 API | 新增 `PUT /api/v1/repos/:id/config` + .env 同步策略 |
+| **P0-1** 缺少仓库配置编辑 API | 新增 `PUT /api/v1/repos/:id/config` + SQLite 持久化配置 |
 | **P0-2** 路径穿越高危风险 | SafeResolve 四层防护（Clean→Abs→EvalSymlinks→Prefix）+ 文件大小/并发限制 |
 | **P0-3** 缺少定时备份 | `robfig/cron/v3` 调度器 + 生命周期管理 + 配置控制 |
 | **P0-4** 缺少 Git 认证配置 | SSH/HTTPS 认证 + AES-GCM 加密存储 + 环境变量注入 |
 | **P0-5** 增量同步与一致性冲突 | 添加软链接时同步复制到 data/，备份退化为 git add+commit+push |
 | **P1-1** Browse API 安全边界模糊 | 移除 `root` 参数，引入 AllowedRoots 机制（仅 $HOME 和 repo 根目录可浏览） |
-| **P1-2** AES-GCM 密钥管理策略缺失 | 首次启动生成 AES-256 密钥存储在 `~/.backup-manager/master.key`（0600 权限），内存中 `[]byte` 管理+使用后清零 |
+| **P1-2** AES-GCM 密钥管理策略缺失 | 首次启动生成 AES-256 密钥存储在 `~/.config/backup-manager/master.key`（0600 权限），内存中 `[]byte` 管理+使用后清零 |
 | **P1-3** 源文件外部删除时 data/ 同步策略未明确 | 增量备份检测阶段补充：源文件不存在时自动删除 data/ 和软链接 |
 | **P1-4** 增量备份检测算法未定义 | 明确为 mtime + fileSize 双字段比对 |
 | **P1-5** SafeResolve EvalSymlinks 降级安全盲区 | 区分错误类型：fs.ErrNotExist 可降级，其他错误拒绝 |

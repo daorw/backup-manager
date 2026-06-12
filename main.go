@@ -49,7 +49,7 @@ func main() {
 		log.Fatalf("failed to get home directory: %v", err)
 	}
 
-	appDir := filepath.Join(homeDir, ".backup-manager")
+	appDir := filepath.Join(homeDir, ".config", "backup-manager")
 	if err := os.MkdirAll(appDir, 0700); err != nil {
 		log.Fatalf("failed to create app directory: %v", err)
 	}

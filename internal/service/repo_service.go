@@ -86,15 +86,10 @@ func (s *RepoService) Create(req *CreateRepoRequest) (*model.Repo, error) {
 
 	gitignorePath := filepath.Join(absPath, ".gitignore")
 	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		content := "# Backup Manager managed files\n.links/\n.env\n"
+		content := "# Backup Manager managed files\n.links/\n"
 		if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
 			return nil, fmt.Errorf("failed to create .gitignore: %w", err)
 		}
-	}
-
-	defaultConfig := &model.RepoConfig{Branch: "main"}
-	if err := s.writeEnvFile(absPath, defaultConfig); err != nil {
-		return nil, fmt.Errorf("failed to create .env file: %w", err)
 	}
 
 	now := time.Now()
@@ -169,7 +164,7 @@ func (s *RepoService) GitInit(id string) error {
 	// Ensure .gitignore exists after init
 	gitignorePath := filepath.Join(repo.Path, ".gitignore")
 	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		content := "# Backup Manager managed files\n.links/\n.env\n"
+		content := "# Backup Manager managed files\n.links/\n"
 		if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to create .gitignore: %w", err)
 		}
@@ -210,27 +205,16 @@ func (s *RepoService) HasGitRemote(id string) (bool, error) {
 // Delete removes a repository from the database.
 // The filesystem contents are left intact for safety.
 func (s *RepoService) Delete(id string) error {
-	repo, err := s.store.GetRepo(id)
-	if err != nil {
-		return err
-	}
-
 	s.scheduler.Unregister(id)
 
 	if err := s.store.DeleteRepo(id); err != nil {
 		return err
 	}
 
-	// Remove .env symlink if it was created by git
-	envPath := filepath.Join(repo.Path, ".env")
-	if _, err := os.Stat(envPath); err == nil {
-		os.Remove(envPath)
-	}
-
 	return nil
 }
 
-// UpdateConfig updates a repo's configuration, syncs .env file,
+// UpdateConfig updates a repo's configuration,
 // applies git config changes, and updates the scheduler.
 // Peripheral operations (file writes, git commands, scheduler) are performed
 // before updating the database to avoid state inconsistency on failure.
@@ -276,12 +260,6 @@ func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 		return nil
 	}
 
-	// Step 1: Write .env file (filesystem operation)
-	if err := s.writeEnvFile(repo.Path, config); err != nil {
-		return fmt.Errorf("failed to write .env file: %w", err)
-	}
-
-	// Step 2: Apply git config changes
 	if req.GitUserName != nil && *req.GitUserName != "" {
 		if err := s.gitEngine.ConfigSet(repo.Path, "user.name", *req.GitUserName); err != nil {
 			return fmt.Errorf("failed to set git user.name: %w", err)
@@ -293,14 +271,13 @@ func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 		}
 	}
 
-	// Step 3: Apply remote URL
 	if req.RemoteURL != nil && *req.RemoteURL != "" {
 		if err := s.gitEngine.RemoteSetURL(repo.Path, *req.RemoteURL); err != nil {
 			return fmt.Errorf("failed to set remote URL: %w", err)
 		}
 	}
 
-	// Step 4: Update scheduler for auto-backup
+	// Update scheduler for auto-backup
 	if req.AutoBackup != nil || req.AutoBackupInterval != nil {
 		s.scheduler.Unregister(id)
 		if config.AutoBackup && config.AutoBackupInterval != "" {
@@ -310,31 +287,10 @@ func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 		}
 	}
 
-	// Step 5: Update database last — all peripheral operations succeeded
+	// Update database last — all peripheral operations succeeded
 	if err := s.store.UpdateRepoConfig(config); err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 
 	return nil
-}
-
-// writeEnvFile writes the repo configuration to the .env file.
-func (s *RepoService) writeEnvFile(repoPath string, config *model.RepoConfig) error {
-	envPath := filepath.Join(repoPath, ".env")
-	autoBackup := "false"
-	if config.AutoBackup {
-		autoBackup = "true"
-	}
-
-	content := fmt.Sprintf(
-		"GIT_REMOTE_URL=%s\nGIT_BRANCH=%s\nGIT_USER_NAME=%s\nGIT_USER_EMAIL=%s\nAUTO_BACKUP=%s\nAUTO_BACKUP_INTERVAL=%s\n",
-		config.RemoteURL,
-		config.Branch,
-		config.GitUserName,
-		config.GitUserEmail,
-		autoBackup,
-		config.AutoBackupInterval,
-	)
-
-	return os.WriteFile(envPath, []byte(content), 0644)
 }

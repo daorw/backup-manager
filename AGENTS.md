@@ -218,7 +218,7 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 
 ### 3. Git 认证加密
 - SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储在 SQLite
-- 密钥文件 `~/.backup-manager/master.key` 权限 0600，首次启动自动生成
+- 密钥文件 `~/.config/backup-manager/master.key` 权限 0600，首次启动自动生成
 - SSH 通过 `GIT_SSH_COMMAND` 环境变量注入
 - HTTPS 通过 `GIT_ASKPASS` 脚本注入
 
@@ -280,10 +280,10 @@ cd frontend && npx tsc --noEmit
 
 ## 环境与配置
 
-- 应用数据目录：`~/.backup-manager/`
-- 配置文件：`~/.backup-manager/config.json`
-- 加密密钥：`~/.backup-manager/master.key`
-- 数据库：`~/.backup-manager/backup-manager.db`
+- 应用数据目录：`~/.config/backup-manager/`
+- 配置文件：`~/.config/backup-manager/config.json`
+- 加密密钥：`~/.config/backup-manager/master.key`
+- 数据库：`~/.config/backup-manager/backup-manager.db`
 - 默认端口：9800
 - 启动后自动打开浏览器
 
@@ -291,7 +291,6 @@ cd frontend && npx tsc --noEmit
 
 ```
 <repo-root>/
-├── .env                 # 仓库配置（由系统管理）
 ├── .links/              # 软链接目录（结构与 data/ 复刻）
 ├── data/                # 实际备份数据（结构与 .links/ 复刻）
 └── .git/                # Git 版本库

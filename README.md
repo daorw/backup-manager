@@ -18,7 +18,6 @@
 
 ```
 <repo-root>/
-├── .env           # 仓库配置（由系统管理）
 ├── .links/        # 软链接目录（指向源文件）
 ├── data/          # 实际备份数据（与 .links/ 目录结构一致）
 └── .git/          # Git 版本库
@@ -26,12 +25,15 @@
 
 ## 功能特性
 
-- **仓库管理** — 创建/删除/查看备份仓库，可视化配置
-- **软链接管理** — 树形展示、添加/删除/批量导入、修改目标路径
+- **仓库管理** — 创建/删除/查看备份仓库，可视化配置（远程仓库、分支、Git 用户）
+- **软链接管理** — 树形展示、添加/删除/批量导入、修改目标路径、已删除源文件同步清理
 - **文件预览** — 纯文本/代码语法高亮、Markdown 渲染（含本地图片）、二进制文件标识
-- **备份执行** — 手动触发或定时自动备份，增量同步，进度展示
-- **备份历史** — 查看 Git 提交历史
-- **Git 集成** — 远程仓库配置、SSH/HTTPS 认证管理（加密存储）
+- **备份执行** — 手动触发或定时自动备份（秒级 cron），增量同步，Git push（可选）
+- **备份历史** — 查看 Git 提交历史，支持分页
+- **源文件回滚** — 选择历史提交版本，将源文件恢复到指定版本
+- **Git 集成** — 远程仓库配置、SSH/HTTPS 认证管理（AES-256-GCM 加密存储）
+- **本地文件浏览** — 安全限定在用户主目录和仓库根目录，防止路径穿越
+- **定时调度** — 基于 cron 的自动备份，应用启动时自动加载，配置变更时动态注册/注销
 - **前后端一体** — 单二进制文件，一键启动
 
 ## 快速开始
@@ -52,6 +54,16 @@ go build -o backup-manager .
 ```
 
 ### 开发模式
+
+```bash
+# 一键启动（前后端同时拉起）
+./scripts/dev-start.sh
+
+# 一键关闭
+./scripts/dev-stop.sh
+```
+
+也可分别启动：
 
 ```bash
 # 终端 1：启动后端
@@ -93,6 +105,7 @@ go build -o backup-manager .
 | 状态管理 | Zustand |
 | 定时调度 | robfig/cron/v3 |
 | 加密 | AES-256-GCM |
+| Markdown | react-markdown + remark-gfm |
 | 打包 | Go embed (前端内嵌到二进制) |
 
 ### REST API
@@ -102,13 +115,16 @@ go build -o backup-manager .
 | 分类 | 端点 | 功能 |
 |------|------|------|
 | 仓库 | `POST/GET/DELETE /repos` | 仓库 CRUD |
-| 仓库 | `PUT /repos/:id/config` | 更新配置 |
-| 软链接 | `POST/GET/DELETE/PUT /repos/:id/symlinks` | 软链接 CRUD |
+| 仓库 | `PUT /repos/:id/config` | 更新配置（部分更新） |
+| 软链接 | `POST/GET /repos/:id/symlinks` | 软链接创建/列表 |
+| 软链接 | `GET/DELETE/PUT /repos/:id/symlinks/:linkId` | 软链接详情/删除/修改目标 |
 | 软链接 | `POST /repos/:id/symlinks/batch` | 批量导入 |
 | 浏览 | `GET /browse?path=...` | 浏览本地文件系统 |
 | 预览 | `GET /repos/:id/preview?path=...` | 预览文件内容 |
 | 备份 | `POST /repos/:id/backup` | 触发备份 |
-| 备份 | `GET /repos/:id/backup/history` | 备份历史 |
+| 备份 | `GET /repos/:id/backup/history` | 备份历史（分页） |
+| 回滚 | `GET /repos/:id/commits/:hash/changed-files` | 提交中变更的文件列表 |
+| 回滚 | `POST /repos/:id/rollback` | 回滚源文件到历史版本 |
 | 认证 | `GET/PUT/DELETE /repos/:id/auth` | Git 认证管理 |
 | 系统 | `GET /health` | 健康检查 |
 
@@ -122,21 +138,22 @@ go build -o backup-manager .
 5. 切换到备份标签页 → 点击"触发备份"
 6. 配置远程仓库和认证信息（可选）
 7. 设置定时备份（可选）
+8. 在备份历史中选择提交 → 回滚源文件到历史版本（可选）
 ```
 
 ## 环境配置
 
 | 路径 | 说明 |
 |------|------|
-| `~/.backup-manager/config.json` | 应用配置（端口、主题等） |
-| `~/.backup-manager/master.key` | AES-256 加密密钥（首次启动自动生成） |
-| `~/.backup-manager/backup-manager.db` | SQLite 数据库 |
+| `~/.config/backup-manager/config.json` | 应用配置（端口、主题、自动打开浏览器等） |
+| `~/.config/backup-manager/master.key` | AES-256 加密密钥（首次启动自动生成） |
+| `~/.config/backup-manager/backup-manager.db` | SQLite 数据库 |
 
 ## 安全设计
 
 - **路径安全**: 四层校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越
 - **认证加密**: SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储
-- **并发控制**: 仓库级互斥锁防止并发备份，预览接口限流
+- **并发控制**: 仓库级互斥锁防止并发备份，预览接口限流（最大 5 并发）
 - **错误隔离**: Git push 失败不阻断本地 commit
 
 ## 开发
@@ -155,25 +172,87 @@ cd frontend && npx tsc --noEmit
 
 ```
 backup-manager/
-├── main.go                     # 入口
+├── main.go                     # 入口：初始化各模块 → 启动 HTTP → 优雅关闭
+├── scripts/
+│   ├── dev-start.sh            # 一键启动开发环境
+│   └── dev-stop.sh             # 一键关闭开发环境
 ├── internal/                   # 后端代码
 │   ├── api/                    # API 层（路由 + 处理器）
+│   │   ├── router.go           # 路由注册 + SPA 挂载
+│   │   ├── middleware.go       # CORS + 错误恢复
+│   │   └── handler/            # HTTP 处理器
+│   │       ├── repo.go         # 仓库 CRUD
+│   │       ├── symlink.go      # 软链接 CRUD + 批量导入
+│   │       ├── browse.go       # 本地文件浏览
+│   │       ├── preview.go      # 文件预览
+│   │       ├── backup.go       # 备份触发 + 历史查询
+│   │       ├── auth.go         # Git 认证管理
+│   │       ├── rollback.go     # 源文件回滚
+│   │       ├── system.go       # 健康检查
+│   │       └── errors.go       # 错误码映射
 │   ├── service/                # 业务逻辑层
+│   │   ├── repo_service.go     # 仓库生命周期
+│   │   ├── symlink_service.go  # 软链接 CRUD + 镜像同步
+│   │   ├── backup_service.go   # 备份执行引擎
+│   │   ├── auth_service.go     # Git 认证管理
+│   │   ├── browser_service.go  # 安全文件浏览
+│   │   ├── rollback_service.go # 源文件回滚逻辑
+│   │   └── repo_mutex.go       # 仓库级互斥锁
 │   ├── store/                  # 数据持久化层
+│   │   ├── db.go               # SQLite 初始化 + 迁移
+│   │   ├── store.go            # Store 聚合
+│   │   ├── repo_store.go       # repos 表操作
+│   │   ├── repo_config_store.go# repo_configs 表操作
+│   │   ├── repo_auth_store.go  # repo_auths 表操作
+│   │   └── symlink_store.go    # symlinks 表操作
 │   ├── model/                  # 数据模型
+│   │   ├── repo.go             # Repo, RepoConfig, RepoStatus
+│   │   ├── symlink.go          # Symlink, SymlinkType
+│   │   └── auth.go             # GitAuth, GitAuthType
 │   ├── git/                    # Git 引擎
+│   │   └── git.go              # Init/Add/Commit/Push/Log/Status/Config/LsTree
+│   ├── resolver/               # Git 路径解析
+│   │   └── symlink_resolver.go # data/ 路径 ↔ 源文件路径映射
 │   ├── scheduler/              # 定时调度器
+│   │   └── scheduler.go        # 基于 cron 的注册/注销
 │   └── util/                   # 工具包
-├── frontend/                   # React 前端
-│   └── src/
-│       ├── api/                # API 客户端
-│       ├── components/         # UI 组件
-│       ├── routes/             # 页面
-│       ├── store/              # 状态管理
-│       └── types/              # 类型定义
-├── REQUIREMENT.md              # 需求文档
-├── DESIGN.md                   # 技术方案
-└── AGENTS.md                   # 项目规范
+│       ├── path.go             # SafeResolve 四层路径校验
+│       ├── crypto.go           # KeyManager (AES-256-GCM)
+│       └── file.go             # CopyFile/CopyDir/DetectMIME
+└── frontend/                   # React SPA
+    ├── package.json
+    ├── vite.config.ts           # 开发代理 /api → localhost:9800
+    └── src/
+        ├── main.tsx             # React 入口
+        ├── App.tsx              # 路由配置
+        ├── App.css              # 全局样式
+        ├── api/client.ts        # axios 实例 + 所有 API 函数
+        ├── types/index.ts       # TypeScript 类型定义
+        ├── store/appStore.ts    # Zustand 状态管理
+        ├── routes/              # 页面组件
+        │   ├── Dashboard.tsx    # 仓库列表
+        │   └── RepoDetail.tsx   # 仓库详情（4 个 Tab）
+        └── components/          # 功能组件
+            ├── layout/
+            │   ├── AppLayout.tsx
+            │   └── Sidebar.tsx
+            ├── repo/
+            │   ├── RepoCard.tsx
+            │   └── CreateRepoModal.tsx
+            ├── symlink/
+            │   ├── SymlinkPanel.tsx
+            │   └── SymlinkAddModal.tsx
+            ├── preview/
+            │   ├── PreviewPanel.tsx
+            │   ├── TextPreview.tsx
+            │   ├── MarkdownPreview.tsx
+            │   └── BinaryInfo.tsx
+            ├── backup/
+            │   └── BackupPanel.tsx
+            │   ├── RollbackConfirmModal.tsx
+            │   └── RollbackResultModal.tsx
+            └── config/
+                └── ConfigPanel.tsx
 ```
 
 ## License

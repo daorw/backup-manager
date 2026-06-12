@@ -47,7 +47,7 @@ interface AppState {
   batchImportSymlinks: (repoId: string, targets: Array<{ target_path: string; relative_path: string }>) => Promise<void>;
 
   triggerBackup: (repoId: string) => Promise<BackupResult | void>;
-  pushRepo: (repoId: string) => Promise<void>;
+  pushRepo: (repoId: string, force?: boolean) => Promise<void>;
   gitInitRepo: (repoId: string) => Promise<void>;
   fetchBackupHistory: (repoId: string, limit?: number, offset?: number) => Promise<void>;
 
@@ -255,10 +255,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  pushRepo: async (repoId: string) => {
+  pushRepo: async (repoId: string, force = false) => {
     set({ error: null });
     try {
-      await api.pushRepo(repoId);
+      await api.pushRepo(repoId, force);
       // Refresh repo to update status
       const repo = await api.fetchRepo(repoId);
       set({ currentRepo: repo });

@@ -174,7 +174,11 @@ func (s *BackupService) History(repoID string, limit, offset int) ([]git.CommitE
 // existing remote origin. Auth env vars are only injected if configured;
 // otherwise, the system's git credentials (SSH agent, credential helper, etc.)
 // are used automatically.
-func (s *BackupService) Push(repoID string) error {
+func (s *BackupService) Push(repoID string, opts ...git.PushOption) error {
+	mu := s.getRepoMutex(repoID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	repo, err := s.store.GetRepo(repoID)
 	if err != nil {
 		return err
@@ -200,7 +204,8 @@ func (s *BackupService) Push(repoID string) error {
 	}
 
 	envVars := s.authSvc.BuildEnvVars(repoID)
-	if err := s.gitEngine.Push(repo.Path, "origin", branch, envVars); err != nil {
+
+	if err := s.gitEngine.Push(repo.Path, "origin", branch, envVars, opts...); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}
 	return nil

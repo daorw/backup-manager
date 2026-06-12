@@ -189,3 +189,84 @@ func TestGitCommandOutput(t *testing.T) {
 		}
 	})
 }
+
+func TestGitEngine_Push_WithOptions(t *testing.T) {
+	engine := NewGitEngine()
+
+	t.Run("push with force option", func(t *testing.T) {
+		// Create a source repo with a commit
+		sourceDir := t.TempDir()
+		if err := engine.Init(sourceDir); err != nil {
+			t.Fatalf("failed to init source repo: %v", err)
+		}
+		// Configure git user
+		cmd := exec.Command("git", "config", "user.email", "test@test.com")
+		cmd.Dir = sourceDir
+		cmd.Run()
+		cmd = exec.Command("git", "config", "user.name", "test")
+		cmd.Dir = sourceDir
+		cmd.Run()
+
+		// Create a file and commit
+		testFile := filepath.Join(sourceDir, "test.txt")
+		os.WriteFile(testFile, []byte("initial content"), 0644)
+		engine.Add(sourceDir, "test.txt")
+		engine.Commit(sourceDir, "initial commit")
+
+		// Create a bare remote repo
+		remoteDir := t.TempDir()
+		remoteURL := "file://" + remoteDir
+		cmd = exec.Command("git", "init", "--bare", remoteDir)
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("failed to init bare remote: %v", err)
+		}
+
+		// Add remote and push
+		engine.RemoteSetURL(sourceDir, remoteURL)
+
+		// Test normal push
+		t.Run("normal push", func(t *testing.T) {
+			err := engine.Push(sourceDir, "origin", "main", nil)
+			if err != nil {
+				t.Fatalf("normal push failed: %v", err)
+			}
+		})
+
+		// Test force push
+		t.Run("force push", func(t *testing.T) {
+			err := engine.Push(sourceDir, "origin", "main", nil, WithForce())
+			if err != nil {
+				t.Fatalf("force push failed: %v", err)
+			}
+		})
+	})
+
+	t.Run("push without options", func(t *testing.T) {
+		// This test ensures backward compatibility
+		sourceDir := t.TempDir()
+		engine.Init(sourceDir)
+		cmd := exec.Command("git", "config", "user.email", "test@test.com")
+		cmd.Dir = sourceDir
+		cmd.Run()
+		cmd = exec.Command("git", "config", "user.name", "test")
+		cmd.Dir = sourceDir
+		cmd.Run()
+
+		testFile := filepath.Join(sourceDir, "test.txt")
+		os.WriteFile(testFile, []byte("content"), 0644)
+		engine.Add(sourceDir, "test.txt")
+		engine.Commit(sourceDir, "commit")
+
+		remoteDir := t.TempDir()
+		remoteURL := "file://" + remoteDir
+		cmd = exec.Command("git", "init", "--bare", remoteDir)
+		cmd.Run()
+		engine.RemoteSetURL(sourceDir, remoteURL)
+
+		// Push without any options (backward compatible)
+		err := engine.Push(sourceDir, "origin", "main", nil)
+		if err != nil {
+			t.Fatalf("push without options failed: %v", err)
+		}
+	})
+}

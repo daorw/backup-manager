@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
+	"backup-manager/internal/git"
 	"backup-manager/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -32,13 +34,32 @@ func (h *BackupHandler) Trigger(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
+// PushRequest is the request payload for push operations.
+type PushRequest struct {
+	Force bool `json:"force"`
+}
+
 // Push handles POST /api/v1/repos/:id/push
 func (h *BackupHandler) Push(c *gin.Context) {
 	repoID := c.Param("id")
-	if err := h.backupSvc.Push(repoID); err != nil {
+
+	var req PushRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Empty body is fine — treat as normal push
+		req.Force = false
+	}
+
+	var opts []git.PushOption
+	if req.Force {
+		opts = append(opts, git.WithForce())
+		log.Printf("[handler] force push requested for repo %s", repoID)
+	}
+
+	if err := h.backupSvc.Push(repoID, opts...); err != nil {
 		respondError(c, err)
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"data": "pushed"})
 }
 

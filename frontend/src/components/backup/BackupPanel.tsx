@@ -15,6 +15,7 @@ import {
   Spin,
   Tooltip,
   Alert,
+  Modal,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -31,6 +32,7 @@ import {
   SendOutlined,
   ExclamationCircleOutlined,
   CheckOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -80,6 +82,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const [backingUp, setBackingUp] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [initializing, setInitializing] = useState(false);
+  const [forcePushConfirmOpen, setForcePushConfirmOpen] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -136,6 +139,21 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     try {
       await pushRepo(repoId);
       message.success('Pushed to remote successfully');
+    } catch (err) {
+      if (err instanceof Error) {
+        message.error(err.message);
+      }
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const handleForcePush = async () => {
+    setPushing(true);
+    setForcePushConfirmOpen(false);
+    try {
+      await pushRepo(repoId, true);
+      message.success('Force pushed to remote successfully');
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -467,14 +485,27 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         </Button>
 
         {hasRemote && (
-          <Button
-            icon={<SendOutlined />}
-            onClick={handlePush}
-            loading={pushing}
-            disabled={!isGitInit}
-          >
-            {pushing ? 'Pushing...' : 'Push to Remote'}
-          </Button>
+          <Space>
+            <Button
+              icon={<SendOutlined />}
+              onClick={handlePush}
+              loading={pushing}
+              disabled={!isGitInit}
+            >
+              {pushing ? 'Pushing...' : 'Push to Remote'}
+            </Button>
+            <Tooltip title="Force push overwrites remote history. Use when remote is out of sync with local.">
+              <Button
+                danger
+                icon={<WarningOutlined />}
+                onClick={() => setForcePushConfirmOpen(true)}
+                loading={pushing}
+                disabled={!isGitInit}
+              >
+                Force Push
+              </Button>
+            </Tooltip>
+          </Space>
         )}
       </Space>
 
@@ -534,6 +565,32 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         result={rollbackResult}
         onClose={handleCloseResult}
       />
+
+      <Modal
+        title="Force Push Confirmation"
+        open={forcePushConfirmOpen}
+        onCancel={() => setForcePushConfirmOpen(false)}
+        onOk={handleForcePush}
+        okText="Force Push"
+        okButtonProps={{ danger: true }}
+        confirmLoading={pushing}
+      >
+        <Typography.Text>
+          This will{' '}
+          <Typography.Text strong type="danger">
+            force push
+          </Typography.Text>{' '}
+          and overwrite the remote branch history. Any commits on the remote
+          that are not in your local branch will be{' '}
+          <Typography.Text strong type="danger">
+            permanently lost
+          </Typography.Text>
+          .
+        </Typography.Text>
+        <Typography.Paragraph style={{ marginTop: 12 }}>
+          Are you sure you want to continue?
+        </Typography.Paragraph>
+      </Modal>
     </div>
   );
 };

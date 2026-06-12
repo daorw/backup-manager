@@ -153,10 +153,33 @@ func (e *GitEngine) ConfigSet(repoPath, key, value string) error {
 	return nil
 }
 
+// PushOption configures git push behavior.
+type PushOption func(*pushConfig)
+
+type pushConfig struct {
+	force bool
+}
+
+// WithForce enables --force flag on git push.
+func WithForce() PushOption {
+	return func(cfg *pushConfig) {
+		cfg.force = true
+	}
+}
+
 // Push pushes commits to the remote repository with optional authentication
 // via environment variables (GIT_SSH_COMMAND for SSH keys).
-func (e *GitEngine) Push(repoPath, remote, branch string, envVars []string) error {
+func (e *GitEngine) Push(repoPath, remote, branch string, envVars []string, opts ...PushOption) error {
+	cfg := &pushConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	args := []string{"push", remote, branch}
+	if cfg.force {
+		args = []string{"push", "--force", remote, branch}
+	}
+
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
 	cmd.Env = append(os.Environ(), envVars...)

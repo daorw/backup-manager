@@ -182,8 +182,8 @@ export async function gitInitRepo(repoId: string): Promise<void> {
 }
 
 // Push API
-export async function pushRepo(repoId: string): Promise<void> {
-  await api.post(`/repos/${repoId}/push`);
+export async function pushRepo(repoId: string, force = false): Promise<void> {
+  await api.post(`/repos/${repoId}/push`, { force });
 }
 
 // Health API

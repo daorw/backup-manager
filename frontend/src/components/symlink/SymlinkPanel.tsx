@@ -4,6 +4,7 @@ import {
   Button,
   Space,
   Typography,
+  Tag,
   Dropdown,
   message,
   Input,
@@ -23,7 +24,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
-import type { Symlink, SymlinkTreeNode, BrowseEntry } from '../../types';
+import type { Symlink, SymlinkTreeNode, SymlinkDirEntry } from '../../types';
 import SymlinkAddModal from './SymlinkAddModal';
 
 interface SymlinkPanelProps {
@@ -212,6 +213,9 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
           {node.symlink ? (
             <Typography.Text>
               {node.title}
+              {node.symlink.is_new && (
+                <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>new</Tag>
+              )}
               <Typography.Text
                 type="secondary"
                 style={{ fontSize: 11, marginLeft: 8 }}
@@ -237,7 +241,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
 
     try {
       const entries = await fetchDirEntries(repoId, linkId, browseRelPath || '');
-      const children: ExtendedDataNode[] = entries.map((entry: BrowseEntry) => {
+      const children: ExtendedDataNode[] = entries.map((entry: SymlinkDirEntry) => {
         const nodeKey = `${key}/${entry.name}`;
         if (entry.type === 'directory') {
           return {
@@ -256,6 +260,9 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
           title: (
             <Typography.Text>
               {entry.name}
+              {entry.is_new && (
+                <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>new</Tag>
+              )}
               <Typography.Text
                 type="secondary"
                 style={{ fontSize: 11, marginLeft: 8 }}

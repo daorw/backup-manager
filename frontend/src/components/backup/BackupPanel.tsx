@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Button,
   Space,
@@ -16,10 +16,12 @@ import {
   Tooltip,
   Alert,
   Modal,
+  Input,
+  Divider,
 } from 'antd';
 import {
   PlayCircleOutlined,
-  ReloadOutlined,
+  MessageOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ClockCircleOutlined,
@@ -28,17 +30,20 @@ import {
   FileOutlined,
   FolderOutlined,
   SwapOutlined,
-  GithubOutlined,
   SendOutlined,
   ExclamationCircleOutlined,
   CheckOutlined,
   WarningOutlined,
+  CaretRightOutlined,
+  CaretDownOutlined,
+  UndoOutlined,
+  CodeOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import type { ColumnsType } from 'antd/es/table';
 import { useAppStore } from '../../store/appStore';
-import type { CommitEntry, CommitFileChange } from '../../types';
+import type { CommitEntry, CommitFileChange, CommitFileContent } from '../../types';
 import RollbackConfirmModal from './RollbackConfirmModal';
 import RollbackResultModal from './RollbackResultModal';
 
@@ -79,10 +84,19 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const rollbackSourceFiles = useAppStore((s) => s.rollbackSourceFiles);
   const clearRollbackResult = useAppStore((s) => s.clearRollbackResult);
 
+  const commitFileContent = useAppStore((s) => s.commitFileContent);
+  const commitFileContentLoading = useAppStore((s) => s.commitFileContentLoading);
+  const restoreFileLoading = useAppStore((s) => s.restoreFileLoading);
+  const fetchCommitFileContent = useAppStore((s) => s.fetchCommitFileContent);
+  const restoreCommitFile = useAppStore((s) => s.restoreCommitFile);
+  const clearCommitFileContent = useAppStore((s) => s.clearCommitFileContent);
+
   const [backingUp, setBackingUp] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [initializing, setInitializing] = useState(false);
   const [forcePushConfirmOpen, setForcePushConfirmOpen] = useState(false);
+  const [commitModalOpen, setCommitModalOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -100,6 +114,10 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     symlinkIDs?: string[];
   } | null>(null);
 
+  // File-level preview and restore state
+  const [expandedFilePath, setExpandedFilePath] = useState<string | null>(null);
+  const [fileContentCache, setFileContentCache] = useState<Record<string, CommitFileContent>>({});
+
   useEffect(() => {
     if (repoId) {
       fetchBackupHistory(repoId, pageSize, 0);
@@ -112,10 +130,16 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     }
   }, [rollbackResult]);
 
-  const handleBackup = async () => {
+  const handleBackupClick = () => {
+    setCommitMessage(`Backup: ${dayjs().format('YYYY-MM-DD HH:mm:ss')}`);
+    setCommitModalOpen(true);
+  };
+
+  const handleBackupConfirm = async () => {
+    setCommitModalOpen(false);
     setBackingUp(true);
     try {
-      const result = await triggerBackup(repoId);
+      const result = await triggerBackup(repoId, commitMessage || undefined);
       if (result) {
         const detail = result.commit_hash
           ? `Committed ${result.files_changed} changed, ${result.files_removed} removed`
@@ -186,6 +210,10 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     if (expanded) {
       setExpandedCommitHash(record.hash);
       setCommitFilesLoading(true);
+      // Clear file-level preview state when switching to a different commit
+      setExpandedFilePath(null);
+      setFileContentCache({});
+      clearCommitFileContent();
       try {
         await fetchCommitFiles(repoId, record.hash);
       } catch (err) {
@@ -195,6 +223,9 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       }
     } else {
       setExpandedCommitHash(null);
+      setExpandedFilePath(null);
+      setFileContentCache({});
+      clearCommitFileContent();
     }
   };
 
@@ -253,6 +284,132 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const handleCloseResult = () => {
     setResultModalOpen(false);
     clearRollbackResult();
+  };
+
+  const handleFileExpand = async (filePath: string, commitHash: string) => {
+    if (expandedFilePath === filePath) {
+      setExpandedFilePath(null);
+      return;
+    }
+
+    setExpandedFilePath(filePath);
+
+    // Load content if not cached
+    if (!fileContentCache[filePath]) {
+      try {
+        const content = await fetchCommitFileContent(repoId, commitHash, filePath);
+        setFileContentCache((prev) => ({ ...prev, [filePath]: content }));
+      } catch {
+        // Error handled by store
+      }
+    }
+  };
+
+  const handleFileRestore = useCallback(async (filePath: string, commitHash: string) => {
+    Modal.confirm({
+      title: 'Restore File',
+      icon: <UndoOutlined />,
+      content: (
+        <div>
+          <Typography.Paragraph>
+            Restore <Typography.Text code>{filePath}</Typography.Text> to the version from this commit?
+          </Typography.Paragraph>
+          <Typography.Text type="warning">
+            This will overwrite the current source file with the version from the commit.
+          </Typography.Text>
+        </div>
+      ),
+      okText: 'Restore',
+      okButtonProps: { danger: true },
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          await restoreCommitFile(repoId, commitHash, filePath);
+          message.success(`File "${filePath}" restored successfully`);
+          // Refresh symlinks and history
+          useAppStore.getState().fetchSymlinks(repoId);
+          fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
+        } catch (err) {
+          if (err instanceof Error) {
+            message.error(err.message);
+          }
+          throw err;
+        }
+      },
+    });
+  }, [repoId, restoreCommitFile, fetchBackupHistory, page, pageSize]);
+
+  const renderFilePreview = (filePath: string) => {
+    const content = fileContentCache[filePath];
+
+    if (commitFileContentLoading && expandedFilePath === filePath && !content) {
+      return (
+        <div style={{ padding: '12px 24px', textAlign: 'center' }}>
+          <Spin size="small" />
+          <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+            Loading content...
+          </Typography.Text>
+        </div>
+      );
+    }
+
+    if (!content) {
+      return null;
+    }
+
+    if (content.text && content.content) {
+      const truncated = content.truncated || false;
+      const maxPreviewLines = 50;
+      const lines = content.content.split('\n');
+      const displayLines = lines.slice(0, maxPreviewLines);
+      const isTruncatedLines = lines.length > maxPreviewLines;
+
+      return (
+        <div
+          style={{
+            padding: '8px 24px 8px 40px',
+            maxHeight: 400,
+            overflow: 'auto',
+          }}
+        >
+          <pre
+            style={{
+              margin: 0,
+              padding: 12,
+              background: '#1e1e1e',
+              color: '#d4d4d4',
+              borderRadius: 4,
+              fontSize: 12,
+              lineHeight: 1.5,
+              overflow: 'auto',
+              maxHeight: 320,
+            }}
+          >
+            {displayLines.join('\n')}
+            {(truncated || isTruncatedLines) && (
+              <Typography.Text type="warning" style={{ display: 'block', marginTop: 8, color: '#f0ad4e' }}>
+                ... (file truncated, showing first {maxPreviewLines} lines)
+              </Typography.Text>
+            )}
+          </pre>
+        </div>
+      );
+    }
+
+    if (!content.text) {
+      return (
+        <div style={{ padding: '8px 24px 8px 40px' }}>
+          <Space>
+            <Tag color="default">Binary file</Tag>
+            <Typography.Text type="secondary">
+              {content.mime_type} — {content.size.toLocaleString()} bytes
+            </Typography.Text>
+          </Space>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   const getUniqueSymlinks = (files: CommitFileChange[]) => {
@@ -334,48 +491,123 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           <div
             key={group.id}
             style={{
-              padding: '6px 12px',
-              marginBottom: 4,
-              background: '#fafafa',
-              borderRadius: 4,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
+              marginBottom: 6,
+              border: '1px solid #f0f0f0',
+              borderRadius: 6,
+              overflow: 'hidden',
             }}
           >
-            <Space>
-              {group.type === 'directory' ? (
-                <FolderOutlined style={{ color: '#faad14' }} />
-              ) : (
-                <FileOutlined style={{ color: '#1890ff' }} />
-              )}
-              <Typography.Text>
-                {group.files[0]?.relative_path || group.id}
-              </Typography.Text>
-              <Tag color={group.type === 'directory' ? 'orange' : 'blue'}>
-                {group.type}
-              </Tag>
-              {group.files.length > 1 && (
-                <Tag>{group.files.length} files</Tag>
-              )}
-            </Space>
-            <Tooltip title="Restore this symlink's source files to the version in this commit">
-              <Button
-                type="link"
-                size="small"
-                icon={<RollbackOutlined />}
-                onClick={() =>
-                  handleSymlinkRollback(
-                    record.hash,
-                    group.id,
-                    record.message,
-                    record.date,
-                  )
-                }
-              >
-                Rollback
-              </Button>
-            </Tooltip>
+            {/* Group header */}
+            <div
+              style={{
+                padding: '6px 12px',
+                background: '#fafafa',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <Space>
+                {group.type === 'directory' ? (
+                  <FolderOutlined style={{ color: '#faad14' }} />
+                ) : (
+                  <FileOutlined style={{ color: '#1890ff' }} />
+                )}
+                <Typography.Text strong>
+                  {group.files[0]?.relative_path || group.id}
+                </Typography.Text>
+                <Tag color={group.type === 'directory' ? 'orange' : 'blue'}>
+                  {group.type}
+                </Tag>
+                {group.files.length > 1 && (
+                  <Tag>{group.files.length} files</Tag>
+                )}
+              </Space>
+              <Tooltip title="Restore all files in this group to the version in this commit">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<RollbackOutlined />}
+                  onClick={() =>
+                    handleSymlinkRollback(
+                      record.hash,
+                      group.id,
+                      record.message,
+                      record.date,
+                    )
+                  }
+                >
+                  Rollback
+                </Button>
+              </Tooltip>
+            </div>
+
+            {/* Individual files within the group */}
+            {group.files.map((file) => {
+              const isExpanded = expandedFilePath === file.relative_path;
+              return (
+                <div key={file.relative_path}>
+                  <div
+                    style={{
+                      padding: '4px 12px 4px 28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      borderTop: '1px solid #f5f5f5',
+                      cursor: 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                    onClick={() => handleFileExpand(file.relative_path, record.hash)}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.background = '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.background = 'transparent';
+                    }}
+                  >
+                    <Space>
+                      {isExpanded ? (
+                        <CaretDownOutlined style={{ fontSize: 10, color: '#999' }} />
+                      ) : (
+                        <CaretRightOutlined style={{ fontSize: 10, color: '#999' }} />
+                      )}
+                      <FileOutlined style={{ color: '#1890ff', fontSize: 13 }} />
+                      <Typography.Text style={{ fontSize: 13 }}>
+                        {file.relative_path}
+                      </Typography.Text>
+                      <Tag
+                        color={
+                          file.change_type === 'A'
+                            ? 'green'
+                            : file.change_type === 'D'
+                            ? 'red'
+                            : 'blue'
+                        }
+                        style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
+                      >
+                        {file.change_type === 'A' ? 'Added' : file.change_type === 'D' ? 'Deleted' : 'Modified'}
+                      </Tag>
+                    </Space>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<UndoOutlined />}
+                      loading={restoreFileLoading}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFileRestore(file.relative_path, record.hash);
+                      }}
+                      style={{ fontSize: 12 }}
+                    >
+                      Restore
+                    </Button>
+                  </div>
+
+                  {/* Preview content when expanded */}
+                  {isExpanded && renderFilePreview(file.relative_path)}
+                </div>
+              );
+            })}
           </div>
         ))}
 
@@ -477,7 +709,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           type="primary"
           size="large"
           icon={<PlayCircleOutlined />}
-          onClick={handleBackup}
+          onClick={handleBackupClick}
           loading={backingUp || isBackingUp}
           disabled={!isGitInit || isBackingUp}
         >
@@ -547,6 +779,28 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           scroll={{ x: 800 }}
         />
       )}
+
+      <Modal
+        title="Custom Commit Message"
+        open={commitModalOpen}
+        onCancel={() => setCommitModalOpen(false)}
+        onOk={handleBackupConfirm}
+        okText="Start Backup"
+        confirmLoading={backingUp}
+        okButtonProps={{ icon: <PlayCircleOutlined /> }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            Customize the commit message for this backup. Leave as-is to use the default.
+          </Typography.Text>
+          <Input.TextArea
+            value={commitMessage}
+            onChange={(e) => setCommitMessage(e.target.value)}
+            rows={3}
+            placeholder="Backup: YYYY-MM-DD HH:mm:ss"
+          />
+        </Space>
+      </Modal>
 
       <RollbackConfirmModal
         open={confirmModalOpen}

@@ -42,6 +42,7 @@ export interface Symlink {
   file_size: number;
   modified_at: string | null;
   created_at: string;
+  is_new?: boolean;
 }
 
 export interface CreateSymlinkRequest {
@@ -66,6 +67,15 @@ export interface BrowseEntry {
   type: 'file' | 'directory';
   size: number;
   modified_at: string;
+}
+
+export interface SymlinkDirEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size: number;
+  modified_at: string;
+  is_new: boolean;
 }
 
 export interface PreviewResult {
@@ -146,6 +156,24 @@ export interface RollbackRequest {
 export interface RollbackFailure {
   relative_path: string;
   error: string;
+}
+
+export interface CommitFileContent {
+  content?: string;
+  mime_type: string;
+  size: number;
+  text: boolean;
+  truncated?: boolean;
+}
+
+export interface FileRestoreRequest {
+  path: string;
+}
+
+export interface FileRestoreResult {
+  relative_path: string;
+  success: boolean;
+  restored_at: string;
 }
 
 export interface RollbackResult {

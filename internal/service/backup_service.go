@@ -54,7 +54,8 @@ type SyncStats struct {
 }
 
 // Trigger performs a full backup cycle: incremental detection → sync → git add → commit → push.
-func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error) {
+// If commitMessage is empty, a default message "Backup: YYYY-MM-DD HH:mm:ss" is used.
+func (s *BackupService) Trigger(repoID string, commitMessage string) (result *BackupResult, err error) {
 	// Per-repo mutual exclusion
 	mu := s.getRepoMutex(repoID)
 	mu.Lock()
@@ -128,7 +129,10 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 	}
 
 	// Step 4: git commit
-	commitMsg := fmt.Sprintf("Backup: %s", time.Now().Format("2006-01-02 15:04:05"))
+	commitMsg := commitMessage
+	if commitMsg == "" {
+		commitMsg = fmt.Sprintf("Backup: %s", time.Now().Format("2006-01-02 15:04:05"))
+	}
 
 	var commitHash string
 	if config.GitUserName != "" && config.GitUserEmail != "" {

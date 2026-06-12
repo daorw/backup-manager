@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -21,11 +23,27 @@ func NewBackupHandler(backupSvc *service.BackupService) *BackupHandler {
 	return &BackupHandler{backupSvc: backupSvc}
 }
 
+// TriggerBackupRequest is the request payload for triggering a backup.
+type TriggerBackupRequest struct {
+	CommitMessage string `json:"commit_message,omitempty"`
+}
+
 // Trigger handles POST /api/v1/repos/:id/backup
 func (h *BackupHandler) Trigger(c *gin.Context) {
 	repoID := c.Param("id")
 
-	result, err := h.backupSvc.Trigger(repoID)
+	var req TriggerBackupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			// Empty body is fine — use default commit message
+			req.CommitMessage = ""
+		} else {
+			respondError(c, err)
+			return
+		}
+	}
+
+	result, err := h.backupSvc.Trigger(repoID, req.CommitMessage)
 	if err != nil {
 		respondError(c, err)
 		return

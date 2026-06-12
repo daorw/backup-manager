@@ -31,6 +31,13 @@ type symlinkResponse struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+// symlinkWithNewResponse extends symlinkResponse with an IsNew flag indicating
+// whether the source file differs from its data/ copy.
+type symlinkWithNewResponse struct {
+	symlinkResponse
+	IsNew bool `json:"is_new"`
+}
+
 func symlinkToResponse(s *model.Symlink) symlinkResponse {
 	r := symlinkResponse{
 		ID:           s.ID,
@@ -67,6 +74,7 @@ func (h *SymlinkHandler) Create(c *gin.Context) {
 }
 
 // List handles GET /api/v1/repos/:id/symlinks
+// Returns symlinks with is_new flag for file-type symlinks.
 func (h *SymlinkHandler) List(c *gin.Context) {
 	repoID := c.Param("id")
 
@@ -76,9 +84,16 @@ func (h *SymlinkHandler) List(c *gin.Context) {
 		return
 	}
 
-	items := make([]symlinkResponse, 0, len(syms))
+	items := make([]symlinkWithNewResponse, 0, len(syms))
 	for _, s := range syms {
-		items = append(items, symlinkToResponse(s))
+		isNew := false
+		if s.Type == model.SymlinkTypeFile {
+			isNew, _ = h.symSvc.ComputeSymlinkIsNew(s)
+		}
+		items = append(items, symlinkWithNewResponse{
+			symlinkResponse: symlinkToResponse(s),
+			IsNew:           isNew,
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -145,7 +160,7 @@ func (h *SymlinkHandler) BrowseDirEntries(c *gin.Context) {
 	}
 
 	if entries == nil {
-		entries = []service.BrowseEntry{}
+		entries = []service.SymlinkDirEntry{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": entries})

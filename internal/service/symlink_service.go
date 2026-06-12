@@ -324,16 +324,53 @@ func (s *SymlinkService) cleanEmptyParentDirs(base, relativePath string) {
 	}
 }
 
+// SymlinkDirEntry represents an entry in a directory-type symlink's source directory.
+// It extends BrowseEntry with an IsNew field that indicates whether the source file
+// differs from its data/ copy.
+type SymlinkDirEntry struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Type       string `json:"type"` // "file" or "directory"
+	Size       int64  `json:"size,omitempty"`
+	ModifiedAt string `json:"modified_at,omitempty"`
+	IsNew      bool   `json:"is_new"`
+}
+
+// compareFileWithData compares a source file against its data/ copy.
+// Returns true if the source file is different from the data copy (or the data
+// copy does not exist), false if they are identical.
+// If the source file cannot be stat'd for reasons other than not-exist, the
+// error is returned so callers can decide how to handle it.
+func compareFileWithData(sourcePath, dataPath string) (bool, error) {
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Source file deleted — consider it "changed" relative to data/
+			return true, nil
+		}
+		return false, fmt.Errorf("stat source %s: %w", sourcePath, err)
+	}
+	dataInfo, err := os.Stat(dataPath)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return true, nil
+	}
+	return sourceInfo.Size() != dataInfo.Size() || !sourceInfo.ModTime().Equal(dataInfo.ModTime()), nil
+}
+
 const maxDirDepth = 50
 
 // ListDirEntries lists the contents of a directory within a directory-type
-// symlink's data directory. It returns sorted entries (directories first, then
+// symlink's source directory. It returns sorted entries (directories first, then
 // files, alphabetically within each group), with hidden files (dot-prefixed)
-// excluded.
+// excluded. For file entries, it computes whether the source has changed
+// compared to the data/ copy (is_new).
 //
-// subPath is an optional relative path within the symlink's data directory.
-// An empty string lists the root of the symlink's data directory.
-func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]BrowseEntry, error) {
+// subPath is an optional relative path within the symlink's source directory.
+// An empty string lists the root of the symlink's source directory.
+func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]SymlinkDirEntry, error) {
 	repo, err := s.store.GetRepo(repoID)
 	if err != nil {
 		return nil, err
@@ -352,17 +389,21 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Brows
 		return nil, fmt.Errorf("symlink is not a directory")
 	}
 
-	// Build the base data directory for this symlink
+	// Build the base source directory (actual source) and data directory
+	symSourceDir := sym.TargetPath
 	symDataDir := filepath.Join(repo.Path, "data", sym.RelativePath)
 
-	// Resolve the target directory: symDataDir + subPath
-	targetDir := symDataDir
+	// Resolve the target directory: symSourceDir + subPath
+	targetDir := symSourceDir
+	dataDir := symDataDir
 	if subPath != "" {
-		resolved, err := util.SafeResolve(symDataDir, subPath)
+		resolved, err := util.SafeResolve(symSourceDir, subPath)
 		if err != nil {
 			return nil, fmt.Errorf("invalid subpath: %w", err)
 		}
 		targetDir = resolved
+		// Compute corresponding data directory (may not exist, handled gracefully)
+		dataDir = filepath.Join(symDataDir, subPath)
 	}
 
 	info, err := os.Stat(targetDir)
@@ -373,8 +414,8 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Brows
 		return nil, fmt.Errorf("path is not a directory")
 	}
 
-	// Depth check
-	rel, err := filepath.Rel(symDataDir, targetDir)
+	// Depth check relative to source root
+	rel, err := filepath.Rel(symSourceDir, targetDir)
 	if err != nil {
 		return nil, fmt.Errorf("path resolution error: %w", err)
 	}
@@ -390,14 +431,14 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Brows
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	var result []BrowseEntry
+	var result []SymlinkDirEntry
 	for _, entry := range entries {
 		// Skip hidden files/directories
 		if len(entry.Name()) > 0 && entry.Name()[0] == '.' {
 			continue
 		}
 
-		e := BrowseEntry{
+		e := SymlinkDirEntry{
 			Name: entry.Name(),
 			Path: filepath.Join(targetDir, entry.Name()),
 		}
@@ -410,6 +451,17 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Brows
 			if err == nil {
 				e.Size = fi.Size()
 				e.ModifiedAt = fi.ModTime().Format("2006-01-02T15:04:05Z07:00")
+			}
+			// Compare source file with data copy
+			dataPath := filepath.Join(dataDir, entry.Name())
+			if changed, err := compareFileWithData(filepath.Join(targetDir, entry.Name()), dataPath); err == nil {
+				e.IsNew = changed
+			} else {
+				// On stat failure, conservatively mark as new so the user knows
+				// something may be off with this file.
+				e.IsNew = true
+				log.Printf("[symlink] warning: compareFileWithData(%q, %q): %v",
+					filepath.Join(targetDir, entry.Name()), dataPath, err)
 			}
 		}
 
@@ -428,6 +480,20 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Brows
 	})
 
 	return result, nil
+}
+
+// ComputeSymlinkIsNew checks if a file-type symlink's source file differs from
+// its data/ copy. For directory-type symlinks, it returns false.
+func (s *SymlinkService) ComputeSymlinkIsNew(sym *model.Symlink) (bool, error) {
+	if sym.Type != model.SymlinkTypeFile {
+		return false, nil
+	}
+	repo, err := s.store.GetRepo(sym.RepoID)
+	if err != nil {
+		return false, err
+	}
+	dataPath := filepath.Join(repo.Path, "data", sym.RelativePath)
+	return compareFileWithData(sym.TargetPath, dataPath)
 }
 
 

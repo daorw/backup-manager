@@ -3,6 +3,8 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -364,6 +366,91 @@ func parseLsTreeOutput(output string) []FileEntry {
 		}
 	}
 	return entries
+}
+
+// GetCommitFileSize returns the size in bytes of a file at a specific commit.
+// filePath is relative to the repo root (e.g., "data/notes/file.md").
+func (e *GitEngine) GetCommitFileSize(repoPath, commitHash, filePath string) (int64, error) {
+	var stdout, stderr bytes.Buffer
+	ref := fmt.Sprintf("%s:%s", commitHash, filePath)
+	err := e.runGitCommand(repoPath, []string{"cat-file", "-s", ref}, &stdout, &stderr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get commit file size: %w", err)
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(stdout.String()), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse file size: %w", err)
+	}
+	return size, nil
+}
+
+// ReadFileContent reads the content of a file at a specific commit, limited by maxSize.
+// It returns the content, MIME type, whether the content is text, and any error.
+// filePath is relative to the repo root (e.g., "data/notes/file.md").
+func (e *GitEngine) ReadFileContent(repoPath, commitHash, filePath string, maxSize int64) (string, string, bool, error) {
+	args := []string{"show", fmt.Sprintf("%s:%s", commitHash, filePath)}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoPath
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", "", false, fmt.Errorf("git show failed to start: %w", err)
+	}
+
+	// Limit reader to protect memory
+	reader := io.LimitReader(stdout, maxSize+1)
+	contentBytes, err := io.ReadAll(reader)
+	if err != nil {
+		cmd.Wait()
+		return "", "", false, fmt.Errorf("failed to read output: %w", err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", "", false, fmt.Errorf("git show failed: %w\nstderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	truncated := int64(len(contentBytes)) > maxSize
+	if truncated {
+		contentBytes = contentBytes[:maxSize]
+	}
+
+	// Detect MIME type from content
+	mimeType := http.DetectContentType(contentBytes)
+	isText := isTextContent(mimeType)
+
+	return string(contentBytes), mimeType, isText, nil
+}
+
+// isTextContent checks whether a MIME type indicates text content.
+func isTextContent(mimeType string) bool {
+	if strings.HasPrefix(mimeType, "text/") {
+		return true
+	}
+	switch mimeType {
+	case "application/json",
+		"application/xml",
+		"application/x-yaml",
+		"application/x-sh",
+		"application/x-tcl",
+		"application/x-httpd-php",
+		"application/x-perl",
+		"application/x-python",
+		"application/x-ruby",
+		"application/x-go",
+		"application/x-msdos-program",
+		"application/x-csh",
+		"application/javascript",
+		"application/typescript":
+		return true
+	}
+	return false
 }
 
 // parseLogOutput parses the git log output into CommitEntry slices.

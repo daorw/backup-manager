@@ -94,7 +94,7 @@ func main() {
 		if backupSvc == nil {
 			return fmt.Errorf("backup service not initialized")
 		}
-		_, err := backupSvc.Trigger(repoID)
+		_, err := backupSvc.Trigger(repoID, "")
 		return err
 	})
 

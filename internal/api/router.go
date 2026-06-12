@@ -74,6 +74,8 @@ func SetupRouter(
 
 		// Rollback
 		v1.GET("/repos/:id/commits/:hash/changed-files", rollbackHandler.ListFiles)
+		v1.GET("/repos/:id/commits/:hash/files", rollbackHandler.GetCommitFile)
+		v1.POST("/repos/:id/commits/:hash/restore", rollbackHandler.RestoreFile)
 		v1.POST("/repos/:id/rollback", rollbackHandler.Rollback)
 	}
 

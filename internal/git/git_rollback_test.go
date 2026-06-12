@@ -270,6 +270,84 @@ func TestGitModeToFileMode(t *testing.T) {
 	}
 }
 
+func TestGetCommitFileSize(t *testing.T) {
+	repoPath, commitHash, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	engine := NewGitEngine()
+
+	t.Run("file exists", func(t *testing.T) {
+		size, err := engine.GetCommitFileSize(repoPath, commitHash, "data/test.txt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if size <= 0 {
+			t.Errorf("expected positive size, got %d", size)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := engine.GetCommitFileSize(repoPath, commitHash, "data/nonexistent.txt")
+		if err == nil {
+			t.Fatal("expected error for non-existent file")
+		}
+	})
+}
+
+func TestReadFileContent_TextFile(t *testing.T) {
+	repoPath, commitHash, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	engine := NewGitEngine()
+
+	content, mimeType, isText, err := engine.ReadFileContent(repoPath, commitHash, "data/test.txt", 1024*1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if content != "hello world" {
+		t.Errorf("expected 'hello world', got '%s'", content)
+	}
+	if isText != true {
+		t.Error("expected isText to be true for text file")
+	}
+	if mimeType == "" {
+		t.Error("expected non-empty MIME type")
+	}
+}
+
+func TestReadFileContent_SizeLimit(t *testing.T) {
+	repoPath, commitHash, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	engine := NewGitEngine()
+
+	// Limit to 5 bytes — "hello world" should be truncated
+	content, _, isText, err := engine.ReadFileContent(repoPath, commitHash, "data/test.txt", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(content) > 5 {
+		t.Errorf("expected content to be limited to 5 bytes, got %d", len(content))
+	}
+	if isText != true {
+		t.Error("expected isText to be true even for truncated content")
+	}
+}
+
+func TestReadFileContent_FileNotFound(t *testing.T) {
+	repoPath, commitHash, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	engine := NewGitEngine()
+
+	_, _, _, err := engine.ReadFileContent(repoPath, commitHash, "data/nonexistent.txt", 1024*1024)
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+}
+
 func TestWriteFileContentTo(t *testing.T) {
 	repoPath, commitHash, cleanup := setupTestRepo(t)
 	defer cleanup()

@@ -176,4 +176,163 @@ func TestListDirEntries(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("is_new is true for modified source file", func(t *testing.T) {
+		// Modify the source file a.txt after data copy was already created
+		// (the data copy exists from Create, now we modify the source)
+		sourceFile := filepath.Join(sourceDir, "a.txt")
+		// a.txt was created with "aaa", modify it
+		if err := os.WriteFile(sourceFile, []byte("modified"), 0644); err != nil {
+			t.Fatalf("failed to modify source file: %v", err)
+		}
+
+		entries, err := svc.ListDirEntries(repo.ID, sym.ID, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Find a.txt entry and verify is_new is true
+		for _, e := range entries {
+			if e.Name == "a.txt" {
+				if !e.IsNew {
+					t.Fatal("expected a.txt to be marked as new (is_new=true) after modification")
+				}
+				return
+			}
+		}
+		t.Fatal("a.txt not found in entries")
+	})
+
+	t.Run("is_new is false for unchanged source file", func(t *testing.T) {
+		entries, err := svc.ListDirEntries(repo.ID, sym.ID, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// b.txt was never modified after Create, so it should match data copy
+		for _, e := range entries {
+			if e.Name == "b.txt" {
+				if e.IsNew {
+					t.Fatal("expected b.txt is_new=false since it was not modified")
+				}
+				return
+			}
+		}
+		t.Fatal("b.txt not found in entries")
+	})
+
+	t.Run("is_new is true for file with no data copy", func(t *testing.T) {
+		// Create a new file in source that was never synced to data/
+		newFile := filepath.Join(sourceDir, "newfile.txt")
+		if err := os.WriteFile(newFile, []byte("new content"), 0644); err != nil {
+			t.Fatalf("failed to create new source file: %v", err)
+		}
+
+		entries, err := svc.ListDirEntries(repo.ID, sym.ID, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		for _, e := range entries {
+			if e.Name == "newfile.txt" {
+				if !e.IsNew {
+					t.Fatal("expected newfile.txt to be marked as new (no data copy exists)")
+				}
+				return
+			}
+		}
+		t.Fatal("newfile.txt not found in entries")
+	})
+
+	t.Run("directory entries always have is_new=false", func(t *testing.T) {
+		entries, err := svc.ListDirEntries(repo.ID, sym.ID, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		for _, e := range entries {
+			if e.Type == "directory" && e.IsNew {
+				t.Fatalf("directory entry %s should have is_new=false", e.Name)
+			}
+		}
+	})
+}
+
+func TestComputeSymlinkIsNew(t *testing.T) {
+	svc, _, repo, cleanup := setupSymlinkServiceTest(t)
+	defer cleanup()
+
+	t.Run("file symlink returns false when source is unchanged", func(t *testing.T) {
+		srcFile := filepath.Join(t.TempDir(), "test.txt")
+		if err := os.WriteFile(srcFile, []byte("hello"), 0644); err != nil {
+			t.Fatalf("failed to create source file: %v", err)
+		}
+
+		sym, err := svc.Create(repo.ID, &CreateSymlinkRequest{
+			TargetPath: srcFile,
+			RelPath:    "test.txt",
+		})
+		if err != nil {
+			t.Fatalf("failed to create symlink: %v", err)
+		}
+
+		isNew, err := svc.ComputeSymlinkIsNew(sym)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isNew {
+			t.Fatal("expected is_new=false for unchanged file")
+		}
+	})
+
+	t.Run("file symlink returns true when source is modified", func(t *testing.T) {
+		srcFile := filepath.Join(t.TempDir(), "modtest.txt")
+		if err := os.WriteFile(srcFile, []byte("hello"), 0644); err != nil {
+			t.Fatalf("failed to create source file: %v", err)
+		}
+
+		sym, err := svc.Create(repo.ID, &CreateSymlinkRequest{
+			TargetPath: srcFile,
+			RelPath:    "modtest.txt",
+		})
+		if err != nil {
+			t.Fatalf("failed to create symlink: %v", err)
+		}
+
+		// Modify the source file after creation
+		if err := os.WriteFile(srcFile, []byte("modified"), 0644); err != nil {
+			t.Fatalf("failed to modify source file: %v", err)
+		}
+
+		isNew, err := svc.ComputeSymlinkIsNew(sym)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !isNew {
+			t.Fatal("expected is_new=true for modified file")
+		}
+	})
+
+	t.Run("directory symlink always returns false", func(t *testing.T) {
+		srcDir := filepath.Join(t.TempDir(), "dirtest")
+		if err := os.MkdirAll(srcDir, 0755); err != nil {
+			t.Fatalf("failed to create source dir: %v", err)
+		}
+
+		sym, err := svc.Create(repo.ID, &CreateSymlinkRequest{
+			TargetPath: srcDir,
+			RelPath:    "dirtest",
+		})
+		if err != nil {
+			t.Fatalf("failed to create symlink: %v", err)
+		}
+
+		isNew, err := svc.ComputeSymlinkIsNew(sym)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isNew {
+			t.Fatal("expected is_new=false for directory symlink")
+		}
+	})
 }

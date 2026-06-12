@@ -4,11 +4,13 @@ import type {
   BackupResult,
   Symlink,
   GitAuth,
-  BrowseEntry,
+  SymlinkDirEntry,
   CommitEntry,
   CommitFileChange,
+  CommitFileContent,
   RollbackRequest,
   RollbackResult,
+  FileRestoreResult,
 } from '../types';
 import * as api from '../api/client';
 
@@ -31,12 +33,17 @@ interface AppState {
   error: string | null;
 
   // Directory browsing cache
-  dirEntriesCache: Record<string, BrowseEntry[]>;
+  dirEntriesCache: Record<string, SymlinkDirEntry[]>;
 
   // Rollback state
   commitFiles: CommitFileChange[];
   rollbackResult: RollbackResult | null;
   rollbackLoading: boolean;
+
+  // Commit file preview state
+  commitFileContent: CommitFileContent | null;
+  commitFileContentLoading: boolean;
+  restoreFileLoading: boolean;
 
   fetchRepos: () => Promise<void>;
   fetchRepo: (id: string) => Promise<void>;
@@ -50,7 +57,7 @@ interface AppState {
   updateSymlink: (repoId: string, linkId: string, targetPath: string) => Promise<void>;
   batchImportSymlinks: (repoId: string, targets: Array<{ target_path: string; relative_path: string }>) => Promise<void>;
 
-  triggerBackup: (repoId: string) => Promise<BackupResult | void>;
+  triggerBackup: (repoId: string, commitMessage?: string) => Promise<BackupResult | void>;
   pushRepo: (repoId: string, force?: boolean) => Promise<void>;
   gitInitRepo: (repoId: string) => Promise<void>;
   fetchBackupHistory: (repoId: string, limit?: number, offset?: number) => Promise<void>;
@@ -60,13 +67,18 @@ interface AppState {
   clearAuth: (repoId: string) => Promise<void>;
 
   // Directory browsing
-  fetchDirEntries: (repoId: string, linkId: string, subPath?: string) => Promise<BrowseEntry[]>;
+  fetchDirEntries: (repoId: string, linkId: string, subPath?: string) => Promise<SymlinkDirEntry[]>;
   clearDirEntryCache: (linkId?: string) => void;
 
   // Rollback actions
   fetchCommitFiles: (repoId: string, commitHash: string) => Promise<void>;
   rollbackSourceFiles: (repoId: string, req: RollbackRequest) => Promise<RollbackResult>;
   clearRollbackResult: () => void;
+
+  // Commit file preview actions
+  fetchCommitFileContent: (repoId: string, commitHash: string, path: string) => Promise<CommitFileContent>;
+  restoreCommitFile: (repoId: string, commitHash: string, path: string) => Promise<FileRestoreResult>;
+  clearCommitFileContent: () => void;
 
   clearError: () => void;
 }
@@ -88,6 +100,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   commitFiles: [],
   rollbackResult: null,
   rollbackLoading: false,
+
+  // Commit file preview initial state
+  commitFileContent: null,
+  commitFileContentLoading: false,
+  restoreFileLoading: false,
 
   clearError: () => set({ error: null }),
 
@@ -215,7 +232,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  triggerBackup: async (repoId: string) => {
+  triggerBackup: async (repoId: string, commitMessage?: string) => {
     set({ error: null, backupProgress: null });
     try {
       set({
@@ -227,7 +244,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           started_at: new Date().toISOString(),
         },
       });
-      const result = await api.triggerBackup(repoId);
+      const result = await api.triggerBackup(repoId, commitMessage);
       set({
         backupProgress: {
           repo_id: repoId,
@@ -392,4 +409,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearRollbackResult: () => set({ rollbackResult: null, commitFiles: [] }),
+
+  // Commit file preview actions
+  fetchCommitFileContent: async (repoId: string, commitHash: string, path: string) => {
+    set({ commitFileContentLoading: true, error: null, commitFileContent: null });
+    try {
+      const content = await api.fetchCommitFileContent(repoId, commitHash, path);
+      set({ commitFileContent: content, commitFileContentLoading: false });
+      return content;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch commit file content';
+      set({ error: message, commitFileContentLoading: false });
+      throw err;
+    }
+  },
+
+  restoreCommitFile: async (repoId: string, commitHash: string, path: string) => {
+    set({ restoreFileLoading: true, error: null });
+    try {
+      const result = await api.restoreCommitFile(repoId, commitHash, path);
+      set({ restoreFileLoading: false });
+      return result;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to restore file';
+      set({ error: message, restoreFileLoading: false });
+      throw err;
+    }
+  },
+
+  clearCommitFileContent: () => set({ commitFileContent: null, commitFileContentLoading: false }),
 }));

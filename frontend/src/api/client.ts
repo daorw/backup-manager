@@ -8,12 +8,15 @@ import type {
   UpdateSymlinkRequest,
   BatchSymlinkRequest,
   BrowseEntry,
+  SymlinkDirEntry,
   PreviewResult,
   BackupResult,
   CommitEntry,
   GitAuth,
   SetAuthRequest,
   CommitFileChange,
+  CommitFileContent,
+  FileRestoreResult,
   RollbackRequest,
   RollbackResult,
   SaveFileRequest,
@@ -119,8 +122,8 @@ export async function fetchDirEntries(
   repoId: string,
   linkId: string,
   subPath?: string
-): Promise<BrowseEntry[]> {
-  const { data } = await api.get<BrowseEntry[]>(
+): Promise<SymlinkDirEntry[]> {
+  const { data } = await api.get<SymlinkDirEntry[]>(
     `/repos/${repoId}/symlinks/${linkId}/entries`,
     { params: { sub_path: subPath || '' } }
   );
@@ -166,9 +169,11 @@ export async function saveFile(
 }
 
 // Backup APIs
-export async function triggerBackup(repoId: string): Promise<BackupResult> {
+export async function triggerBackup(repoId: string, commitMessage?: string): Promise<BackupResult> {
+  const body = commitMessage ? { commit_message: commitMessage } : {};
   const { data } = await api.post<BackupResult>(
-    `/repos/${repoId}/backup`
+    `/repos/${repoId}/backup`,
+    body
   );
   return data;
 }
@@ -226,6 +231,32 @@ export async function fetchCommitChangedFiles(
 ): Promise<CommitFileChange[]> {
   const { data } = await api.get<CommitFileChange[]>(
     `/repos/${repoId}/commits/${commitHash}/changed-files`
+  );
+  return data;
+}
+
+// Commit file content preview API
+export async function fetchCommitFileContent(
+  repoId: string,
+  commitHash: string,
+  path: string
+): Promise<CommitFileContent> {
+  const { data } = await api.get<CommitFileContent>(
+    `/repos/${repoId}/commits/${commitHash}/files`,
+    { params: { path } }
+  );
+  return data;
+}
+
+// File restore API
+export async function restoreCommitFile(
+  repoId: string,
+  commitHash: string,
+  path: string
+): Promise<FileRestoreResult> {
+  const { data } = await api.post<FileRestoreResult>(
+    `/repos/${repoId}/commits/${commitHash}/restore`,
+    { path }
   );
   return data;
 }

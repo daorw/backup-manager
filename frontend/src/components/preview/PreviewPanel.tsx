@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Tree, Spin, Empty, Typography, Space, Button, message } from 'antd';
+import { Tree, Spin, Empty, Typography, Tag, Space, Button, message } from 'antd';
 import {
   FileOutlined,
   FolderOutlined,
@@ -9,7 +9,7 @@ import {
 import type { DataNode } from 'antd/es/tree';
 import { useAppStore } from '../../store/appStore';
 import { previewFile, saveFile } from '../../api/client';
-import type { PreviewResult, Symlink, BrowseEntry } from '../../types';
+import type { PreviewResult, Symlink, SymlinkDirEntry } from '../../types';
 import TextPreview from './TextPreview';
 import MarkdownPreview from './MarkdownPreview';
 import BinaryInfo from './BinaryInfo';
@@ -156,7 +156,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
 
     try {
       const entries = await fetchDirEntries(repoId, linkId, browseRelPath || '');
-      const children: PreviewTreeNode[] = entries.map((entry: BrowseEntry) => {
+      const children: PreviewTreeNode[] = entries.map((entry: SymlinkDirEntry) => {
         const nodeKey = `${key}/${entry.name}`;
         if (entry.type === 'directory') {
           return {
@@ -173,7 +173,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
         }
         return {
           key: nodeKey,
-          title: entry.name,
+          title: (
+            <span>
+              {entry.name}
+              {entry.is_new && (
+                <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>new</Tag>
+              )}
+            </span>
+          ),
           isLeaf: true,
           icon: <FileTextOutlined />,
           linkId: linkId,

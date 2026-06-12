@@ -18,6 +18,15 @@ func NewBrowseHandler(browserSvc *service.BrowserService) *BrowseHandler {
 	return &BrowseHandler{browserSvc: browserSvc}
 }
 
+// AllowedRoots handles GET /api/v1/browse/allowed-roots
+func (h *BrowseHandler) AllowedRoots(c *gin.Context) {
+	roots := h.browserSvc.AllowedRoots()
+	if roots == nil {
+		roots = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": roots})
+}
+
 // Browse handles GET /api/v1/browse
 func (h *BrowseHandler) Browse(c *gin.Context) {
 	path := c.Query("path")
@@ -36,10 +45,4 @@ func (h *BrowseHandler) Browse(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": entries})
-}
-
-// AllowedRoots handles GET /api/v1/browse/allowed-roots
-func (h *BrowseHandler) AllowedRoots(c *gin.Context) {
-	roots := h.browserSvc.AllowedRoots()
-	c.JSON(http.StatusOK, gin.H{"data": roots})
 }

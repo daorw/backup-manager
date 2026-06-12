@@ -75,7 +75,15 @@ func CopyDir(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
-		if entry.IsDir() {
+		// Use os.Stat (follows symlinks) to determine if entry is a directory.
+		// entry.IsDir() does NOT follow symlinks, so a symlink pointing to a
+		// directory would be treated as a file, causing CopyFile to fail with
+		// "source is a directory, use CopyDir instead".
+		info, err := os.Stat(srcPath)
+		if err != nil {
+			return fmt.Errorf("failed to stat %s: %w", srcPath, err)
+		}
+		if info.IsDir() {
 			if err := CopyDir(srcPath, dstPath); err != nil {
 				return err
 			}

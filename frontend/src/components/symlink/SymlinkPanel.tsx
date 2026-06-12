@@ -213,9 +213,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
       key: node.key,
       title: titleRenderer(node),
       isLeaf: node.isLeaf,
-      icon: node.isLeaf ? (
-        node.symlink?.type === 'directory' ? <FolderOutlined /> : <FileOutlined />
-      ) : <FolderOutlined />,
+      icon: node.isLeaf ? <FileOutlined /> : <FolderOutlined />,
       children: node.children
         ? convertToAntdTreeData(node.children)
         : undefined,

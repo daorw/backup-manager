@@ -291,8 +291,8 @@ func (e *GitEngine) IsRootCommit(repoPath, commitHash string) (bool, error) {
 
 // GetChangedFilesInCommit returns the list of files changed under data/
 // in a specific commit, compared to its parent.
-// For root commits, returns all files under data/.
-func (e *GitEngine) GetChangedFilesInCommit(repoPath, commitHash string) ([]string, error) {
+// For root commits, returns all files under data/ with change type "A".
+func (e *GitEngine) GetChangedFilesInCommit(repoPath, commitHash string) ([]CommitFileEntry, error) {
 	isRoot, err := e.IsRootCommit(repoPath, commitHash)
 	if err != nil {
 		return nil, err
@@ -305,33 +305,46 @@ func (e *GitEngine) GetChangedFilesInCommit(repoPath, commitHash string) ([]stri
 			// data/ might not exist in this commit
 			return nil, nil
 		}
-		paths := make([]string, 0, len(entries))
+		result := make([]CommitFileEntry, 0, len(entries))
 		for _, entry := range entries {
-			paths = append(paths, entry.Path)
+			result = append(result, CommitFileEntry{
+				ChangeType: "A",
+				Path:       entry.Path,
+			})
 		}
-		return paths, nil
+		return result, nil
 	}
 
-	// Non-root commit: use diff-tree to get changed files
+	// Non-root commit: use diff-tree to get changed files with status
 	var stdout, stderr bytes.Buffer
-	args := []string{"diff-tree", "--no-commit-id", "-r", "--name-only",
+	args := []string{"diff-tree", "--no-commit-id", "-r", "--name-status",
 		"--diff-filter=ACDMRT", "-m", commitHash}
 	err = e.runGitCommand(repoPath, args, &stdout, &stderr)
 	if err != nil {
 		return nil, fmt.Errorf("git diff-tree failed: %w", err)
 	}
 
-	var dataFiles []string
+	var result []CommitFileEntry
 	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, DataDirName+"/") {
-			dataFiles = append(dataFiles, line)
+		// Parse name-status format: <status>\t<path>
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		status := strings.TrimSpace(parts[0])
+		path := strings.TrimSpace(parts[1])
+		if strings.HasPrefix(path, DataDirName+"/") {
+			result = append(result, CommitFileEntry{
+				ChangeType: status,
+				Path:       path,
+			})
 		}
 	}
-	return dataFiles, nil
+	return result, nil
 }
 
 // gitModeToFileMode converts a git mode string (e.g. "100755") to os.FileMode.

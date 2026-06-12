@@ -130,14 +130,18 @@ func TestGetChangedFilesInCommit_RootCommit(t *testing.T) {
 	}
 
 	expectedFiles := map[string]bool{
-		"data/test.txt":    false,
+		"data/test.txt":       false,
 		"data/sub/nested.txt": false,
-		"data/script.sh":   false,
+		"data/script.sh":      false,
 	}
 
 	for _, f := range files {
-		if _, ok := expectedFiles[f]; ok {
-			expectedFiles[f] = true
+		if _, ok := expectedFiles[f.Path]; ok {
+			expectedFiles[f.Path] = true
+		}
+		// Root commit files should all be Added
+		if f.ChangeType != "A" {
+			t.Errorf("expected change type 'A' for root commit, got '%s'", f.ChangeType)
 		}
 	}
 
@@ -178,8 +182,12 @@ func TestGetChangedFilesInCommit_NonRootCommit(t *testing.T) {
 
 	found := false
 	for _, f := range files {
-		if f == "data/test.txt" {
+		if f.Path == "data/test.txt" {
 			found = true
+			// Modified file should have change type "M"
+			if f.ChangeType != "M" {
+				t.Errorf("expected change type 'M' for modified file, got '%s'", f.ChangeType)
+			}
 			break
 		}
 	}

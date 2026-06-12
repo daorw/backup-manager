@@ -286,7 +286,12 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     clearRollbackResult();
   };
 
-  const handleFileExpand = async (filePath: string, commitHash: string) => {
+  const handleFileExpand = async (filePath: string, commitHash: string, changeType: string) => {
+    // Don't allow preview for deleted files
+    if (changeType === 'D') {
+      return;
+    }
+
     if (expandedFilePath === filePath) {
       setExpandedFilePath(null);
       return;
@@ -545,6 +550,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
             {/* Individual files within the group */}
             {group.files.map((file) => {
               const isExpanded = expandedFilePath === file.relative_path;
+              const isDeleted = file.change_type === 'D';
               return (
                 <div key={file.relative_path}>
                   <div
@@ -554,12 +560,15 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       borderTop: '1px solid #f5f5f5',
-                      cursor: 'pointer',
+                      cursor: isDeleted ? 'default' : 'pointer',
                       transition: 'background 0.15s',
+                      opacity: isDeleted ? 0.6 : 1,
                     }}
-                    onClick={() => handleFileExpand(file.relative_path, record.hash)}
+                    onClick={() => handleFileExpand(file.relative_path, record.hash, file.change_type)}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = '#f5f5f5';
+                      if (!isDeleted) {
+                        (e.currentTarget as HTMLElement).style.background = '#f5f5f5';
+                      }
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLElement).style.background = 'transparent';
@@ -571,8 +580,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                       ) : (
                         <CaretRightOutlined style={{ fontSize: 10, color: '#999' }} />
                       )}
-                      <FileOutlined style={{ color: '#1890ff', fontSize: 13 }} />
-                      <Typography.Text style={{ fontSize: 13 }}>
+                      <FileOutlined style={{ color: isDeleted ? '#ff4d4f' : '#1890ff', fontSize: 13 }} />
+                      <Typography.Text style={{ fontSize: 13, textDecoration: isDeleted ? 'line-through' : 'none' }}>
                         {file.relative_path}
                       </Typography.Text>
                       <Tag
@@ -593,6 +602,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                       size="small"
                       icon={<UndoOutlined />}
                       loading={restoreFileLoading}
+                      disabled={isDeleted}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleFileRestore(file.relative_path, record.hash);
@@ -604,7 +614,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                   </div>
 
                   {/* Preview content when expanded */}
-                  {isExpanded && renderFilePreview(file.relative_path)}
+                  {isExpanded && !isDeleted && renderFilePreview(file.relative_path)}
                 </div>
               );
             })}

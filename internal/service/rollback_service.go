@@ -96,7 +96,7 @@ func (s *RollbackService) ListCommitFiles(repoID, commitHash string) ([]CommitFi
 		return nil, err
 	}
 
-	// Get changed files in commit
+	// Get changed files in commit (now includes change type)
 	changedFiles, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, commitHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list changed files: %w", err)
@@ -116,19 +116,18 @@ func (s *RollbackService) ListCommitFiles(repoID, commitHash string) ([]CommitFi
 
 	// Build the file change list
 	res := make([]CommitFileChange, 0, len(changedFiles))
-	for _, gitPath := range changedFiles {
-		relPath, ok := strings.CutPrefix(gitPath, resolver.DataDirPrefix)
+	for _, entry := range changedFiles {
+		relPath, ok := strings.CutPrefix(entry.Path, resolver.DataDirPrefix)
 		if !ok {
 			continue
 		}
 
 		change := CommitFileChange{
+			ChangeType:   entry.ChangeType,
 			RelativePath: relPath,
 		}
 
-		// Determine change type from git diff-tree output
-		// We don't have the change type directly from GetChangedFilesInCommit,
-		// but we can look at the symlink to provide extra info
+		// Match against symlinks
 		if sym, found := symlinkMap[relPath]; found {
 			change.SymlinkID = sym.ID
 			change.SymlinkType = string(sym.Type)
@@ -169,12 +168,21 @@ func (s *RollbackService) Rollback(repoID string, req *RollbackRequest) (*Rollba
 		return nil, fmt.Errorf("cannot rollback while backup is in progress")
 	}
 
-	// Get changed files in the target commit (deduplicated)
-	changedFiles, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, req.CommitHash)
+	// Get changed files in the target commit
+	changedFileEntries, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, req.CommitHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list changed files: %w", err)
 	}
-	changedFiles = deduplicateStrings(changedFiles)
+
+	// Extract paths and deduplicate
+	changedPaths := make([]string, 0, len(changedFileEntries))
+	seen := make(map[string]struct{})
+	for _, entry := range changedFileEntries {
+		if _, ok := seen[entry.Path]; !ok {
+			seen[entry.Path] = struct{}{}
+			changedPaths = append(changedPaths, entry.Path)
+		}
+	}
 
 	// Load current symlinks
 	allSymlinks, err := s.store.ListSymlinks(repoID)
@@ -184,7 +192,7 @@ func (s *RollbackService) Rollback(repoID string, req *RollbackRequest) (*Rollba
 
 	// Build resolver and resolve paths
 	resolver := resolver.NewSymlinkResolver(allSymlinks)
-	grouped := resolver.ResolveCommitFiles(changedFiles)
+	grouped := resolver.ResolveCommitFiles(changedPaths)
 
 	// Build rollback list (apply symlink_id filter if specified)
 	type rollbackItem struct {
@@ -460,19 +468,6 @@ func (s *RollbackService) RestoreFile(repoID, commitHash string, req *RestoreFil
 		Success:      true,
 		RestoredAt:   time.Now().Format(time.RFC3339),
 	}, nil
-}
-
-// deduplicateStrings removes duplicate entries from a string slice while preserving order.
-func deduplicateStrings(input []string) []string {
-	seen := make(map[string]struct{}, len(input))
-	result := make([]string, 0, len(input))
-	for _, s := range input {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			result = append(result, s)
-		}
-	}
-	return result
 }
 
 // safeRollbackTarget verifies that the target path stays within the allowed base.

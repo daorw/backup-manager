@@ -43,7 +43,6 @@ type BackupResult struct {
 	FilesRemoved  int    `json:"files_removed"`
 	CommitHash    string `json:"commit_hash,omitempty"`
 	CommitMessage string `json:"commit_message,omitempty"`
-	Pushed        bool   `json:"pushed"`
 }
 
 // Trigger performs a full backup cycle: incremental detection → sync → git add → commit → push.
@@ -77,6 +76,11 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 		}
 	}()
 
+	// Verify the repository is a git repository
+	if _, statErr := os.Stat(filepath.Join(repo.Path, ".git")); os.IsNotExist(statErr) {
+		return nil, fmt.Errorf("repository not initialized, please run Git Init first")
+	}
+
 	config, err := s.store.GetRepoConfig(repoID)
 	if err != nil {
 		config = &model.RepoConfig{RepoID: repoID, Branch: "main"}
@@ -102,7 +106,6 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 			return &BackupResult{
 				RepoID:      repoID,
 				CompletedAt: now.Format(time.RFC3339),
-				Pushed:      false,
 			}, nil
 		}
 		// There are uncommitted files (e.g., initial data/ copy at symlink
@@ -136,19 +139,6 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 		commitHash = entries[0].Hash
 	}
 
-	// Step 5: git push (optional)
-	pushed := false
-	if config.RemoteURL != "" {
-		envVars := s.authSvc.BuildEnvVars(repoID)
-		if err := s.gitEngine.Push(repo.Path, "origin", config.Branch, envVars); err != nil {
-			// Push failure is not fatal — we still committed locally
-			log.Printf("[backup] push failed for repo %s: %v", repoID, err)
-			pushed = false
-		} else {
-			pushed = true
-		}
-	}
-
 	// Update last_backup_at (defer will handle status)
 	now := time.Now()
 	repo.LastBackupAt = &now
@@ -161,7 +151,6 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 		FilesRemoved:  removed,
 		CommitHash:    commitHash,
 		CommitMessage: commitMsg,
-		Pushed:        pushed,
 	}, nil
 }
 
@@ -178,6 +167,29 @@ func (s *BackupService) History(repoID string, limit, offset int) ([]git.CommitE
 	}
 
 	return s.gitEngine.Log(repo.Path, limit, offset)
+}
+
+// Push pushes committed changes to the remote repository.
+func (s *BackupService) Push(repoID string) error {
+	repo, err := s.store.GetRepo(repoID)
+	if err != nil {
+		return err
+	}
+
+	config, err := s.store.GetRepoConfig(repoID)
+	if err != nil {
+		return fmt.Errorf("failed to get repo config: %w", err)
+	}
+
+	if config.RemoteURL == "" {
+		return fmt.Errorf("no remote URL configured")
+	}
+
+	envVars := s.authSvc.BuildEnvVars(repoID)
+	if err := s.gitEngine.Push(repo.Path, "origin", config.Branch, envVars); err != nil {
+		return fmt.Errorf("push failed: %w", err)
+	}
+	return nil
 }
 
 // syncChangedFiles checks each symlink's source and syncs changed files to data/.

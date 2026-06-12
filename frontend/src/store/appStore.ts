@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   BackupRepo,
+  BackupResult,
   Symlink,
   GitAuth,
   CommitEntry,
@@ -45,7 +46,9 @@ interface AppState {
   updateSymlink: (repoId: string, linkId: string, targetPath: string) => Promise<void>;
   batchImportSymlinks: (repoId: string, targets: Array<{ target_path: string; relative_path: string }>) => Promise<void>;
 
-  triggerBackup: (repoId: string) => Promise<void>;
+  triggerBackup: (repoId: string) => Promise<BackupResult | void>;
+  pushRepo: (repoId: string) => Promise<void>;
+  gitInitRepo: (repoId: string) => Promise<void>;
   fetchBackupHistory: (repoId: string, limit?: number, offset?: number) => Promise<void>;
 
   fetchAuth: (repoId: string) => Promise<void>;
@@ -225,6 +228,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       const repo = await api.fetchRepo(repoId);
       set({ currentRepo: repo });
+      return result;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Backup failed';
       set({
@@ -248,6 +252,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to fetch backup history';
       set({ error: message });
+    }
+  },
+
+  pushRepo: async (repoId: string) => {
+    set({ error: null });
+    try {
+      await api.pushRepo(repoId);
+      // Refresh repo to update status
+      const repo = await api.fetchRepo(repoId);
+      set({ currentRepo: repo });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Push failed';
+      set({ error: message });
+      throw err;
+    }
+  },
+
+  gitInitRepo: async (repoId: string) => {
+    set({ error: null });
+    try {
+      await api.gitInitRepo(repoId);
+      // Refresh repo to get updated git_initialized flag
+      const repo = await api.fetchRepo(repoId);
+      set({ currentRepo: repo });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Git init failed';
+      set({ error: message });
+      throw err;
     }
   },
 

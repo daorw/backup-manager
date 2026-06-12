@@ -56,9 +56,13 @@ func SetupRouter(
 		// File preview
 		v1.GET("/repos/:id/preview", previewHandler.Preview)
 
+		// Git init
+		v1.POST("/repos/:id/git-init", repoHandler.GitInit)
+
 		// Backup
 		v1.POST("/repos/:id/backup", backupHandler.Trigger)
 		v1.GET("/repos/:id/backup/history", backupHandler.History)
+		v1.POST("/repos/:id/push", backupHandler.Push)
 
 		// Git auth
 		v1.GET("/repos/:id/auth", authHandler.Get)

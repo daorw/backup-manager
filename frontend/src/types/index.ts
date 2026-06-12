@@ -8,6 +8,7 @@ export interface BackupRepo {
   updated_at: string;
   last_backup_at: string | null;
   status: BackupRepoStatus;
+  git_initialized: boolean;
   // Config fields — backend returns them flat in the repo response
   remote_url?: string;
   branch?: string;
@@ -81,7 +82,6 @@ export interface BackupResult {
   files_removed: number;
   commit_hash?: string;
   commit_message?: string;
-  pushed: boolean;
 }
 
 export interface CommitEntry {

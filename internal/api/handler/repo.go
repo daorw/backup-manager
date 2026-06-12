@@ -27,6 +27,7 @@ type repoResponse struct {
 	UpdatedAt          string `json:"updated_at"`
 	LastBackupAt       string `json:"last_backup_at,omitempty"`
 	Status             string `json:"status"`
+	GitInitialized     bool   `json:"git_initialized"`
 	RemoteURL          string `json:"remote_url,omitempty"`
 	Branch             string `json:"branch,omitempty"`
 	AutoBackup         bool   `json:"auto_backup"`
@@ -62,13 +63,15 @@ func (h *RepoHandler) List(c *gin.Context) {
 
 	items := make([]repoResponse, 0, len(repos))
 	for i, r := range repos {
+		gitInit, _ := h.repoSvc.IsGitInitialized(r.ID)
 		item := repoResponse{
-			ID:        r.ID,
-			Name:      r.Name,
-			Path:      r.Path,
-			CreatedAt: r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt: r.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			Status:    string(r.Status),
+			ID:             r.ID,
+			Name:           r.Name,
+			Path:           r.Path,
+			CreatedAt:      r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt:      r.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Status:         string(r.Status),
+			GitInitialized: gitInit,
 		}
 		if r.LastBackupAt != nil {
 			item.LastBackupAt = r.LastBackupAt.Format("2006-01-02T15:04:05Z07:00")
@@ -96,6 +99,7 @@ func (h *RepoHandler) Get(c *gin.Context) {
 		return
 	}
 
+	gitInit, _ := h.repoSvc.IsGitInitialized(repo.ID)
 	detail := repoResponse{
 		ID:                 repo.ID,
 		Name:               repo.Name,
@@ -103,6 +107,7 @@ func (h *RepoHandler) Get(c *gin.Context) {
 		CreatedAt:          repo.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:          repo.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		Status:             string(repo.Status),
+		GitInitialized:     gitInit,
 		RemoteURL:          config.RemoteURL,
 		Branch:             config.Branch,
 		AutoBackup:         config.AutoBackup,
@@ -144,4 +149,14 @@ func (h *RepoHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": "updated"})
+}
+
+// GitInit handles POST /api/v1/repos/:id/git-init
+func (h *RepoHandler) GitInit(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.repoSvc.GitInit(id); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": "initialized"})
 }

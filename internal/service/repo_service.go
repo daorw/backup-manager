@@ -157,6 +157,43 @@ func (s *RepoService) List() ([]*model.Repo, []*model.RepoConfig, error) {
 	return repos, configs, nil
 }
 
+// GitInit initializes a Git repository in the repo directory.
+func (s *RepoService) GitInit(id string) error {
+	repo, err := s.store.GetRepo(id)
+	if err != nil {
+		return err
+	}
+	if err := s.gitEngine.Init(repo.Path); err != nil {
+		return fmt.Errorf("failed to initialize git repository: %w", err)
+	}
+	// Ensure .gitignore exists after init
+	gitignorePath := filepath.Join(repo.Path, ".gitignore")
+	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
+		content := "# Backup Manager managed files\n.links/\n.env\n"
+		if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to create .gitignore: %w", err)
+		}
+	}
+	return nil
+}
+
+// IsGitInitialized checks whether the repo has a .git directory.
+func (s *RepoService) IsGitInitialized(id string) (bool, error) {
+	repo, err := s.store.GetRepo(id)
+	if err != nil {
+		return false, err
+	}
+	gitDir := filepath.Join(repo.Path, ".git")
+	info, err := os.Stat(gitDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
 // Delete removes a repository from the database.
 // The filesystem contents are left intact for safety.
 func (s *RepoService) Delete(id string) error {

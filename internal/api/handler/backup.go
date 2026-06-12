@@ -32,6 +32,16 @@ func (h *BackupHandler) Trigger(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
+// Push handles POST /api/v1/repos/:id/push
+func (h *BackupHandler) Push(c *gin.Context) {
+	repoID := c.Param("id")
+	if err := h.backupSvc.Push(repoID); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": "pushed"})
+}
+
 // History handles GET /api/v1/repos/:id/backup/history
 func (h *BackupHandler) History(c *gin.Context) {
 	repoID := c.Param("id")

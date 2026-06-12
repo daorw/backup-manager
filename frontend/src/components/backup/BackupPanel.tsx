@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Button,
   Space,
@@ -14,6 +14,7 @@ import {
   message,
   Spin,
   Tooltip,
+  Alert,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -26,6 +27,10 @@ import {
   FileOutlined,
   FolderOutlined,
   SwapOutlined,
+  GithubOutlined,
+  SendOutlined,
+  ExclamationCircleOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -65,12 +70,16 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
 
   const currentRepo = useAppStore((s) => s.currentRepo);
   const triggerBackup = useAppStore((s) => s.triggerBackup);
+  const pushRepo = useAppStore((s) => s.pushRepo);
+  const gitInitRepo = useAppStore((s) => s.gitInitRepo);
   const fetchBackupHistory = useAppStore((s) => s.fetchBackupHistory);
   const fetchCommitFiles = useAppStore((s) => s.fetchCommitFiles);
   const rollbackSourceFiles = useAppStore((s) => s.rollbackSourceFiles);
   const clearRollbackResult = useAppStore((s) => s.clearRollbackResult);
 
   const [backingUp, setBackingUp] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [initializing, setInitializing] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -94,7 +103,6 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     }
   }, [repoId, fetchBackupHistory]);
 
-  // Open result modal when rollback completes
   useEffect(() => {
     if (rollbackResult) {
       setResultModalOpen(true);
@@ -104,8 +112,15 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const handleBackup = async () => {
     setBackingUp(true);
     try {
-      await triggerBackup(repoId);
-      message.success('Backup completed');
+      const result = await triggerBackup(repoId);
+      if (result) {
+        const detail = result.commit_hash
+          ? `Committed ${result.files_changed} changed, ${result.files_removed} removed`
+          : 'No changes to commit';
+        message.success(`Backup completed — ${detail}`);
+      } else {
+        message.success('Backup completed');
+      }
       fetchBackupHistory(repoId, pageSize, 0);
     } catch (err) {
       if (err instanceof Error) {
@@ -116,63 +131,88 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     }
   };
 
+  const handlePush = async () => {
+    setPushing(true);
+    try {
+      await pushRepo(repoId);
+      message.success('Pushed to remote successfully');
+    } catch (err) {
+      if (err instanceof Error) {
+        message.error(err.message);
+      }
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const handleGitInit = async () => {
+    setInitializing(true);
+    try {
+      await gitInitRepo(repoId);
+      message.success('Git repository initialized');
+    } catch (err) {
+      if (err instanceof Error) {
+        message.error(err.message);
+      }
+    } finally {
+      setInitializing(false);
+    }
+  };
+
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
     fetchBackupHistory(repoId, pageSize, (newPage - 1) * pageSize);
   };
 
-  // Expandable row: load commit files
-  const handleExpandRow = useCallback(
-    async (expanded: boolean, record: CommitEntry) => {
-      if (expanded) {
-        setExpandedCommitHash(record.hash);
-        setCommitFilesLoading(true);
-        try {
-          await fetchCommitFiles(repoId, record.hash);
-        } catch (err) {
-          // Error handled by store
-        } finally {
-          setCommitFilesLoading(false);
-        }
-      } else {
-        setExpandedCommitHash(null);
+  const handleExpandRow = async (expanded: boolean, record: CommitEntry) => {
+    if (expanded) {
+      setExpandedCommitHash(record.hash);
+      setCommitFilesLoading(true);
+      try {
+        await fetchCommitFiles(repoId, record.hash);
+      } catch (err) {
+        // Error handled by store
+      } finally {
+        setCommitFilesLoading(false);
       }
-    },
-    [repoId, fetchCommitFiles]
-  );
+    } else {
+      setExpandedCommitHash(null);
+    }
+  };
 
-  // Open confirm modal for single symlink rollback
-  const handleSymlinkRollback = useCallback(
-    (commitHash: string, symlinkID: string, commitMessage: string, commitDate: string) => {
-      setRollbackTarget({
-        commitHash,
-        commitMessage,
-        commitDate,
-        symlinkCount: 1,
-        isFull: false,
-        symlinkIDs: [symlinkID],
-      });
-      setConfirmModalOpen(true);
-    },
-    []
-  );
+  const handleSymlinkRollback = (
+    commitHash: string,
+    symlinkID: string,
+    commitMessage: string,
+    commitDate: string,
+  ) => {
+    setRollbackTarget({
+      commitHash,
+      commitMessage,
+      commitDate,
+      symlinkCount: 1,
+      isFull: false,
+      symlinkIDs: [symlinkID],
+    });
+    setConfirmModalOpen(true);
+  };
 
-  // Open confirm modal for full rollback
-  const handleFullRollback = useCallback(
-    (commitHash: string, commitMessage: string, commitDate: string, count: number) => {
-      setRollbackTarget({
-        commitHash,
-        commitMessage,
-        commitDate,
-        symlinkCount: count,
-        isFull: true,
-      });
-      setConfirmModalOpen(true);
-    },
-    []
-  );
+  const handleFullRollback = (
+    commitHash: string,
+    commitMessage: string,
+    commitDate: string,
+    count: number,
+  ) => {
+    setRollbackTarget({
+      commitHash,
+      commitMessage,
+      commitDate,
+      symlinkCount: count,
+      isFull: true,
+    });
+    setConfirmModalOpen(true);
+  };
 
-  // Execute rollback
   const handleConfirmRollback = async () => {
     if (!rollbackTarget) return;
 
@@ -182,7 +222,6 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         symlink_ids: rollbackTarget.symlinkIDs,
       });
       message.success('Rollback completed');
-      // Refresh history to show the updated state
       fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
     } catch (err) {
       if (err instanceof Error) {
@@ -198,8 +237,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     clearRollbackResult();
   };
 
-  // Get unique symlinks from commit files (for grouped display)
-  const getUniqueSymlinks = (files: CommitFileChange[]): { id: string; type: string; files: CommitFileChange[] }[] => {
+  const getUniqueSymlinks = (files: CommitFileChange[]) => {
     const grouped = new Map<string, { id: string; type: string; files: CommitFileChange[] }>();
     for (const file of files) {
       const key = file.symlink_id || file.relative_path;
@@ -250,7 +288,6 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     },
   ];
 
-  // Expanded row renderer
   const expandedRowRender = (record: CommitEntry) => {
     if (commitFilesLoading && expandedCommitHash === record.hash) {
       return (
@@ -314,7 +351,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                     record.hash,
                     group.id,
                     record.message,
-                    record.date
+                    record.date,
                   )
                 }
               >
@@ -336,7 +373,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                   record.hash,
                   record.message,
                   record.date,
-                  symlinkGroups.length
+                  symlinkGroups.length,
                 )
               }
             >
@@ -349,9 +386,22 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   };
 
   const isBackingUp = backupProgress?.status === 'running';
+  const isGitInit = currentRepo?.git_initialized ?? true;
+  const hasRemote = !!currentRepo?.remote_url;
 
   return (
     <div>
+      {!isGitInit && (
+        <Alert
+          message="Git repository not initialized"
+          description="The .git directory is missing. Click 'Git Init' below to initialize the repository before running backups."
+          type="warning"
+          showIcon
+          icon={<ExclamationCircleOutlined />}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
           <Card size="small">
@@ -394,23 +444,38 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         </Col>
       </Row>
 
-      <Space style={{ marginBottom: 16 }}>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Button
+          icon={isGitInit ? <CheckOutlined /> : <ExclamationCircleOutlined />}
+          onClick={handleGitInit}
+          loading={initializing}
+          type={isGitInit ? 'default' : 'primary'}
+          disabled={isGitInit && !initializing}
+        >
+          {initializing ? 'Initializing...' : isGitInit ? 'Git Init ✓' : 'Git Init'}
+        </Button>
+
         <Button
           type="primary"
           size="large"
           icon={<PlayCircleOutlined />}
           onClick={handleBackup}
           loading={backingUp || isBackingUp}
-          disabled={isBackingUp}
+          disabled={!isGitInit || isBackingUp}
         >
           {isBackingUp ? 'Backing up...' : 'Trigger Backup'}
         </Button>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => fetchBackupHistory(repoId, pageSize, 0)}
-        >
-          Refresh
-        </Button>
+
+        {hasRemote && (
+          <Button
+            icon={<SendOutlined />}
+            onClick={handlePush}
+            loading={pushing}
+            disabled={!isGitInit}
+          >
+            {pushing ? 'Pushing...' : 'Push to Remote'}
+          </Button>
+        )}
       </Space>
 
       {isBackingUp && (
@@ -452,7 +517,6 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         />
       )}
 
-      {/* Rollback Confirm Modal */}
       <RollbackConfirmModal
         open={confirmModalOpen}
         commitHash={rollbackTarget?.commitHash || ''}
@@ -465,7 +529,6 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         loading={rollbackLoading}
       />
 
-      {/* Rollback Result Modal */}
       <RollbackResultModal
         open={resultModalOpen}
         result={rollbackResult}

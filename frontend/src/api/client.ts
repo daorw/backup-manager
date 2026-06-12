@@ -176,6 +176,16 @@ export async function clearAuth(repoId: string): Promise<void> {
   await api.delete(`/repos/${repoId}/auth`);
 }
 
+// Git init API
+export async function gitInitRepo(repoId: string): Promise<void> {
+  await api.post(`/repos/${repoId}/git-init`);
+}
+
+// Push API
+export async function pushRepo(repoId: string): Promise<void> {
+  await api.post(`/repos/${repoId}/push`);
+}
+
 // Health API
 export async function healthCheck(): Promise<{ status: string }> {
   const { data } = await api.get<{ status: string }>('/health');

@@ -17,7 +17,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { browsePath } from '../../api/client';
+import { browsePath, fetchAllowedRoots } from '../../api/client';
 
 interface SymlinkAddModalProps {
   open: boolean;
@@ -59,13 +59,22 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
   const loadRoot = useCallback(async () => {
     setLoading(true);
     try {
+      const roots = await fetchAllowedRoots();
+      if (roots.length > 0) {
+        const nodes = await loadChildren(roots[0]);
+        setTreeData(nodes);
+        return;
+      }
+    } catch {
+      // fall through to fallback
+    }
+    try {
       const homePath = typeof window !== 'undefined'
         ? (window as any).__HOME_DIR__ || '/Users/Shared'
         : '/';
       const nodes = await loadChildren(homePath);
       setTreeData(nodes);
     } catch {
-      // If home fails, try root
       try {
         const nodes = await loadChildren('/');
         setTreeData(nodes);
@@ -89,8 +98,12 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
     if (node.children && node.children.length > 0) {
       return;
     }
-    const children = await loadChildren(node.path);
-    setTreeData((prev) => updateTreeNode(prev, node.key, children));
+    try {
+      const children = await loadChildren(node.path);
+      setTreeData((prev) => updateTreeNode(prev, node.key, children));
+    } catch (err) {
+      message.error(`Failed to load directory: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const updateTreeNode = (
@@ -115,10 +128,8 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
   const handleSelect = (selectedKeys: React.Key[], info: { node: FileBrowserNode }) => {
     if (selectedKeys.length > 0) {
       const node = info.node;
-      if (node.nodeType === 'file') {
-        setSelectedPath(node.path);
-        form.setFieldsValue({ target_path: node.path });
-      }
+      setSelectedPath(node.path);
+      form.setFieldsValue({ target_path: node.path });
     }
   };
 
@@ -130,10 +141,8 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
       form.resetFields();
       message.success('Symlink created successfully');
       onClose();
-    } catch (err) {
-      if (err instanceof Error) {
-        message.error(err.message);
-      }
+    } catch {
+      // validation errors are shown inline by Ant Design Form
     } finally {
       setSubmitting(false);
     }
@@ -152,11 +161,11 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
       <Form form={form} layout="vertical">
         <Form.Item
           name="target_path"
-          label="Source File Path"
-          rules={[{ required: true, message: 'Please select a source file' }]}
+          label="Source Path"
+          rules={[{ required: true, message: 'Please select a source file or directory' }]}
         >
           <Input
-            placeholder="Select a file from the browser below"
+            placeholder="Select a file or directory from the browser below"
             value={selectedPath}
             onChange={(e) => setSelectedPath(e.target.value)}
           />

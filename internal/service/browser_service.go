@@ -104,6 +104,33 @@ func (s *BrowserService) Browse(browsePath string) ([]BrowseEntry, error) {
 	return result, nil
 }
 
+// AllowedRoots returns the list of allowed browse roots.
+func (s *BrowserService) AllowedRoots() []string {
+	rootSet := make(map[string]bool)
+
+	for _, r := range s.allowedRoots {
+		if r != "" {
+			abs, err := filepath.Abs(r)
+			if err == nil {
+				rootSet[abs] = true
+			}
+		}
+	}
+
+	repos, err := s.store.ListRepos()
+	if err == nil {
+		for _, repo := range repos {
+			rootSet[repo.Path] = true
+		}
+	}
+
+	var roots []string
+	for r := range rootSet {
+		roots = append(roots, r)
+	}
+	return roots
+}
+
 // buildAllowedRoots collects all directories that can be browsed.
 func (s *BrowserService) buildAllowedRoots() []string {
 	rootSet := make(map[string]bool)

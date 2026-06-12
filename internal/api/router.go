@@ -52,6 +52,7 @@ func SetupRouter(
 
 		// File browsing
 		v1.GET("/browse", browseHandler.Browse)
+		v1.GET("/browse/allowed-roots", browseHandler.AllowedRoots)
 
 		// File preview
 		v1.GET("/repos/:id/preview", previewHandler.Preview)

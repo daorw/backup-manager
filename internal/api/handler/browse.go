@@ -37,3 +37,9 @@ func (h *BrowseHandler) Browse(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": entries})
 }
+
+// AllowedRoots handles GET /api/v1/browse/allowed-roots
+func (h *BrowseHandler) AllowedRoots(c *gin.Context) {
+	roots := h.browserSvc.AllowedRoots()
+	c.JSON(http.StatusOK, gin.H{"data": roots})
+}

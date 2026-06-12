@@ -108,6 +108,7 @@ func (e *GitEngine) CommitWithAuthor(repoPath, message, authorName, authorEmail 
 }
 
 // Log returns the commit history for the repository.
+// Returns an empty list if the repository has no commits yet.
 func (e *GitEngine) Log(repoPath string, limit, offset int) ([]CommitEntry, error) {
 	format := "--format=%H%x00%an%x00%ae%x00%ai%x00%s"
 	args := []string{"log", format}
@@ -121,6 +122,11 @@ func (e *GitEngine) Log(repoPath string, limit, offset int) ([]CommitEntry, erro
 	var stdout, stderr bytes.Buffer
 	err := e.runGitCommand(repoPath, args, &stdout, &stderr)
 	if err != nil {
+		// An empty repository (no commits yet) causes git log to exit non-zero.
+		// Return an empty list instead of an error.
+		if strings.Contains(stderr.String(), "does not have any commits yet") {
+			return []CommitEntry{}, nil
+		}
 		return nil, fmt.Errorf("failed to get git log: %w", err)
 	}
 

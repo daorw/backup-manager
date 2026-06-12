@@ -1,10 +1,14 @@
-import React from 'react';
-import { Typography } from 'antd';
+import React, { useState } from 'react';
+import { Typography, Button, Space } from 'antd';
+import { EditOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
 
 interface TextPreviewProps {
   content: string;
   fileName: string;
   truncated: boolean;
+  editable?: boolean;
+  onSave?: (content: string) => Promise<void>;
+  saving?: boolean;
 }
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -61,11 +65,91 @@ const TextPreview: React.FC<TextPreviewProps> = ({
   content,
   fileName,
   truncated,
+  editable = false,
+  onSave,
+  saving = false,
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(content);
+
   const language = getLanguage(fileName);
+
+  const handleStartEdit = () => {
+    setEditContent(content);
+    setIsEditing(true);
+  };
+
+  const handleCancel = () => {
+    setEditContent(content);
+    setIsEditing(false);
+  };
+
+  const handleSave = async () => {
+    if (!onSave) return;
+    await onSave(editContent);
+    setIsEditing(false);
+  };
+
+  if (isEditing) {
+    return (
+      <div>
+        {truncated && (
+          <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
+            File was truncated. Only the first 10MB is shown.
+          </Typography.Text>
+        )}
+        <Space style={{ marginBottom: 8 }}>
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={handleSave}
+            loading={saving}
+          >
+            Save
+          </Button>
+          <Button
+            icon={<CloseOutlined />}
+            onClick={handleCancel}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+        </Space>
+        <textarea
+          value={editContent}
+          onChange={(e) => setEditContent(e.target.value)}
+          disabled={saving}
+          style={{
+            width: '100%',
+            minHeight: 400,
+            maxHeight: 600,
+            fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
+            fontSize: 13,
+            lineHeight: 1.5,
+            padding: 16,
+            border: '1px solid #d9d9d9',
+            borderRadius: 6,
+            resize: 'vertical',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div>
+      {editable && !truncated && (
+        <Button
+          type="text"
+          icon={<EditOutlined />}
+          onClick={handleStartEdit}
+          style={{ marginBottom: 8 }}
+        >
+          Edit
+        </Button>
+      )}
       {truncated && (
         <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
           File was truncated. Only the first 10MB is shown.

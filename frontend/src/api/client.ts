@@ -16,6 +16,8 @@ import type {
   CommitFileChange,
   RollbackRequest,
   RollbackResult,
+  SaveFileRequest,
+  SaveFileResult,
 } from '../types';
 
 const api = axios.create({
@@ -147,6 +149,18 @@ export async function previewFile(
   const { data } = await api.get<PreviewResult>(
     `/repos/${repoId}/preview`,
     { params: { path } }
+  );
+  return data;
+}
+
+// Save file API
+export async function saveFile(
+  repoId: string,
+  req: SaveFileRequest
+): Promise<SaveFileResult> {
+  const { data } = await api.put<SaveFileResult>(
+    `/repos/${repoId}/save`,
+    req
   );
   return data;
 }

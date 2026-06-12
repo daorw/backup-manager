@@ -55,8 +55,9 @@ func SetupRouter(
 		v1.GET("/browse", browseHandler.Browse)
 		v1.GET("/browse/allowed-roots", browseHandler.AllowedRoots)
 
-		// File preview
+		// File preview and save
 		v1.GET("/repos/:id/preview", previewHandler.Preview)
+		v1.PUT("/repos/:id/save", previewHandler.Save)
 
 		// Git init
 		v1.POST("/repos/:id/git-init", repoHandler.GitInit)

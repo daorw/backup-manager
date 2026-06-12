@@ -356,3 +356,217 @@ backup-manager/
 | **P1-4** 增量备份检测算法未定义 | 明确为 mtime + fileSize 双字段比对 |
 | **P1-5** SafeResolve EvalSymlinks 降级安全盲区 | 区分错误类型：fs.ErrNotExist 可降级，其他错误拒绝 |
 | **P1-6** 缺少错误处理与用户通知方案 | 补充完整错误处理章节：错误分类、SSE 通知、崩溃恢复、回滚机制 |
+
+## 7. 预览编辑功能设计
+
+### 7.1 概述
+
+在 Preview 页面中，用户可以直接预览和编辑软链接指向的**源文件**（非 `data/` 副本）。编辑保存时，同时写入源文件和同步到 `data/` 目录保持镜像一致性。
+
+**核心变化**：Preview 读取路径从 `data/` 切换到源文件路径（`symlink.TargetPath`）。
+
+### 7.2 后端设计
+
+#### 7.2.1 Store 层 — 新增查询方法
+
+在 `internal/store/symlink_store.go` 中新增通过 `relative_path` 查询 symlink 的方法：
+
+```go
+func (s *Store) GetSymlinkByRelativePath(repoID, relativePath string) (*model.Symlink, error)
+```
+
+利用已有的 `UNIQUE(repo_id, relative_path)` 约束，无需新增索引。
+
+#### 7.2.2 Service 层 — 新增 PreviewService
+
+新建 `internal/service/preview_service.go`，包含以下核心方法：
+
+**ResolveSource** — 将 `relative_path` 解析为源文件绝对路径：
+
+```
+输入: repoID, relPath = "docs/notes/readme.md"
+
+匹配策略（按优先级）：
+  1. 精确匹配: sym.RelativePath == relPath → 返回 sym.TargetPath
+  2. 最长前缀: 遍历 directory-type symlinks,
+     检查 strings.HasPrefix(relPath, sym.RelativePath+"/")
+     → 返回 filepath.Join(sym.TargetPath, suffix)
+  3. 无匹配: 返回错误
+```
+
+**SaveFile** — 保存编辑后的文件内容到源文件，并同步到 `data/`：
+
+```
+流程:
+  1. ResolveSource 获取源文件路径
+  2. 验证非 directory-type symlink
+  3. os.Stat 获取原始文件权限 mode
+  4. os.WriteFile(sourcePath, content, mode) → 写入源文件
+  5. os.Chmod(sourcePath, mode) → 确保权限不受 umask 影响
+  6. os.MkdirAll(filepath.Dir(dataPath), 0755)
+     os.WriteFile(dataPath, content, mode) → 同步 data/
+     os.Chmod(dataPath, mode) → data/ 也保留权限
+  7. store.UpdateSymlink → 更新 file_size, modified_at
+```
+
+**API 合同**：
+
+```go
+// PUT /api/v1/repos/:id/save
+// Content-Type: application/json
+type SaveRequest struct {
+    Path    string `json:"path" binding:"required"`    // symlink relative path
+    Content string `json:"content" binding:"required"` // 文件内容（UTF-8 文本）
+}
+// 响应: {"data": {"file_size": 1234, "modified_at": "2026-06-12T10:30:00Z"}}
+```
+
+约束：
+| 条件 | 处理 |
+|------|------|
+| Content > 10MB | 413 Request Entity Too Large |
+| 目录 symlink | 400 Bad Request |
+| 无匹配 symlink | 404 Not Found |
+| 源文件已被删除 | 404 Not Found |
+
+#### 7.2.3 Handler 层 — 改造 PreviewHandler
+
+改造 `internal/api/handler/preview.go`：
+
+```go
+type PreviewHandler struct {
+    previewSvc *service.PreviewService
+    semaphore  chan struct{}     // 最大 5 并发，Preview 和 Save 共用
+}
+```
+
+- **Preview 方法**：重写为通过 `PreviewService.Preview(repoID, relPath)` 从源文件读取
+- **Save 方法**：新增，调用 `PreviewService.SaveFile(repoID, path, content)`
+
+#### 7.2.4 路由注册
+
+```go
+v1.GET("/repos/:id/preview", previewHandler.Preview)  // 不变
+v1.PUT("/repos/:id/save", previewHandler.Save)         // 新增
+```
+
+#### 7.2.5 main.go 依赖注入
+
+```go
+previewSvc := service.NewPreviewService(dataStore)      // 新增
+previewHandler := handler.NewPreviewHandler(previewSvc)  // 改造
+```
+
+### 7.3 前端设计
+
+#### 7.3.1 类型定义
+
+```typescript
+export interface SaveFileRequest {
+  path: string;
+  content: string;
+}
+
+export interface SaveFileResult {
+  file_size: number;
+  modified_at: string;
+}
+```
+
+#### 7.3.2 API 客户端
+
+```typescript
+export async function saveFile(repoId: string, req: SaveFileRequest): Promise<SaveFileResult> {
+  const { data } = await api.put<SaveFileResult>(`/repos/${repoId}/save`, req);
+  return data;
+}
+```
+
+#### 7.3.3 TextPreview 改造
+
+- 新增 `editable`, `onContentChange`, `onSave`, `saving` props
+- 展示模式：现有 `<pre>` 只读显示 + "编辑"按钮
+- 编辑模式：`<textarea>` + "保存"/"取消"按钮
+- truncated 文件禁用编辑按钮
+
+#### 7.3.4 MarkdownPreview 改造
+
+- 新增 `editable`, `onContentChange`, `onSave`, `saving` props
+- 使用 Ant Design Tabs 实现 Preview/Edit 模式切换
+- 预览模式：渲染 HTML（现有逻辑）
+- 编辑模式：Markdown 源码 textarea
+- 切换 Tab 不丢失编辑内容
+
+#### 7.3.5 PreviewPanel 改造
+
+- 新增 `editingContent` 编辑中内容状态
+- 新增 `saving` 保存中状态
+- `handleSave` 调用 `saveFile` API → 刷新预览 → 提示成功
+
+### 7.4 数据流
+
+**预览流**：
+```
+用户点击文件节点 → GET /preview?path=<relPath>
+  → PreviewService.ResolveSource → 解析到源文件路径
+  → 从源文件读取内容 → 返回 {content, mime_type, size, text, truncated}
+  → 前端渲染 TextPreview / MarkdownPreview / BinaryInfo
+```
+
+**保存流**：
+```
+用户编辑内容 → 点击保存 → PUT /repos/:id/save {path, content}
+  → 校验: content ≤ 10MB, path 非空
+  → ResolveSource → 解析源文件路径
+  → os.WriteFile(sourcePath, content, origMode) → 写入源文件
+  → os.WriteFile(dataPath, content, origMode) → 同步 data/
+  → UpdateSymlink → 更新元数据
+  → 返回 {file_size, modified_at}
+  → 前端刷新预览 → 提示 "File saved successfully"
+```
+
+### 7.5 边界与异常处理
+
+| 场景 | 处理方式 | 状态码 |
+|------|----------|--------|
+| path 为空 | 返回错误 | 400 |
+| content 为空 | 返回错误 | 400 |
+| content > 10MB | 返回大小限制提示 | 413 |
+| 无匹配 symlink | 返回 "no matching symlink" | 404 |
+| 目标为目录 symlink | 返回 "cannot save directory" | 400 |
+| 源文件已被外部删除 | os.Stat 失败 | 404 |
+| 写源文件成功但 data/ 同步失败 | 记录日志，源文件已更新不回滚 | 200（日志告警） |
+| 无写权限 | os.WriteFile 失败 | 500 |
+
+### 7.6 安全考量
+
+| 风险 | 防护 |
+|------|------|
+| 路径遍历 | 路径来自数据库（WHERE repo_id = ?），非用户直接拼接 |
+| 写入二进制文件 | 前端 truncated 禁用编辑；后端 content 大小校验 |
+| 超大内容 OOM | Content 长度 ≤ 10MB |
+| 权限丢失 | 写入前读取原始 mode，写入后 Chmod 恢复 |
+
+### 7.7 变更影响
+
+| 影响点 | 变更 | 影响程度 |
+|--------|------|----------|
+| Preview 读取路径 | data/ → 源文件 | ✅ 行为变化，符合需求 |
+| Preview 响应格式 | 不变 | ✅ 兼容 |
+| ListDirEntries | 仍读 data/ | ✅ 无需修改 |
+| 备份流程 | 不变。保存后 mtime 变化，下次备份自动检测 | ✅ 兼容 |
+| 回滚服务 | 不变。SymlinkResolver 已正确处理 | ✅ 兼容 |
+| SafeResolveFile(dataDir) | Preview 不再使用 | ⚠️ 移除一处调用 |
+
+### 7.8 测试策略
+
+**单元测试**：
+- `PreviewService.ResolveSource`：精确匹配、前缀匹配、无匹配
+- `PreviewService.SaveFile`：保存后元数据更新、权限保持、源文件不存在
+- Save Handler：content 超限、目录 symlink、请求格式错误
+
+**集成测试**：
+- 文件 symlink 预览 → 源文件内容正确
+- 目录 symlink 内部文件预览 → 内容正确
+- 编辑保存 → 重新预览 → 内容已更新
+- 并发保存与备份 → 无数据损坏

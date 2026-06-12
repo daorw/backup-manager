@@ -76,6 +76,16 @@ export interface PreviewResult {
   truncated?: boolean;
 }
 
+export interface SaveFileRequest {
+  path: string;
+  content: string;
+}
+
+export interface SaveFileResult {
+  file_size: number;
+  modified_at: string;
+}
+
 export interface BackupResult {
   repo_id: string;
   completed_at: string;

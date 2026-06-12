@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { useAppStore } from '../../store/appStore';
-import { previewFile } from '../../api/client';
+import { previewFile, saveFile } from '../../api/client';
 import type { PreviewResult, Symlink, BrowseEntry } from '../../types';
 import TextPreview from './TextPreview';
 import MarkdownPreview from './MarkdownPreview';
@@ -93,6 +93,24 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async (newContent: string) => {
+    if (!selectedFile) return;
+    setSaving(true);
+    try {
+      await saveFile(repoId, { path: selectedFile, content: newContent });
+      message.success('File saved successfully');
+      // Update local preview content so the preview refreshes immediately
+      setPreviewResult((prev) =>
+        prev ? { ...prev, content: newContent } : null
+      );
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Failed to save file');
+    } finally {
+      setSaving(false);
+    }
+  }, [repoId, selectedFile]);
 
   // Dynamic children for expanded directory symlinks
   const [dynamicChildren, setDynamicChildren] = useState<Record<string, PreviewTreeNode[]>>({});
@@ -242,12 +260,18 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
     const ext = fileName.toLowerCase().split('.').pop();
 
     const content = previewResult.content || '';
+    // Only allow editing if the content is text and not truncated
+    const isEditable = previewResult.text && !previewResult.truncated && selectedFile != null;
+
     if (ext === 'md' || ext === 'markdown') {
       return (
         <MarkdownPreview
           content={content}
           repoId={repoId}
           filePath={selectedFile}
+          editable={isEditable}
+          onSave={handleSave}
+          saving={saving}
         />
       );
     }
@@ -257,6 +281,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
         content={content}
         fileName={fileName}
         truncated={previewResult.truncated || false}
+        editable={isEditable}
+        onSave={handleSave}
+        saving={saving}
       />
     );
   };

@@ -50,12 +50,12 @@
 | FR-9 | 批量导入软链接 | 支持批量选择多个源文件/目录添加软链接，部分失败时自动回滚 | P1 |
 | FR-10 | 已删除源文件同步清理 | 检测源文件已被删除的软链接，同步清理 `data/` 中的对应文件并生成 Git 提交 | P2 |
 
-### 3.3 文件预览
+### 3.3 文件预览与编辑
 
 | ID | 功能 | 描述 | 优先级 |
 |----|------|------|--------|
-| FR-11 | 纯文本文件预览 | 在 UI 中快速阅览纯文本文件内容（如 .txt, .log, .json, .yaml, .py 等），含语法高亮 | P0 |
-| FR-12 | Markdown 渲染预览 | 渲染显示 Markdown 文件（.md），支持本地图片显示 | P0 |
+| FR-11 | 纯文本文件预览与编辑 | 在 UI 中阅览和编辑纯文本源文件内容（如 .txt, .log, .json, .yaml, .py 等），支持编辑保存到源文件。操作对象为软链接指向的源文件。 | P0 |
+| FR-12 | Markdown 渲染预览与编辑 | 渲染显示 Markdown 源文件（.md），支持本地图片显示。支持编辑模式与预览模式切换，编辑保存到源文件。操作对象为软链接指向的源文件。 | P0 |
 | FR-13 | 二进制文件标识 | 对于非文本文件显示文件类型信息和大小，不尝试预览内容 | P2 |
 
 ### 3.4 备份执行
@@ -92,13 +92,13 @@
 | NFR-1 | **前后端一体架构** | 前端 UI 和后端服务整合为一个应用，单进程运行 |
 | NFR-2 | **跨平台支持** | 至少支持 macOS 和 Linux |
 | NFR-3 | **响应式 UI** | 界面适配不同屏幕尺寸 |
-| NFR-4 | **安全性** | 删除软链接和删除仓库前二次确认；不对源文件做任何修改（只读，回滚操作除外） |
+| NFR-4 | **安全性** | 删除软链接和删除仓库前二次确认；预览和编辑源文件时需通过路径安全校验 |
 | NFR-5 | **数据一致性** | `.links/` 和 `data/` 目录结构镜像一致 |
 | NFR-6 | **备份原子性** | 备份失败应有清晰的提示和错误状态 |
 | NFR-7 | **易用性** | 核心功能在 3 次点击内可完成 |
 | NFR-8 | **启动方式** | 启动后自动打开浏览器 |
 | NFR-9 | **路径安全** | 四层路径校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越 |
-| NFR-10 | **并发安全** | 每个仓库独立互斥锁防止并发备份；预览接口限流（最大 5 并发） |
+| NFR-10 | **并发安全** | 每个仓库独立互斥锁防止并发备份；预览/编辑接口限流（最大 5 并发） |
 | NFR-11 | **敏感信息加密** | SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密后存储在 SQLite，密钥文件权限 0600 |
 
 ---
@@ -148,37 +148,11 @@ Symlink
 ├── id: string
 ├── repoId: string
 ├── relativePath: string   # 在 .links/ 下的相对路径（含文件名）
-├── targetPath: string     # 源文件/目录的绝对路径
+├── targetPath: string     # 源文件/目录的绝对路径（预览和编辑操作的对象）
 ├── type: 'file' | 'directory'
 ├── size: number           # 源文件大小
 ├── modifiedAt: timestamp  # 源文件最后修改时间
 └── createdAt: timestamp
-
-BackupResult
-├── repoId: string
-├── completedAt: timestamp
-├── filesChanged: number    # 本次备份变更的文件数
-├── filesRemoved: number    # 本次备份删除的文件数
-├── commitHash: string|null
-├── commitMessage: string|null
-└── pushed: boolean         # 是否成功推送到远程
-
-RollbackResult
-├── repoId: string
-├── commitHash: string      # 回滚到的目标提交
-├── total: number           # 总文件数
-├── success: number         # 成功数
-├── skipped: number         # 跳过数（文件无变更）
-├── failed: number          # 失败数
-├── failures: RollbackFailure[]
-└── completedAt: timestamp
-
-CommitEntry (Git 提交记录)
-├── hash: string
-├── author: string
-├── email: string
-├── date: string
-└── message: string
 ```
 
 ### 5.3 数据库 Schema
@@ -191,9 +165,6 @@ repo_configs  — 配置: repo_id(FK), remote_url, branch, auto_backup, auto_bac
 repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_private_key_path, username, password_encrypted(BLOB)
 symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path, type, file_size, modified_at, created_at
 ```
-
-- WAL 模式启用
-- 外键约束启用
 
 ---
 
@@ -214,9 +185,33 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 | 认证加密 | SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储 |
 | 源文件回滚 | 回滚操作会覆写源文件（需要用户确认），回滚前展示变更文件列表 |
 | 仓库删除 | 删除仓库仅移除数据库记录和调度任务，保留文件系统上的数据不丢失 |
+| **预览/编辑目标** | 预览和编辑操作的对象是**软链接指向的源文件**（target_path），而非 data/ 目录中的副本 |
 
 ---
 
-**文档版本**：v1.1  
+## 7. 预览与编辑功能需求详情
+
+### 7.1 功能描述
+
+在仓库详情页的预览（Preview）标签页中，用户可以通过文件树选择软链接文件，实现：
+- **纯文本文件**：查看文件内容（只读预览），并可切换至编辑模式修改内容后保存到源文件
+- **Markdown 文件**：在渲染预览模式与原始文本编辑模式之间切换，编辑后可保存到源文件
+- **二进制文件**：仅显示文件类型信息，不可编辑
+
+### 7.2 操作对象说明
+
+| 操作 | 对象 | 说明 |
+|------|------|------|
+| 预览（读取） | 软链接指向的源文件（`symlink.target_path`） | 读取源文件的当前内容展示给用户 |
+| 编辑（保存） | 软链接指向的源文件（`symlink.target_path`） | 将编辑后的内容写回源文件 |
+| 备份 | data/ 目录中的副本 | Git 版本管理的是 data/ 中的副本，与预览/编辑无关 |
+
+### 7.3 与备份的关系
+
+编辑源文件后，不会自动触发备份。用户对源文件的修改将在下一次手动或定时备份时被增量检测（mtime+size 变化）发现，同步到 `data/` 目录后进入 Git 版本管理。这是合理的设计——用户编辑源文件是独立行为，备份时机由用户自主控制。
+
+---
+
+**文档版本**：v1.2  
 **状态**：已确认  
 **编制日期**：2026-06-12

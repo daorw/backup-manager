@@ -66,6 +66,27 @@ func (s *Store) ListSymlinks(repoID string) ([]*model.Symlink, error) {
 	return links, rows.Err()
 }
 
+// GetSymlinkByRelativePath retrieves a symlink by repo ID and relative path.
+func (s *Store) GetSymlinkByRelativePath(repoID, relativePath string) (*model.Symlink, error) {
+	query := `SELECT id, repo_id, relative_path, target_path, type, file_size, modified_at, created_at
+	           FROM symlinks WHERE repo_id = ? AND relative_path = ?`
+	row := s.db.QueryRow(query, repoID, relativePath)
+
+	l := &model.Symlink{}
+	var modifiedAt sql.NullTime
+	err := row.Scan(&l.ID, &l.RepoID, &l.RelativePath, &l.TargetPath, &l.Type, &l.FileSize, &modifiedAt, &l.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("symlink not found for repo %s and path %s", repoID, relativePath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get symlink by relative path: %w", err)
+	}
+	if modifiedAt.Valid {
+		l.ModifiedAt = &modifiedAt.Time
+	}
+	return l, nil
+}
+
 // UpdateSymlink updates an existing symlink.
 func (s *Store) UpdateSymlink(l *model.Symlink) error {
 	query := `UPDATE symlinks SET relative_path = ?, target_path = ?, type = ?, file_size = ?, modified_at = ?

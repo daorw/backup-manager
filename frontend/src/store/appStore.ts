@@ -4,6 +4,7 @@ import type {
   BackupResult,
   Symlink,
   GitAuth,
+  BrowseEntry,
   CommitEntry,
   CommitFileChange,
   RollbackRequest,
@@ -28,6 +29,9 @@ interface AppState {
   backupProgress: BackupProgressState | null;
   loading: boolean;
   error: string | null;
+
+  // Directory browsing cache
+  dirEntriesCache: Record<string, BrowseEntry[]>;
 
   // Rollback state
   commitFiles: CommitFileChange[];
@@ -55,6 +59,10 @@ interface AppState {
   setAuth: (repoId: string, auth: Parameters<typeof api.setAuth>[1]) => Promise<void>;
   clearAuth: (repoId: string) => Promise<void>;
 
+  // Directory browsing
+  fetchDirEntries: (repoId: string, linkId: string, subPath?: string) => Promise<BrowseEntry[]>;
+  clearDirEntryCache: (linkId?: string) => void;
+
   // Rollback actions
   fetchCommitFiles: (repoId: string, commitHash: string) => Promise<void>;
   rollbackSourceFiles: (repoId: string, req: RollbackRequest) => Promise<RollbackResult>;
@@ -72,6 +80,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   backupProgress: null,
   loading: false,
   error: null,
+
+  // Directory browsing initial state
+  dirEntriesCache: {},
 
   // Rollback initial state
   commitFiles: [],
@@ -315,6 +326,43 @@ export const useAppStore = create<AppState>((set, get) => ({
       const message = err instanceof Error ? err.message : 'Failed to clear auth config';
       set({ error: message });
       throw err;
+    }
+  },
+
+  // Directory browsing
+  fetchDirEntries: async (repoId: string, linkId: string, subPath?: string) => {
+    set({ error: null });
+    const cacheKey = `${linkId}:${subPath || ''}`;
+    const cached = get().dirEntriesCache[cacheKey];
+    if (cached) {
+      return cached;
+    }
+    try {
+      const entries = await api.fetchDirEntries(repoId, linkId, subPath);
+      set((state) => ({
+        dirEntriesCache: { ...state.dirEntriesCache, [cacheKey]: entries },
+      }));
+      return entries;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch directory entries';
+      set({ error: message });
+      throw err;
+    }
+  },
+
+  clearDirEntryCache: (linkId?: string) => {
+    if (linkId) {
+      set((state) => {
+        const newCache = { ...state.dirEntriesCache };
+        Object.keys(newCache).forEach((key) => {
+          if (key.startsWith(`${linkId}:`)) {
+            delete newCache[key];
+          }
+        });
+        return { dirEntriesCache: newCache };
+      });
+    } else {
+      set({ dirEntriesCache: {} });
     }
   },
 

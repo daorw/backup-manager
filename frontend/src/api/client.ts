@@ -112,6 +112,19 @@ export async function batchImportSymlinks(
   return data;
 }
 
+// Directory symlink browsing API
+export async function fetchDirEntries(
+  repoId: string,
+  linkId: string,
+  subPath?: string
+): Promise<BrowseEntry[]> {
+  const { data } = await api.get<BrowseEntry[]>(
+    `/repos/${repoId}/symlinks/${linkId}/entries`,
+    { params: { sub_path: subPath || '' } }
+  );
+  return data;
+}
+
 // Browse API
 export async function browsePath(path: string): Promise<BrowseEntry[]> {
   const { data } = await api.get<BrowseEntry[]>('/browse', {

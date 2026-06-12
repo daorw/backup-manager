@@ -120,6 +120,42 @@ func TestSafeResolve(t *testing.T) {
 	})
 }
 
+func TestSafeResolve_RootIsSlash(t *testing.T) {
+	t.Run("root slash itself", func(t *testing.T) {
+		resolved, err := SafeResolve("/", "/")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		absRoot, _ := filepath.EvalSymlinks("/")
+		if resolved != "/" && resolved != absRoot {
+			t.Fatalf("expected '/' or '%s', got '%s'", absRoot, resolved)
+		}
+	})
+
+	t.Run("absolute path under root slash", func(t *testing.T) {
+		tmp := t.TempDir()
+		resolved, err := SafeResolve("/", tmp)
+		if err != nil {
+			t.Fatalf("unexpected error for path %q under root '/': %v", tmp, err)
+		}
+		expected, _ := filepath.EvalSymlinks(tmp)
+		if resolved != expected && resolved != tmp {
+			t.Fatalf("expected %s or %s, got %s", tmp, expected, resolved)
+		}
+	})
+
+	t.Run("system tmp under root slash", func(t *testing.T) {
+		resolved, err := SafeResolve("/", "/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error for /tmp under root '/': %v", err)
+		}
+		absTmp, _ := filepath.EvalSymlinks("/tmp")
+		if resolved != "/tmp" && resolved != absTmp {
+			t.Fatalf("expected '/tmp' or '%s', got '%s'", absTmp, resolved)
+		}
+	})
+}
+
 func TestSafeResolveFile(t *testing.T) {
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello"), 0644)

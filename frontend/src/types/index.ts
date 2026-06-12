@@ -80,6 +80,7 @@ export interface BackupResult {
   repo_id: string;
   completed_at: string;
   files_changed: number;
+  files_added: number;
   files_removed: number;
   commit_hash?: string;
   commit_message?: string;

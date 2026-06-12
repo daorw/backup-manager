@@ -130,6 +130,27 @@ func (h *SymlinkHandler) UpdateTarget(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": symlinkToResponse(sym)})
 }
 
+// BrowseDirEntries handles GET /api/v1/repos/:id/symlinks/:linkId/entries
+// Lists contents of a directory-type symlink's data directory.
+// Query params: sub_path (optional, defaults to "" for root)
+func (h *SymlinkHandler) BrowseDirEntries(c *gin.Context) {
+	repoID := c.Param("id")
+	linkID := c.Param("linkId")
+	subPath := c.Query("sub_path")
+
+	entries, err := h.symSvc.ListDirEntries(repoID, linkID, subPath)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	if entries == nil {
+		entries = []service.BrowseEntry{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": entries})
+}
+
 // BatchImport handles POST /api/v1/repos/:id/symlinks/batch
 func (h *SymlinkHandler) BatchImport(c *gin.Context) {
 	repoID := c.Param("id")

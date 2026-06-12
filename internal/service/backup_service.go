@@ -40,9 +40,17 @@ type BackupResult struct {
 	RepoID        string `json:"repo_id"`
 	CompletedAt   string `json:"completed_at"`
 	FilesChanged  int    `json:"files_changed"`
+	FilesAdded    int    `json:"files_added"`
 	FilesRemoved  int    `json:"files_removed"`
 	CommitHash    string `json:"commit_hash,omitempty"`
 	CommitMessage string `json:"commit_message,omitempty"`
+}
+
+// SyncStats tracks per-directory sync statistics.
+type SyncStats struct {
+	FilesAdded   int
+	FilesChanged int
+	FilesRemoved int
 }
 
 // Trigger performs a full backup cycle: incremental detection → sync → git add → commit → push.
@@ -93,7 +101,7 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 	}
 
 	// Step 2: Incremental detection - check mtime and size changes
-	changed, err := s.syncChangedFiles(repo)
+	changed, filesAdded, err := s.syncChangedFiles(repo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync changed files: %w", err)
 	}
@@ -148,6 +156,7 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 		RepoID:        repoID,
 		CompletedAt:   now.Format(time.RFC3339),
 		FilesChanged:  changed,
+		FilesAdded:    filesAdded,
 		FilesRemoved:  removed,
 		CommitHash:    commitHash,
 		CommitMessage: commitMsg,
@@ -212,25 +221,36 @@ func (s *BackupService) Push(repoID string, opts ...git.PushOption) error {
 }
 
 // syncChangedFiles checks each symlink's source and syncs changed files to data/.
-// Returns the number of files synced.
-func (s *BackupService) syncChangedFiles(repo *model.Repo) (int, error) {
+// Returns:
+//   - totalChanges: the total number of file-level changes (added + changed + removed)
+//   - filesAdded: the number of new files added (from directory symlinks only)
+//   - err: any fatal error that occurred
+func (s *BackupService) syncChangedFiles(repo *model.Repo) (totalChanges int, filesAdded int, err error) {
 	symlinks, err := s.store.ListSymlinks(repo.ID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	synced := 0
 	for _, sym := range symlinks {
-		changed, err := s.syncOneFile(repo, sym)
-		if err != nil {
-			return synced, fmt.Errorf("failed to sync %q: %w", sym.RelativePath, err)
-		}
-		if changed {
-			synced++
+		if sym.Type == model.SymlinkTypeDirectory {
+			stats, iterErr := s.syncDirectoryFiles(repo, sym)
+			if iterErr != nil {
+				return totalChanges, filesAdded, fmt.Errorf("failed to sync directory %q: %w", sym.RelativePath, iterErr)
+			}
+			totalChanges += stats.FilesAdded + stats.FilesChanged + stats.FilesRemoved
+			filesAdded += stats.FilesAdded
+		} else {
+			changed, iterErr := s.syncOneFile(repo, sym)
+			if iterErr != nil {
+				return totalChanges, filesAdded, fmt.Errorf("failed to sync %q: %w", sym.RelativePath, iterErr)
+			}
+			if changed {
+				totalChanges++
+			}
 		}
 	}
 
-	return synced, nil
+	return totalChanges, filesAdded, nil
 }
 
 // syncOneFile checks if a file has changed and syncs it to data/.
@@ -271,16 +291,8 @@ func (s *BackupService) syncOneFile(repo *model.Repo, sym *model.Symlink) (bool,
 	}
 
 	// Copy updated source to data/
-	if sym.Type == model.SymlinkTypeDirectory {
-		// Remove old data and re-copy
-		os.RemoveAll(dataPath)
-		if err := util.CopyDir(sym.TargetPath, dataPath); err != nil {
-			return false, fmt.Errorf("failed to copy directory: %w", err)
-		}
-	} else {
-		if err := util.CopyFile(sym.TargetPath, dataPath); err != nil {
-			return false, fmt.Errorf("failed to copy file: %w", err)
-		}
+	if err := util.CopyFile(sym.TargetPath, dataPath); err != nil {
+		return false, fmt.Errorf("failed to copy file: %w", err)
 	}
 
 	// Update stored metadata
@@ -291,6 +303,164 @@ func (s *BackupService) syncOneFile(repo *model.Repo, sym *model.Symlink) (bool,
 	}
 
 	return true, nil
+}
+
+// syncDirectoryFiles performs incremental per-file sync for a directory-type
+// symlink. It walks the source directory tree, compares each file against the
+// corresponding file in data/ by mtime and size, and copies only changed or
+// new files. Files that exist in data/ but not in source are removed.
+// It updates the symlink's aggregated metadata (FileSize = total size of all
+// files, ModifiedAt = latest modification time across all files).
+//
+// Errors for individual files are logged but do not abort the entire sync.
+func (s *BackupService) syncDirectoryFiles(repo *model.Repo, sym *model.Symlink) (*SyncStats, error) {
+	stats := &SyncStats{}
+	dataDir := filepath.Join(repo.Path, "data", sym.RelativePath)
+
+	// Ensure data directory exists
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return stats, fmt.Errorf("failed to create data directory: %w", err)
+	}
+
+	// Walk the source directory and sync files
+	var latestModTime time.Time
+	var totalSize int64
+
+	// Collect all source files (relative paths)
+	type sourceFile struct {
+		relPath  string
+		fi       os.FileInfo
+	}
+	var sourceFiles []sourceFile
+
+	if err := filepath.Walk(sym.TargetPath, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			// Skip files that can't be accessed
+			log.Printf("[backup] warning: cannot access %q: %v", path, err)
+			return nil
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		// Skip hidden files (dot-prefixed) to stay consistent with the
+		// browsing interface which also filters them out.
+		if len(fi.Name()) > 0 && fi.Name()[0] == '.' {
+			return nil
+		}
+		rel, err := filepath.Rel(sym.TargetPath, path)
+		if err != nil {
+			log.Printf("[backup] warning: cannot compute relative path for %q: %v", path, err)
+			return nil
+		}
+		sourceFiles = append(sourceFiles, sourceFile{relPath: rel, fi: fi})
+		totalSize += fi.Size()
+		if fi.ModTime().After(latestModTime) {
+			latestModTime = fi.ModTime()
+		}
+		return nil
+	}); err != nil {
+		return stats, fmt.Errorf("failed to walk source directory: %w", err)
+	}
+
+	// Build set of source files for removal detection
+	sourceFileSet := make(map[string]bool, len(sourceFiles))
+	for _, sf := range sourceFiles {
+		sourceFileSet[sf.relPath] = true
+	}
+
+	// Sync each source file: copy if mtime or size differs
+	for _, sf := range sourceFiles {
+		srcPath := filepath.Join(sym.TargetPath, sf.relPath)
+		dstPath := filepath.Join(dataDir, sf.relPath)
+
+		// Ensure parent directory in data/ exists
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			log.Printf("[backup] warning: failed to create parent dir for %q: %v", sf.relPath, err)
+			continue
+		}
+
+		// Check if destination exists and is up-to-date
+		dstFi, dstErr := os.Stat(dstPath)
+		if dstErr == nil {
+			if dstFi.Size() == sf.fi.Size() && dstFi.ModTime().Equal(sf.fi.ModTime()) {
+				// File is up-to-date, skip
+				continue
+			}
+			stats.FilesChanged++
+		} else if os.IsNotExist(dstErr) {
+			stats.FilesAdded++
+		} else {
+			log.Printf("[backup] warning: cannot stat destination %q: %v", sf.relPath, dstErr)
+			continue
+		}
+
+		// Copy the file
+		if err := util.CopyFile(srcPath, dstPath); err != nil {
+			log.Printf("[backup] warning: failed to copy %q: %v", sf.relPath, err)
+			continue
+		}
+	}
+
+	// Remove files in data/ that no longer exist in source
+	if err := filepath.Walk(dataDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip inaccessible
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dataDir, path)
+		if err != nil {
+			return nil
+		}
+		if !sourceFileSet[rel] {
+			if err := os.Remove(path); err != nil {
+				log.Printf("[backup] warning: failed to remove stale data file %q: %v", rel, err)
+			} else {
+				stats.FilesRemoved++
+				log.Printf("[backup] removed stale data file: %s", rel)
+			}
+		}
+		return nil
+	}); err != nil {
+		log.Printf("[backup] warning: failed to walk data directory for cleanup: %v", err)
+	}
+
+	// Clean up empty directories in data/
+	s.cleanEmptyDataDirs(dataDir)
+
+	// Update aggregated metadata
+	sym.FileSize = totalSize
+	if !latestModTime.IsZero() {
+		sym.ModifiedAt = &latestModTime
+	}
+	if err := s.store.UpdateSymlink(sym); err != nil {
+		return stats, fmt.Errorf("failed to update symlink metadata: %w", err)
+	}
+
+	return stats, nil
+}
+
+// cleanEmptyDataDirs removes empty directories recursively from the given path.
+func (s *BackupService) cleanEmptyDataDirs(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subPath := filepath.Join(dir, entry.Name())
+			s.cleanEmptyDataDirs(subPath)
+		}
+	}
+	// Try to remove if empty (after cleaning children)
+	entries, err = os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	if len(entries) == 0 {
+		os.Remove(dir)
+	}
 }
 
 // getRepoMutex returns the per-repo mutex from the shared manager.

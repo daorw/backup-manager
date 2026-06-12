@@ -12,6 +12,7 @@ import {
   Spin,
 } from 'antd';
 import type { MenuProps } from 'antd';
+import type { DataNode } from 'antd/es/tree';
 import {
   PlusOutlined,
   FileOutlined,
@@ -22,11 +23,18 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
-import type { Symlink, SymlinkTreeNode } from '../../types';
+import type { Symlink, SymlinkTreeNode, BrowseEntry } from '../../types';
 import SymlinkAddModal from './SymlinkAddModal';
 
 interface SymlinkPanelProps {
   repoId: string;
+}
+
+interface ExtendedDataNode extends DataNode {
+  symlink?: Symlink;
+  isSymlinkLeaf?: boolean;
+  linkId?: string;      // For directory symlinks: the symlink ID
+  browseRelPath?: string; // For directory entries: relative path within the symlink
 }
 
 function buildTree(symlinks: Symlink[]): SymlinkTreeNode[] {
@@ -52,9 +60,9 @@ function buildTree(symlinks: Symlink[]): SymlinkTreeNode[] {
         const node: SymlinkTreeNode = {
           key: currentPath,
           title: part,
-          isLeaf: isLast,
+          isLeaf: isLast && sym.type === 'file',
           symlink: isLast ? sym : undefined,
-          children: isLast ? undefined : [],
+          children: isLast && sym.type === 'file' ? undefined : [],
         };
         map.set(currentPath, node);
 
@@ -81,25 +89,34 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
   const createSymlink = useAppStore((s) => s.createSymlink);
   const deleteSymlink = useAppStore((s) => s.deleteSymlink);
   const updateSymlink = useAppStore((s) => s.updateSymlink);
+  const fetchDirEntries = useAppStore((s) => s.fetchDirEntries);
+  const clearDirEntryCache = useAppStore((s) => s.clearDirEntryCache);
 
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<SymlinkTreeNode | null>(null);
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  // Track which directory nodes have been expanded and their loaded children
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [dynamicChildren, setDynamicChildren] = useState<Record<string, ExtendedDataNode[]>>({});
 
   useEffect(() => {
     if (repoId) {
       fetchSymlinks(repoId);
+      clearDirEntryCache();
+      setDynamicChildren({});
+      setExpandedKeys([]);
     }
-  }, [repoId, fetchSymlinks]);
+  }, [repoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const treeData = buildTree(symlinks);
 
   const handleAddSymlink = useCallback(
     async (targetPath: string, relativePath: string) => {
       await createSymlink(repoId, targetPath, relativePath);
+      clearDirEntryCache();
+      setDynamicChildren({});
     },
-    [repoId, createSymlink]
+    [repoId, createSymlink, clearDirEntryCache]
   );
 
   const handleDeleteSymlink = useCallback(
@@ -113,6 +130,8 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
         onOk: async () => {
           try {
             await deleteSymlink(repoId, sym.id);
+            clearDirEntryCache(sym.id);
+            setDynamicChildren({});
             message.success('Symlink deleted');
           } catch (err) {
             if (err instanceof Error) {
@@ -122,7 +141,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
         },
       });
     },
-    [repoId, deleteSymlink]
+    [repoId, deleteSymlink, clearDirEntryCache]
   );
 
   const handleEditSymlink = useCallback(
@@ -165,7 +184,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
     return items.length > 0 ? items : undefined;
   };
 
-  const titleRenderer = (node: SymlinkTreeNode) => {
+  const handleTitleRenderer = (node: SymlinkTreeNode) => {
     if (editingPath === node.key && node.symlink) {
       return (
         <Input
@@ -208,16 +227,131 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
     );
   };
 
-  const convertToAntdTreeData = (nodes: SymlinkTreeNode[]): any[] => {
-    return nodes.map((node) => ({
-      key: node.key,
-      title: titleRenderer(node),
-      isLeaf: node.isLeaf,
-      icon: node.isLeaf ? <FileOutlined /> : <FolderOutlined />,
-      children: node.children
-        ? convertToAntdTreeData(node.children)
-        : undefined,
-    }));
+  // Load directory contents when a directory-type symlink node is expanded
+  const handleLoadData = async (treeNode: ExtendedDataNode): Promise<void> => {
+    const { key, linkId, browseRelPath } = treeNode;
+    if (!linkId) return;
+
+    const cacheKey = `${linkId}:${browseRelPath || ''}`;
+    if (dynamicChildren[cacheKey]) return; // Already loaded
+
+    try {
+      const entries = await fetchDirEntries(repoId, linkId, browseRelPath || '');
+      const children: ExtendedDataNode[] = entries.map((entry: BrowseEntry) => {
+        const nodeKey = `${key}/${entry.name}`;
+        if (entry.type === 'directory') {
+          return {
+            key: nodeKey,
+            title: entry.name,
+            isLeaf: false,
+            icon: <FolderOutlined />,
+            linkId: linkId,
+            browseRelPath: browseRelPath
+              ? `${browseRelPath}/${entry.name}`
+              : entry.name,
+          };
+        }
+        return {
+          key: nodeKey,
+          title: (
+            <Typography.Text>
+              {entry.name}
+              <Typography.Text
+                type="secondary"
+                style={{ fontSize: 11, marginLeft: 8 }}
+              >
+                {entry.size > 0 ? `(${(entry.size / 1024).toFixed(1)} KB)` : ''}
+              </Typography.Text>
+            </Typography.Text>
+          ),
+          isLeaf: true,
+          icon: <FileOutlined />,
+          linkId: linkId,
+          browseRelPath: browseRelPath
+            ? `${browseRelPath}/${entry.name}`
+            : entry.name,
+        };
+      });
+
+      setDynamicChildren((prev) => ({
+        ...prev,
+        [cacheKey]: children,
+      }));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Failed to load directory contents');
+    }
+  };
+
+  // Convert SymlinkTreeNode to Ant Design tree nodes with dynamic loading support
+  const convertToAntdTreeData = (nodes: SymlinkTreeNode[]): ExtendedDataNode[] => {
+    return nodes.map((node) => {
+      const isDirectorySymlink =
+        node.symlink && node.symlink.type === 'directory';
+
+      const antdNode: ExtendedDataNode = {
+        key: node.key,
+        title: handleTitleRenderer(node),
+        isLeaf: isDirectorySymlink ? false : node.isLeaf,
+        icon: node.isLeaf ? (
+          <FileOutlined />
+        ) : isDirectorySymlink ? (
+          <FolderOutlined />
+        ) : (
+          <FolderOutlined />
+        ),
+        symlink: node.symlink,
+        isSymlinkLeaf: node.isLeaf,
+      };
+
+      // For directory symlinks, attach loading info
+      if (isDirectorySymlink && node.symlink) {
+        antdNode.linkId = node.symlink.id;
+        antdNode.browseRelPath = '';
+      }
+
+      // Convert static children
+      if (node.children && node.children.length > 0) {
+        antdNode.children = convertToAntdTreeData(node.children);
+      } else if (!node.isLeaf && isDirectorySymlink) {
+        // Directory symlink: children will be loaded dynamically
+        const cacheKey = `${node.symlink!.id}:`;
+        if (dynamicChildren[cacheKey]) {
+          antdNode.children = dynamicChildren[cacheKey];
+        } else {
+          antdNode.children = [];
+        }
+      } else if (!node.isLeaf) {
+        antdNode.children = [];
+      }
+
+      return antdNode;
+    });
+  };
+
+  // Merge dynamic children into tree data (recursive)
+  const mergeTreeData = (nodes: ExtendedDataNode[]): ExtendedDataNode[] => {
+    return nodes.map((node) => {
+      let processedChildren = node.children;
+      if (!node.isLeaf && node.linkId) {
+        const cacheKey = `${node.linkId}:${node.browseRelPath || ''}`;
+        if (dynamicChildren[cacheKey]) {
+          processedChildren = dynamicChildren[cacheKey];
+        }
+      }
+      if (processedChildren && processedChildren.length > 0) {
+        return { ...node, children: mergeTreeData(processedChildren) };
+      }
+      return { ...node, children: processedChildren };
+    });
+  };
+
+  const finalTreeData = mergeTreeData(convertToAntdTreeData(treeData));
+
+  const handleExpand = async (keys: React.Key[], info: { expanded: boolean; node: ExtendedDataNode }) => {
+    setExpandedKeys(keys);
+    if (info.expanded && info.node.linkId) {
+      await handleLoadData(info.node);
+    }
   };
 
   return (
@@ -229,7 +363,12 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
         <Space>
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => fetchSymlinks(repoId)}
+            onClick={() => {
+              fetchSymlinks(repoId);
+              clearDirEntryCache();
+              setDynamicChildren({});
+              setExpandedKeys([]);
+            }}
           >
             Refresh
           </Button>
@@ -274,15 +413,19 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
             }}
           >
             <Tree
-              treeData={convertToAntdTreeData(treeData)}
-              defaultExpandAll
+              treeData={finalTreeData}
+              expandedKeys={expandedKeys}
+              defaultExpandAll={false}
               showIcon
               onSelect={(keys, info) => {
-                const node = info.node as any;
-                if (node?.symlink) {
-                  setSelectedNode(node.symlink);
+                const node = info.node as ExtendedDataNode;
+                // For directory entries, we just report the selection
+                if (node?.linkId && node?.isLeaf) {
+                  message.info(`Selected: ${node.key}`);
                 }
               }}
+              onExpand={handleExpand}
+              loadData={undefined} // We handle loading via onExpand
             />
           </div>
         )}

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -298,23 +299,9 @@ func (s *SymlinkService) SyncDeletedSource(repoID string) (int, error) {
 }
 
 // resolveTargetPath safely resolves a user-provided target path by
-// standardizing it and preventing path traversal via ".." components.
+// standardizing it and preventing path traversal via SafeResolve.
 func resolveTargetPath(targetPath string) (string, error) {
-	cleaned := filepath.Clean(targetPath)
-	absPath, err := filepath.Abs(cleaned)
-	if err != nil {
-		return "", fmt.Errorf("invalid target path: %w", err)
-	}
-	absPath = filepath.Clean(absPath)
-
-	// Verify no ".." component remains after resolution
-	for _, part := range strings.Split(absPath, string(filepath.Separator)) {
-		if part == ".." {
-			return "", fmt.Errorf("path traversal detected in target path %q", targetPath)
-		}
-	}
-
-	return absPath, nil
+	return util.SafeResolve("/", targetPath)
 }
 
 // cleanEmptyParentDirs removes empty parent directories starting from the
@@ -335,6 +322,112 @@ func (s *SymlinkService) cleanEmptyParentDirs(base, relativePath string) {
 		os.Remove(dir)
 		dir = filepath.Dir(dir)
 	}
+}
+
+const maxDirDepth = 50
+
+// ListDirEntries lists the contents of a directory within a directory-type
+// symlink's data directory. It returns sorted entries (directories first, then
+// files, alphabetically within each group), with hidden files (dot-prefixed)
+// excluded.
+//
+// subPath is an optional relative path within the symlink's data directory.
+// An empty string lists the root of the symlink's data directory.
+func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]BrowseEntry, error) {
+	repo, err := s.store.GetRepo(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	sym, err := s.store.GetSymlink(linkID)
+	if err != nil {
+		return nil, err
+	}
+
+	if sym.RepoID != repoID {
+		return nil, fmt.Errorf("symlink does not belong to repo")
+	}
+
+	if sym.Type != model.SymlinkTypeDirectory {
+		return nil, fmt.Errorf("symlink is not a directory")
+	}
+
+	// Build the base data directory for this symlink
+	symDataDir := filepath.Join(repo.Path, "data", sym.RelativePath)
+
+	// Resolve the target directory: symDataDir + subPath
+	targetDir := symDataDir
+	if subPath != "" {
+		resolved, err := util.SafeResolve(symDataDir, subPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid subpath: %w", err)
+		}
+		targetDir = resolved
+	}
+
+	info, err := os.Stat(targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory")
+	}
+
+	// Depth check
+	rel, err := filepath.Rel(symDataDir, targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("path resolution error: %w", err)
+	}
+	if rel != "." {
+		depth := len(strings.Split(rel, string(filepath.Separator)))
+		if depth > maxDirDepth {
+			return nil, fmt.Errorf("directory depth exceeds maximum (%d)", maxDirDepth)
+		}
+	}
+
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	var result []BrowseEntry
+	for _, entry := range entries {
+		// Skip hidden files/directories
+		if len(entry.Name()) > 0 && entry.Name()[0] == '.' {
+			continue
+		}
+
+		e := BrowseEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(targetDir, entry.Name()),
+		}
+
+		if entry.IsDir() {
+			e.Type = "directory"
+		} else {
+			e.Type = "file"
+			fi, err := entry.Info()
+			if err == nil {
+				e.Size = fi.Size()
+				e.ModifiedAt = fi.ModTime().Format("2006-01-02T15:04:05Z07:00")
+			}
+		}
+
+		result = append(result, e)
+	}
+
+	// Sort: directories first, then by name
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Type != result[j].Type {
+			if result[i].Type == "directory" {
+				return true
+			}
+			return false
+		}
+		return result[i].Name < result[j].Name
+	})
+
+	return result, nil
 }
 
 

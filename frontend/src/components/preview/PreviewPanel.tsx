@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Tree, Spin, Empty, Typography, Space, Button } from 'antd';
+import { Tree, Spin, Empty, Typography, Space, Button, message } from 'antd';
 import {
   FileOutlined,
   FolderOutlined,
@@ -9,7 +9,7 @@ import {
 import type { DataNode } from 'antd/es/tree';
 import { useAppStore } from '../../store/appStore';
 import { previewFile } from '../../api/client';
-import type { PreviewResult, Symlink } from '../../types';
+import type { PreviewResult, Symlink, BrowseEntry } from '../../types';
 import TextPreview from './TextPreview';
 import MarkdownPreview from './MarkdownPreview';
 import BinaryInfo from './BinaryInfo';
@@ -20,13 +20,15 @@ interface PreviewPanelProps {
 
 interface PreviewTreeNode extends DataNode {
   symlink?: Symlink;
+  linkId?: string;       // For directory entries: the parent symlink ID
+  browseRelPath?: string; // For directory entries: relative path from symlink root
 }
 
 function buildPreviewTree(symlinks: Symlink[]): PreviewTreeNode[] {
   const root: PreviewTreeNode[] = [];
   const map = new Map<string, PreviewTreeNode>();
+  // Include all symlinks (both file and directory)
   const sorted = [...symlinks]
-    .filter((s) => s.type === 'file')
     .sort((a, b) => a.relative_path.localeCompare(b.relative_path));
 
   for (const sym of sorted) {
@@ -37,13 +39,17 @@ function buildPreviewTree(symlinks: Symlink[]): PreviewTreeNode[] {
       currentPath = currentPath ? `${currentPath}/${part}` : part;
       const isLast = i === parts.length - 1;
       if (!map.has(currentPath)) {
+        const isDirectorySymlink = isLast && sym.type === 'directory';
         const node: PreviewTreeNode = {
           key: currentPath,
           title: part,
-          isLeaf: isLast,
+          isLeaf: isDirectorySymlink ? false : isLast,
           symlink: isLast ? sym : undefined,
-          icon: isLast ? <FileTextOutlined /> : <FolderOutlined />,
-          children: isLast ? undefined : [],
+          icon: isLast ? (isDirectorySymlink ? <FolderOutlined /> : <FileTextOutlined />) : <FolderOutlined />,
+          children: isLast && !isDirectorySymlink ? undefined : [],
+          // For directory symlinks, attach loading info
+          linkId: isDirectorySymlink ? sym.id : undefined,
+          browseRelPath: isDirectorySymlink ? '' : undefined,
         };
         map.set(currentPath, node);
         if (i === 0) {
@@ -81,19 +87,26 @@ function isTextExtension(filename: string): boolean {
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
   const symlinks = useAppStore((s) => s.symlinks);
   const fetchSymlinks = useAppStore((s) => s.fetchSymlinks);
+  const fetchDirEntries = useAppStore((s) => s.fetchDirEntries);
 
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  // Dynamic children for expanded directory symlinks
+  const [dynamicChildren, setDynamicChildren] = useState<Record<string, PreviewTreeNode[]>>({});
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+
   useEffect(() => {
     if (repoId) {
       fetchSymlinks(repoId);
+      setDynamicChildren({});
+      setExpandedKeys([]);
     }
   }, [repoId, fetchSymlinks]);
 
-  const treeData = buildPreviewTree(symlinks);
+  const baseTreeData = buildPreviewTree(symlinks);
 
   const handleFileSelect = useCallback(
     async (path: string) => {
@@ -115,9 +128,81 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
     [repoId]
   );
 
+  // Load directory contents when expanded
+  const handleLoadData = async (treeNode: PreviewTreeNode): Promise<void> => {
+    const { key, linkId, browseRelPath } = treeNode;
+    if (!linkId) return;
+
+    const cacheKey = `${linkId}:${browseRelPath || ''}`;
+    if (dynamicChildren[cacheKey]) return;
+
+    try {
+      const entries = await fetchDirEntries(repoId, linkId, browseRelPath || '');
+      const children: PreviewTreeNode[] = entries.map((entry: BrowseEntry) => {
+        const nodeKey = `${key}/${entry.name}`;
+        if (entry.type === 'directory') {
+          return {
+            key: nodeKey,
+            title: entry.name,
+            isLeaf: false,
+            icon: <FolderOutlined />,
+            linkId: linkId,
+            browseRelPath: browseRelPath
+              ? `${browseRelPath}/${entry.name}`
+              : entry.name,
+            children: [],
+          };
+        }
+        return {
+          key: nodeKey,
+          title: entry.name,
+          isLeaf: true,
+          icon: <FileTextOutlined />,
+          linkId: linkId,
+          browseRelPath: browseRelPath
+            ? `${browseRelPath}/${entry.name}`
+            : entry.name,
+        };
+      });
+
+      setDynamicChildren((prev) => ({
+        ...prev,
+        [cacheKey]: children,
+      }));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Failed to load directory contents');
+    }
+  };
+
+  // Merge dynamic children into tree data (recursive)
+  const mergeTreeData = (nodes: PreviewTreeNode[]): PreviewTreeNode[] => {
+    return nodes.map((node) => {
+      let processedChildren = node.children;
+      if (!node.isLeaf && node.linkId) {
+        const cacheKey = `${node.linkId}:${node.browseRelPath || ''}`;
+        if (dynamicChildren[cacheKey]) {
+          processedChildren = dynamicChildren[cacheKey];
+        }
+      }
+      if (processedChildren && processedChildren.length > 0) {
+        return { ...node, children: mergeTreeData(processedChildren) };
+      }
+      return { ...node, children: processedChildren || [] };
+    });
+  };
+
+  const treeData = mergeTreeData(baseTreeData);
+
   const selectedSymlink = symlinks.find(
     (s) => s.relative_path === selectedFile
   );
+
+  const handleExpand = async (keys: React.Key[], info: { expanded: boolean; node: PreviewTreeNode }) => {
+    setExpandedKeys(keys);
+    if (info.expanded && info.node.linkId) {
+      await handleLoadData(info.node);
+    }
+  };
 
   const renderPreview = () => {
     if (previewLoading) {
@@ -200,7 +285,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
           <Button
             size="small"
             icon={<ReloadOutlined />}
-            onClick={() => fetchSymlinks(repoId)}
+            onClick={() => {
+              fetchSymlinks(repoId);
+              setDynamicChildren({});
+              setExpandedKeys([]);
+            }}
           />
         </Space>
         {treeData.length === 0 ? (
@@ -211,18 +300,32 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
         ) : (
           <Tree
             treeData={treeData}
-            defaultExpandAll
+            expandedKeys={expandedKeys}
+            defaultExpandAll={false}
             showIcon
             selectedKeys={selectedFile ? [selectedFile] : []}
             onSelect={(keys) => {
               if (keys.length > 0) {
                 const key = keys[0] as string;
-                const sym = symlinks.find((s) => s.relative_path === key);
-                if (sym && sym.type === 'file') {
+                // Find the node to check if it's a file (leaf)
+                // Traverse treeData to find the node
+                const findNode = (nodes: PreviewTreeNode[]): PreviewTreeNode | null => {
+                  for (const n of nodes) {
+                    if (n.key === key) return n;
+                    if (n.children) {
+                      const found = findNode(n.children as PreviewTreeNode[]);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                };
+                const node = findNode(treeData);
+                if (node && node.isLeaf) {
                   handleFileSelect(key);
                 }
               }
             }}
+            onExpand={handleExpand}
           />
         )}
       </div>
@@ -242,6 +345,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
               </Typography.Text>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 → {selectedSymlink.target_path}
+              </Typography.Text>
+            </Space>
+          )}
+          {selectedFile && !selectedSymlink && (
+            <Space style={{ marginBottom: 12 }}>
+              <Typography.Text strong>
+                {selectedFile}
+              </Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                (inside directory symlink)
               </Typography.Text>
             </Space>
           )}

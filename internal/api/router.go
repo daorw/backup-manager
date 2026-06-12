@@ -49,6 +49,7 @@ func SetupRouter(
 		v1.DELETE("/repos/:id/symlinks/:linkId", symlinkHandler.Delete)
 		v1.PUT("/repos/:id/symlinks/:linkId", symlinkHandler.UpdateTarget)
 		v1.POST("/repos/:id/symlinks/batch", symlinkHandler.BatchImport)
+		v1.GET("/repos/:id/symlinks/:linkId/entries", symlinkHandler.BrowseDirEntries)
 
 		// File browsing
 		v1.GET("/browse", browseHandler.Browse)

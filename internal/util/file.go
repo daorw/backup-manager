@@ -41,9 +41,12 @@ func CopyFile(src, dst string) error {
 		return fmt.Errorf("failed to copy data: %w", err)
 	}
 
-	// Preserve file permissions
+	// Preserve file permissions and modification time
 	if err := os.Chmod(dst, srcInfo.Mode()); err != nil {
 		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+	if err := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
+		return fmt.Errorf("failed to preserve timestamps: %w", err)
 	}
 
 	return nil

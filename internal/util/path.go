@@ -60,8 +60,14 @@ func SafeResolve(allowedRoot, userPath string) (string, error) {
 		realRoot = absRoot
 	}
 
-	// Check that realPath is within the allowed root
-	if realPath != realRoot && !strings.HasPrefix(realPath, realRoot+string(filepath.Separator)) {
+	// Check that realPath is within the allowed root.
+	// When realRoot is "/", appending a separator would produce "//"
+	// which would break the prefix check. Handle that edge case.
+	rootPrefix := realRoot
+	if realRoot != "/" {
+		rootPrefix += string(filepath.Separator)
+	}
+	if realPath != realRoot && !strings.HasPrefix(realPath, rootPrefix) {
 		return "", fmt.Errorf("path %q is outside allowed root %q", userPath, allowedRoot)
 	}
 

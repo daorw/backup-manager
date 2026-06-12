@@ -165,6 +165,11 @@ func (s *BackupService) History(repoID string, limit, offset int) ([]git.CommitE
 		return nil, err
 	}
 
+	// Verify that the repo path still exists on disk
+	if _, err := os.Stat(repo.Path); os.IsNotExist(err) {
+		return nil, fmt.Errorf("repository directory %q no longer exists on disk", repo.Path)
+	}
+
 	return s.gitEngine.Log(repo.Path, limit, offset)
 }
 

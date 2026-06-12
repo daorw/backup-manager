@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,16 +42,14 @@ func (s *SymlinkService) Create(repoID string, req *CreateSymlinkRequest) (*mode
 		return nil, err
 	}
 
-	// Safely resolve the target path using the source's parent as root
-	// to prevent path traversal
-	sourceInfo, err := os.Stat(req.TargetPath)
+	targetAbs, err := resolveTargetPath(req.TargetPath)
 	if err != nil {
-		return nil, fmt.Errorf("cannot access target path: %w", err)
+		return nil, err
 	}
 
-	targetAbs, err := filepath.Abs(req.TargetPath)
+	sourceInfo, err := os.Stat(targetAbs)
 	if err != nil {
-		return nil, fmt.Errorf("invalid target path: %w", err)
+		return nil, fmt.Errorf("cannot access target path: %w", err)
 	}
 
 	symType := model.SymlinkTypeFile
@@ -183,12 +182,12 @@ func (s *SymlinkService) UpdateTarget(id, newTarget string) (*model.Symlink, err
 		return nil, err
 	}
 
-	newTargetAbs, err := filepath.Abs(newTarget)
+	targetAbs, err := resolveTargetPath(newTarget)
 	if err != nil {
-		return nil, fmt.Errorf("invalid new target path: %w", err)
+		return nil, err
 	}
 
-	sourceInfo, err := os.Stat(newTargetAbs)
+	sourceInfo, err := os.Stat(targetAbs)
 	if err != nil {
 		return nil, fmt.Errorf("cannot access new target: %w", err)
 	}
@@ -206,18 +205,18 @@ func (s *SymlinkService) UpdateTarget(id, newTarget string) (*model.Symlink, err
 	os.RemoveAll(dataPath)
 
 	// Create new symlink
-	if err := os.Symlink(newTargetAbs, linkPath); err != nil {
+	if err := os.Symlink(targetAbs, linkPath); err != nil {
 		return nil, fmt.Errorf("failed to create new symlink: %w", err)
 	}
 
 	// Copy new source to data/
 	if symType == model.SymlinkTypeDirectory {
-		if err := util.CopyDir(newTargetAbs, dataPath); err != nil {
+		if err := util.CopyDir(targetAbs, dataPath); err != nil {
 			os.Remove(linkPath)
 			return nil, fmt.Errorf("failed to copy directory: %w", err)
 		}
 	} else {
-		if err := util.CopyFile(newTargetAbs, dataPath); err != nil {
+		if err := util.CopyFile(targetAbs, dataPath); err != nil {
 			os.Remove(linkPath)
 			return nil, fmt.Errorf("failed to copy file: %w", err)
 		}
@@ -229,7 +228,7 @@ func (s *SymlinkService) UpdateTarget(id, newTarget string) (*model.Symlink, err
 	}
 	modifiedAt := sourceInfo.ModTime()
 
-	sym.TargetPath = newTargetAbs
+	sym.TargetPath = targetAbs
 	sym.Type = symType
 	sym.FileSize = fileSize
 	sym.ModifiedAt = &modifiedAt
@@ -241,15 +240,23 @@ func (s *SymlinkService) UpdateTarget(id, newTarget string) (*model.Symlink, err
 	return sym, nil
 }
 
-// BatchImport creates multiple symlinks at once.
+// BatchImport creates multiple symlinks at once with rollback on failure.
 func (s *SymlinkService) BatchImport(repoID string, targets []string) ([]*model.Symlink, error) {
 	var results []*model.Symlink
+	var createdIDs []string
 	for _, target := range targets {
 		sym, err := s.Create(repoID, &CreateSymlinkRequest{TargetPath: target})
 		if err != nil {
-			return results, fmt.Errorf("failed to import %q: %w", target, err)
+			// Rollback: delete all previously created symlinks
+			for _, id := range createdIDs {
+				if rerr := s.Delete(id); rerr != nil {
+					log.Printf("[batch-import] failed to rollback symlink %s: %v", id, rerr)
+				}
+			}
+			return nil, fmt.Errorf("failed to import %q: %w", target, err)
 		}
 		results = append(results, sym)
+		createdIDs = append(createdIDs, sym.ID)
 	}
 	return results, nil
 }
@@ -288,6 +295,26 @@ func (s *SymlinkService) SyncDeletedSource(repoID string) (int, error) {
 	}
 
 	return removed, nil
+}
+
+// resolveTargetPath safely resolves a user-provided target path by
+// standardizing it and preventing path traversal via ".." components.
+func resolveTargetPath(targetPath string) (string, error) {
+	cleaned := filepath.Clean(targetPath)
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("invalid target path: %w", err)
+	}
+	absPath = filepath.Clean(absPath)
+
+	// Verify no ".." component remains after resolution
+	for _, part := range strings.Split(absPath, string(filepath.Separator)) {
+		if part == ".." {
+			return "", fmt.Errorf("path traversal detected in target path %q", targetPath)
+		}
+	}
+
+	return absPath, nil
 }
 
 // cleanEmptyParentDirs removes empty parent directories starting from the

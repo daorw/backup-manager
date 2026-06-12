@@ -182,6 +182,8 @@ func (s *RepoService) Delete(id string) error {
 
 // UpdateConfig updates a repo's configuration, syncs .env file,
 // applies git config changes, and updates the scheduler.
+// Peripheral operations (file writes, git commands, scheduler) are performed
+// before updating the database to avoid state inconsistency on failure.
 func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 	repo, err := s.store.GetRepo(id)
 	if err != nil {
@@ -224,15 +226,12 @@ func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 		return nil
 	}
 
-	if err := s.store.UpdateRepoConfig(config); err != nil {
-		return fmt.Errorf("failed to update config: %w", err)
-	}
-
+	// Step 1: Write .env file (filesystem operation)
 	if err := s.writeEnvFile(repo.Path, config); err != nil {
 		return fmt.Errorf("failed to write .env file: %w", err)
 	}
 
-	// Apply git config changes
+	// Step 2: Apply git config changes
 	if req.GitUserName != nil && *req.GitUserName != "" {
 		if err := s.gitEngine.ConfigSet(repo.Path, "user.name", *req.GitUserName); err != nil {
 			return fmt.Errorf("failed to set git user.name: %w", err)
@@ -244,14 +243,14 @@ func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 		}
 	}
 
-	// Apply remote URL
+	// Step 3: Apply remote URL
 	if req.RemoteURL != nil && *req.RemoteURL != "" {
 		if err := s.gitEngine.RemoteSetURL(repo.Path, *req.RemoteURL); err != nil {
 			return fmt.Errorf("failed to set remote URL: %w", err)
 		}
 	}
 
-	// Update scheduler for auto-backup
+	// Step 4: Update scheduler for auto-backup
 	if req.AutoBackup != nil || req.AutoBackupInterval != nil {
 		s.scheduler.Unregister(id)
 		if config.AutoBackup && config.AutoBackupInterval != "" {
@@ -259,6 +258,11 @@ func (s *RepoService) UpdateConfig(id string, req *UpdateConfigRequest) error {
 				return fmt.Errorf("failed to register backup schedule: %w", err)
 			}
 		}
+	}
+
+	// Step 5: Update database last — all peripheral operations succeeded
+	if err := s.store.UpdateRepoConfig(config); err != nil {
+		return fmt.Errorf("failed to update config: %w", err)
 	}
 
 	return nil

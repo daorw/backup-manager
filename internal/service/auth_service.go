@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"backup-manager/internal/model"
 	"backup-manager/internal/store"
@@ -12,13 +14,19 @@ import (
 
 // AuthService handles Git authentication business logic.
 type AuthService struct {
-	store      *store.Store
-	keyManager *util.KeyManager
+	store          *store.Store
+	keyManager     *util.KeyManager
+	askpassScripts map[string]string // repoID -> askpass script path
+	mu             sync.Mutex        // protect askpassScripts
 }
 
 // NewAuthService creates a new AuthService.
 func NewAuthService(s *store.Store, km *util.KeyManager) *AuthService {
-	return &AuthService{store: s, keyManager: km}
+	return &AuthService{
+		store:          s,
+		keyManager:     km,
+		askpassScripts: make(map[string]string),
+	}
 }
 
 // SetAuthRequest is the input for setting Git authentication.
@@ -124,6 +132,54 @@ func (s *AuthService) Set(repoID string, req *SetAuthRequest) error {
 	return s.store.UpdateRepoAuth(auth)
 }
 
+// writeAskpassScript creates a GIT_ASKPASS script for the given repo.
+// The script is a shell script that git invokes to obtain username and password.
+func (s *AuthService) writeAskpassScript(repoID, username, password string) (string, error) {
+	scriptDir := filepath.Join(os.TempDir(), "backup-manager-askpass")
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create askpass script directory: %w", err)
+	}
+
+	scriptPath := filepath.Join(scriptDir, fmt.Sprintf("%s-askpass.sh", repoID))
+
+	content := fmt.Sprintf(`#!/bin/sh
+case "$1" in
+*Username*) echo '%s' ;;
+*Password*) echo '%s' ;;
+esac
+`, escapeSingleQuote(username), escapeSingleQuote(password))
+
+	if err := os.WriteFile(scriptPath, []byte(content), 0700); err != nil {
+		return "", fmt.Errorf("failed to write askpass script: %w", err)
+	}
+
+	// Track the script for cleanup; remove any previous script for this repo first
+	s.mu.Lock()
+	if oldPath, ok := s.askpassScripts[repoID]; ok {
+		os.Remove(oldPath)
+	}
+	s.askpassScripts[repoID] = scriptPath
+	s.mu.Unlock()
+
+	return scriptPath, nil
+}
+
+// escapeSingleQuote escapes a string for safe use inside single quotes in a shell script.
+func escapeSingleQuote(s string) string {
+	return strings.ReplaceAll(s, "'", "'\\''")
+}
+
+// CleanupAskpassScripts removes the askpass script for the given repo.
+func (s *AuthService) CleanupAskpassScripts(repoID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if path, ok := s.askpassScripts[repoID]; ok {
+		os.Remove(path)
+		delete(s.askpassScripts, repoID)
+	}
+}
+
 // Clear removes all authentication config for a repo.
 func (s *AuthService) Clear(repoID string) error {
 	// Clean up SSH key file if it exists
@@ -132,6 +188,9 @@ func (s *AuthService) Clear(repoID string) error {
 			os.Remove(auth.SSHPrivateKeyPath)
 		}
 	}
+
+	// Clean up askpass script
+	s.CleanupAskpassScripts(repoID)
 
 	return s.store.DeleteRepoAuth(repoID)
 }
@@ -154,17 +213,18 @@ func (s *AuthService) BuildEnvVars(repoID string) []string {
 					os.Chmod(auth.SSHPrivateKeyPath, 0600)
 				}
 			}
-			sshCmd := fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", auth.SSHPrivateKeyPath)
+			sshCmd := fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=accept-new", auth.SSHPrivateKeyPath)
 			envVars = append(envVars, sshCmd)
 		}
 
 	case model.GitAuthPassword:
 		if len(auth.PasswordEncrypted) > 0 && auth.Username != "" {
-			// Decrypt password
 			password, err := s.keyManager.Decrypt(auth.PasswordEncrypted)
 			if err == nil {
-				envVars = append(envVars, fmt.Sprintf("GIT_USERNAME=%s", auth.Username))
-				envVars = append(envVars, fmt.Sprintf("GIT_PASSWORD=%s", string(password)))
+				scriptPath, err := s.writeAskpassScript(repoID, auth.Username, string(password))
+				if err == nil {
+					envVars = append(envVars, fmt.Sprintf("GIT_ASKPASS=%s", scriptPath))
+				}
 			}
 		}
 	}

@@ -206,7 +206,7 @@ func saveConfig(appDir string, config AppConfig) {
 	}
 
 	configPath := filepath.Join(appDir, "config.json")
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		log.Printf("warning: failed to write config: %v", err)
 	}
 }

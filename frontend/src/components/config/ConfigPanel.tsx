@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Form,
   Input,
@@ -32,6 +33,7 @@ interface ConfigPanelProps {
 }
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
+  const navigate = useNavigate();
   const currentRepo = useAppStore((s) => s.currentRepo);
   const currentAuth = useAppStore((s) => s.currentAuth);
   const loading = useAppStore((s) => s.loading);
@@ -144,7 +146,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
     try {
       await deleteRepo(repoId);
       message.success('Repository deleted');
-      window.location.href = '/';
+      navigate('/');
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -153,7 +155,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
   };
 
   const handleNavigateHome = () => {
-    window.location.href = '/';
+    navigate('/');
   };
 
   if (!currentRepo) {

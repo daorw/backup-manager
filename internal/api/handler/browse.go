@@ -27,7 +27,7 @@ func (h *BrowseHandler) Browse(c *gin.Context) {
 
 	entries, err := h.browserSvc.Browse(path)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

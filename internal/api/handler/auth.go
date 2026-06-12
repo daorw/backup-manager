@@ -24,7 +24,7 @@ func (h *AuthHandler) Get(c *gin.Context) {
 
 	auth, err := h.authSvc.Get(repoID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -42,7 +42,7 @@ func (h *AuthHandler) Set(c *gin.Context) {
 	}
 
 	if err := h.authSvc.Set(repoID, &req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *AuthHandler) Clear(c *gin.Context) {
 	repoID := c.Param("id")
 
 	if err := h.authSvc.Clear(repoID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

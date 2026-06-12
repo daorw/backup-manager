@@ -153,7 +153,7 @@ func (e *GitEngine) Push(repoPath, remote, branch string, envVars []string) erro
 	args := []string{"push", remote, branch}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
-	cmd.Env = append(cmd.Env, envVars...)
+	cmd.Env = append(os.Environ(), envVars...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

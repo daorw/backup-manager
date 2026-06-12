@@ -59,7 +59,7 @@ func (h *SymlinkHandler) Create(c *gin.Context) {
 
 	sym, err := h.symSvc.Create(repoID, &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *SymlinkHandler) List(c *gin.Context) {
 
 	syms, err := h.symSvc.List(repoID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *SymlinkHandler) Get(c *gin.Context) {
 
 	sym, err := h.symSvc.Get(linkID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *SymlinkHandler) Delete(c *gin.Context) {
 	linkID := c.Param("linkId")
 
 	if err := h.symSvc.Delete(linkID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *SymlinkHandler) UpdateTarget(c *gin.Context) {
 
 	sym, err := h.symSvc.UpdateTarget(linkID, req.TargetPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *SymlinkHandler) BatchImport(c *gin.Context) {
 
 	syms, err := h.symSvc.BatchImport(repoID, req.Targets)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

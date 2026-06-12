@@ -25,7 +25,7 @@ func (h *BackupHandler) Trigger(c *gin.Context) {
 
 	result, err := h.backupSvc.Trigger(repoID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -52,7 +52,7 @@ func (h *BackupHandler) History(c *gin.Context) {
 
 	entries, err := h.backupSvc.History(repoID, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

@@ -31,7 +31,7 @@ func (h *RollbackHandler) ListFiles(c *gin.Context) {
 
 	files, err := h.rollbackSvc.ListCommitFiles(repoID, hash)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -45,7 +45,7 @@ func (h *RollbackHandler) Rollback(c *gin.Context) {
 
 	var req service.RollbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -56,7 +56,7 @@ func (h *RollbackHandler) Rollback(c *gin.Context) {
 
 	result, err := h.rollbackSvc.Rollback(repoID, &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

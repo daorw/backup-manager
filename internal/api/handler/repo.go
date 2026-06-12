@@ -45,7 +45,7 @@ func (h *RepoHandler) Create(c *gin.Context) {
 
 	repo, err := h.repoSvc.Create(&req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -56,7 +56,7 @@ func (h *RepoHandler) Create(c *gin.Context) {
 func (h *RepoHandler) List(c *gin.Context) {
 	repos, configs, err := h.repoSvc.List()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *RepoHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	repo, config, err := h.repoSvc.Get(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -121,7 +121,7 @@ func (h *RepoHandler) Get(c *gin.Context) {
 func (h *RepoHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.repoSvc.Delete(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -139,7 +139,7 @@ func (h *RepoHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	if err := h.repoSvc.UpdateConfig(id, &req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

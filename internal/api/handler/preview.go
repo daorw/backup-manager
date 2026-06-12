@@ -62,7 +62,7 @@ func (h *PreviewHandler) Preview(c *gin.Context) {
 
 	repo, _, err := h.repoSvc.Get(repoID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "repo not found"})
+		respondError(c, err)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *PreviewHandler) Preview(c *gin.Context) {
 	if isText {
 		content, truncated, err := readTextFile(absFilePath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file: " + err.Error()})
+			respondError(c, fmt.Errorf("failed to read file: %w", err))
 			return
 		}
 		resp.Content = content

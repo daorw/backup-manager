@@ -28,6 +28,7 @@ type repoResponse struct {
 	LastBackupAt       string `json:"last_backup_at,omitempty"`
 	Status             string `json:"status"`
 	GitInitialized     bool   `json:"git_initialized"`
+	HasRemote          bool   `json:"has_remote"`
 	RemoteURL          string `json:"remote_url,omitempty"`
 	Branch             string `json:"branch,omitempty"`
 	AutoBackup         bool   `json:"auto_backup"`
@@ -83,6 +84,7 @@ func (h *RepoHandler) List(c *gin.Context) {
 			item.AutoBackupInterval = configs[i].AutoBackupInterval
 			item.GitUserName = configs[i].GitUserName
 			item.GitUserEmail = configs[i].GitUserEmail
+			item.HasRemote = configs[i].RemoteURL != ""
 		}
 		items = append(items, item)
 	}
@@ -100,6 +102,7 @@ func (h *RepoHandler) Get(c *gin.Context) {
 	}
 
 	gitInit, _ := h.repoSvc.IsGitInitialized(repo.ID)
+	gitRemote, _ := h.repoSvc.HasGitRemote(repo.ID)
 	detail := repoResponse{
 		ID:                 repo.ID,
 		Name:               repo.Name,
@@ -108,6 +111,7 @@ func (h *RepoHandler) Get(c *gin.Context) {
 		UpdatedAt:          repo.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		Status:             string(repo.Status),
 		GitInitialized:     gitInit,
+		HasRemote:          config.RemoteURL != "" || gitRemote,
 		RemoteURL:          config.RemoteURL,
 		Branch:             config.Branch,
 		AutoBackup:         config.AutoBackup,

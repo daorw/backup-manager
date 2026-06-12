@@ -170,6 +170,10 @@ func (s *BackupService) History(repoID string, limit, offset int) ([]git.CommitE
 }
 
 // Push pushes committed changes to the remote repository.
+// It first checks the config's RemoteURL, then falls back to the git repo's
+// existing remote origin. Auth env vars are only injected if configured;
+// otherwise, the system's git credentials (SSH agent, credential helper, etc.)
+// are used automatically.
 func (s *BackupService) Push(repoID string) error {
 	repo, err := s.store.GetRepo(repoID)
 	if err != nil {
@@ -178,15 +182,25 @@ func (s *BackupService) Push(repoID string) error {
 
 	config, err := s.store.GetRepoConfig(repoID)
 	if err != nil {
-		return fmt.Errorf("failed to get repo config: %w", err)
+		config = &model.RepoConfig{RepoID: repoID, Branch: "main"}
 	}
 
-	if config.RemoteURL == "" {
-		return fmt.Errorf("no remote URL configured")
+	// Prefer config RemoteURL; fall back to git repo's existing remote origin
+	remoteURL := config.RemoteURL
+	if remoteURL == "" {
+		remoteURL, err = s.gitEngine.GetRemoteURL(repo.Path, "origin")
+		if err != nil {
+			return fmt.Errorf("no remote URL configured. Set it in Config tab or via 'git remote add origin <url>'")
+		}
+	}
+
+	branch := config.Branch
+	if branch == "" {
+		branch = "main"
 	}
 
 	envVars := s.authSvc.BuildEnvVars(repoID)
-	if err := s.gitEngine.Push(repo.Path, "origin", config.Branch, envVars); err != nil {
+	if err := s.gitEngine.Push(repo.Path, "origin", branch, envVars); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}
 	return nil

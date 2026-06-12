@@ -387,7 +387,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
 
   const isBackingUp = backupProgress?.status === 'running';
   const isGitInit = currentRepo?.git_initialized ?? true;
-  const hasRemote = !!currentRepo?.remote_url;
+  const hasRemote = !!(currentRepo?.remote_url || currentRepo?.has_remote);
 
   return (
     <div>

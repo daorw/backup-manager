@@ -194,6 +194,19 @@ func (s *RepoService) IsGitInitialized(id string) (bool, error) {
 	return info.IsDir(), nil
 }
 
+// HasGitRemote checks whether the repo has a remote configured in git.
+func (s *RepoService) HasGitRemote(id string) (bool, error) {
+	repo, err := s.store.GetRepo(id)
+	if err != nil {
+		return false, err
+	}
+	url, err := s.gitEngine.GetRemoteURL(repo.Path, "origin")
+	if err != nil {
+		return false, nil
+	}
+	return url != "", nil
+}
+
 // Delete removes a repository from the database.
 // The filesystem contents are left intact for safety.
 func (s *RepoService) Delete(id string) error {

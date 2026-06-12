@@ -9,6 +9,7 @@ export interface BackupRepo {
   last_backup_at: string | null;
   status: BackupRepoStatus;
   git_initialized: boolean;
+  has_remote: boolean;
   // Config fields — backend returns them flat in the repo response
   remote_url?: string;
   branch?: string;

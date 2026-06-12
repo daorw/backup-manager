@@ -14,9 +14,16 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-echo "Starting backend (port 9800)..."
+echo "Building frontend..."
+cd "$ROOT_DIR/frontend"
+npm run build
+
+echo "Building backend..."
 cd "$ROOT_DIR"
-go run . &
+go build -o backup-manager .
+
+echo "Starting backend (port 9800)..."
+./backup-manager &
 BACKEND_PID=$!
 echo $BACKEND_PID > "$BACKEND_PID_FILE"
 

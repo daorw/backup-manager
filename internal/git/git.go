@@ -163,6 +163,16 @@ func (e *GitEngine) Push(repoPath, remote, branch string, envVars []string) erro
 	return nil
 }
 
+// GetRemoteURL returns the URL of a remote.
+func (e *GitEngine) GetRemoteURL(repoPath, remote string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	err := e.runGitCommand(repoPath, []string{"remote", "get-url", remote}, &stdout, &stderr)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 // RemoteSetURL sets the remote origin URL.
 func (e *GitEngine) RemoteSetURL(repoPath, url string) error {
 	var stderr bytes.Buffer

@@ -117,3 +117,32 @@ export interface SymlinkTreeNode {
   symlink?: Symlink;
   children?: SymlinkTreeNode[];
 }
+
+// Rollback types
+export interface CommitFileChange {
+  change_type: string;
+  relative_path: string;
+  symlink_id: string | null;
+  symlink_type: string | null;
+}
+
+export interface RollbackRequest {
+  commit_hash: string;
+  symlink_ids?: string[];
+}
+
+export interface RollbackFailure {
+  relative_path: string;
+  error: string;
+}
+
+export interface RollbackResult {
+  repo_id: string;
+  commit_hash: string;
+  total: number;
+  success: number;
+  skipped: number;
+  failed: number;
+  failures?: RollbackFailure[];
+  completed_at: string;
+}

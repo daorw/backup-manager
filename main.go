@@ -98,9 +98,11 @@ func main() {
 		return err
 	})
 
+	repoMu := service.NewRepoMutexManager()
 	authSvc := service.NewAuthService(dataStore, keyManager)
 	symSvc := service.NewSymlinkService(dataStore)
-	backupSvc = service.NewBackupService(dataStore, gitEngine, symSvc, authSvc)
+	backupSvc = service.NewBackupService(dataStore, gitEngine, symSvc, authSvc, repoMu)
+	rollbackSvc := service.NewRollbackService(dataStore, gitEngine, repoMu)
 	repoSvc := service.NewRepoService(dataStore, gitEngine, sched)
 	browserSvc := service.NewBrowserService(dataStore, homeDir)
 
@@ -119,6 +121,7 @@ func main() {
 	backupHandler := handler.NewBackupHandler(backupSvc)
 	authHandler := handler.NewAuthHandler(authSvc)
 	systemHandler := handler.NewSystemHandler()
+	rollbackHandler := handler.NewRollbackHandler(rollbackSvc)
 
 	// Setup router
 	router := api.SetupRouter(
@@ -129,6 +132,7 @@ func main() {
 		backupHandler,
 		authHandler,
 		systemHandler,
+		rollbackHandler,
 	)
 
 	// Mount frontend static files

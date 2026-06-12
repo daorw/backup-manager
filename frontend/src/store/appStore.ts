@@ -4,6 +4,9 @@ import type {
   Symlink,
   GitAuth,
   CommitEntry,
+  CommitFileChange,
+  RollbackRequest,
+  RollbackResult,
 } from '../types';
 import * as api from '../api/client';
 
@@ -25,6 +28,11 @@ interface AppState {
   loading: boolean;
   error: string | null;
 
+  // Rollback state
+  commitFiles: CommitFileChange[];
+  rollbackResult: RollbackResult | null;
+  rollbackLoading: boolean;
+
   fetchRepos: () => Promise<void>;
   fetchRepo: (id: string) => Promise<void>;
   createRepo: (name: string, path: string) => Promise<void>;
@@ -44,6 +52,11 @@ interface AppState {
   setAuth: (repoId: string, auth: Parameters<typeof api.setAuth>[1]) => Promise<void>;
   clearAuth: (repoId: string) => Promise<void>;
 
+  // Rollback actions
+  fetchCommitFiles: (repoId: string, commitHash: string) => Promise<void>;
+  rollbackSourceFiles: (repoId: string, req: RollbackRequest) => Promise<RollbackResult>;
+  clearRollbackResult: () => void;
+
   clearError: () => void;
 }
 
@@ -56,6 +69,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   backupProgress: null,
   loading: false,
   error: null,
+
+  // Rollback initial state
+  commitFiles: [],
+  rollbackResult: null,
+  rollbackLoading: false,
 
   clearError: () => set({ error: null }),
 
@@ -267,4 +285,31 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw err;
     }
   },
+
+  // Rollback actions
+  fetchCommitFiles: async (repoId: string, commitHash: string) => {
+    set({ error: null });
+    try {
+      const files = await api.fetchCommitChangedFiles(repoId, commitHash);
+      set({ commitFiles: files });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch commit files';
+      set({ error: message });
+    }
+  },
+
+  rollbackSourceFiles: async (repoId: string, req: RollbackRequest) => {
+    set({ rollbackLoading: true, error: null, rollbackResult: null });
+    try {
+      const result = await api.rollbackSourceFiles(repoId, req);
+      set({ rollbackResult: result, rollbackLoading: false });
+      return result;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Rollback failed';
+      set({ error: message, rollbackLoading: false });
+      throw err;
+    }
+  },
+
+  clearRollbackResult: () => set({ rollbackResult: null, commitFiles: [] }),
 }));

@@ -3,9 +3,28 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
+
+// DataDirName is the name of the data directory within a repo root.
+const DataDirName = "data"
+
+// FileEntry represents a file entry from git ls-tree.
+type FileEntry struct {
+	Mode string // e.g., "100644", "100755", "040000"
+	Path string // relative to repo root
+}
+
+// CommitFileEntry represents a file changed in a commit diff.
+// ChangeType: 'A' (Added), 'M' (Modified), 'D' (Deleted).
+type CommitFileEntry struct {
+	ChangeType string
+	Path       string
+}
 
 // CommitEntry represents a single Git commit in the log.
 type CommitEntry struct {
@@ -156,6 +175,156 @@ func (e *GitEngine) RemoteSetURL(repoPath, url string) error {
 		return fmt.Errorf("failed to set remote origin: %w", err)
 	}
 	return nil
+}
+
+// WriteFileContentTo streams the content of a file from a specific commit
+// directly to a destination file, avoiding loading the entire content into memory.
+// filePath is relative to the repo root (e.g., "data/notes/file.md").
+func (e *GitEngine) WriteFileContentTo(repoPath, commitHash, filePath, destPath string, perm os.FileMode) error {
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return fmt.Errorf("failed to create parent dir: %w", err)
+	}
+
+	args := []string{"show", fmt.Sprintf("%s:%s", commitHash, filePath)}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoPath
+
+	dstFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dstFile.Close()
+
+	// Pipe stdout directly to file — zero memory copy for content
+	cmd.Stdout = dstFile
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git show failed: %w\nstderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	return nil
+}
+
+// LsTree lists the contents of a tree object at the given commit.
+// treePath is the directory path within the commit (e.g., "data/notes").
+func (e *GitEngine) LsTree(repoPath, commitHash, treePath string) ([]FileEntry, error) {
+	var stdout, stderr bytes.Buffer
+	args := []string{"ls-tree", "-r", commitHash, treePath}
+	err := e.runGitCommand(repoPath, args, &stdout, &stderr)
+	if err != nil {
+		return nil, fmt.Errorf("git ls-tree failed: %w", err)
+	}
+
+	return parseLsTreeOutput(stdout.String()), nil
+}
+
+// GetCommitFileMode returns the file mode for a specific path in a commit.
+func (e *GitEngine) GetCommitFileMode(repoPath, commitHash, filePath string) (os.FileMode, error) {
+	entries, err := e.LsTree(repoPath, commitHash, filePath)
+	if err != nil {
+		return 0, err
+	}
+	if len(entries) == 0 {
+		return 0, fmt.Errorf("path %q not found in commit %s", filePath, commitHash)
+	}
+	return gitModeToFileMode(entries[0].Mode), nil
+}
+
+// IsRootCommit checks whether the given commit is a root commit (has no parent).
+// Uses: git rev-parse --verify <commit>^ which exits non-zero if no parent exists.
+func (e *GitEngine) IsRootCommit(repoPath, commitHash string) (bool, error) {
+	cmd := exec.Command("git", "rev-parse", "--verify", commitHash+"^")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
+			return true, nil
+		}
+		return false, fmt.Errorf("failed to check root commit: %w", err)
+	}
+	return false, nil
+}
+
+// GetChangedFilesInCommit returns the list of files changed under data/
+// in a specific commit, compared to its parent.
+// For root commits, returns all files under data/.
+func (e *GitEngine) GetChangedFilesInCommit(repoPath, commitHash string) ([]string, error) {
+	isRoot, err := e.IsRootCommit(repoPath, commitHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if isRoot {
+		// Root commit: list all files under data/
+		entries, err := e.LsTree(repoPath, commitHash, DataDirName+"/")
+		if err != nil {
+			// data/ might not exist in this commit
+			return nil, nil
+		}
+		paths := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			paths = append(paths, entry.Path)
+		}
+		return paths, nil
+	}
+
+	// Non-root commit: use diff-tree to get changed files
+	var stdout, stderr bytes.Buffer
+	args := []string{"diff-tree", "--no-commit-id", "-r", "--name-only",
+		"--diff-filter=ACDMRT", "-m", commitHash}
+	err = e.runGitCommand(repoPath, args, &stdout, &stderr)
+	if err != nil {
+		return nil, fmt.Errorf("git diff-tree failed: %w", err)
+	}
+
+	var dataFiles []string
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, DataDirName+"/") {
+			dataFiles = append(dataFiles, line)
+		}
+	}
+	return dataFiles, nil
+}
+
+// gitModeToFileMode converts a git mode string (e.g. "100755") to os.FileMode.
+func gitModeToFileMode(gitMode string) os.FileMode {
+	mode, err := strconv.ParseUint(gitMode, 8, 32)
+	if err != nil {
+		return 0644
+	}
+	return os.FileMode(mode) & os.ModePerm
+}
+
+// parseLsTreeOutput parses git ls-tree output into FileEntry slices.
+// Input format: <mode> <type> <hash>\t<path>
+func parseLsTreeOutput(output string) []FileEntry {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		return nil
+	}
+
+	entries := make([]FileEntry, 0, len(lines))
+	for _, line := range lines {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		modeFields := strings.Fields(parts[0])
+		if len(modeFields) > 0 {
+			entries = append(entries, FileEntry{
+				Mode: modeFields[0],
+				Path: parts[1],
+			})
+		}
+	}
+	return entries
 }
 
 // parseLogOutput parses the git log output into CommitEntry slices.

@@ -13,6 +13,9 @@ import type {
   CommitEntry,
   GitAuth,
   SetAuthRequest,
+  CommitFileChange,
+  RollbackRequest,
+  RollbackResult,
 } from '../types';
 
 const api = axios.create({
@@ -176,6 +179,28 @@ export async function clearAuth(repoId: string): Promise<void> {
 // Health API
 export async function healthCheck(): Promise<{ status: string }> {
   const { data } = await api.get<{ status: string }>('/health');
+  return data;
+}
+
+// Rollback APIs
+export async function fetchCommitChangedFiles(
+  repoId: string,
+  commitHash: string
+): Promise<CommitFileChange[]> {
+  const { data } = await api.get<CommitFileChange[]>(
+    `/repos/${repoId}/commits/${commitHash}/changed-files`
+  );
+  return data;
+}
+
+export async function rollbackSourceFiles(
+  repoId: string,
+  req: RollbackRequest
+): Promise<RollbackResult> {
+  const { data } = await api.post<RollbackResult>(
+    `/repos/${repoId}/rollback`,
+    req
+  );
   return data;
 }
 

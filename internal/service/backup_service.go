@@ -18,18 +18,19 @@ import (
 type BackupService struct {
 	store     *store.Store
 	gitEngine *git.GitEngine
-	repoMu    sync.Map // repoID -> *sync.Mutex for per-repo concurrency control
+	repoMu    *RepoMutexManager
 	symSvc    *SymlinkService
 	authSvc   *AuthService
 }
 
 // NewBackupService creates a new BackupService.
-func NewBackupService(s *store.Store, g *git.GitEngine, symSvc *SymlinkService, authSvc *AuthService) *BackupService {
+func NewBackupService(s *store.Store, g *git.GitEngine, symSvc *SymlinkService, authSvc *AuthService, repoMu *RepoMutexManager) *BackupService {
 	return &BackupService{
 		store:     s,
 		gitEngine: g,
 		symSvc:    symSvc,
 		authSvc:   authSvc,
+		repoMu:    repoMu,
 	}
 }
 
@@ -249,8 +250,7 @@ func (s *BackupService) syncOneFile(repo *model.Repo, sym *model.Symlink) (bool,
 	return true, nil
 }
 
-// getRepoMutex returns or creates a per-repo mutex for concurrency control.
+// getRepoMutex returns the per-repo mutex from the shared manager.
 func (s *BackupService) getRepoMutex(repoID string) *sync.Mutex {
-	mu, _ := s.repoMu.LoadOrStore(repoID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
+	return s.repoMu.Get(repoID)
 }

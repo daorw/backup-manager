@@ -19,6 +19,7 @@ func SetupRouter(
 	backupHandler *handler.BackupHandler,
 	authHandler *handler.AuthHandler,
 	systemHandler *handler.SystemHandler,
+	rollbackHandler *handler.RollbackHandler,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -63,6 +64,10 @@ func SetupRouter(
 		v1.GET("/repos/:id/auth", authHandler.Get)
 		v1.PUT("/repos/:id/auth", authHandler.Set)
 		v1.DELETE("/repos/:id/auth", authHandler.Clear)
+
+		// Rollback
+		v1.GET("/repos/:id/commits/:hash/changed-files", rollbackHandler.ListFiles)
+		v1.POST("/repos/:id/rollback", rollbackHandler.Rollback)
 	}
 
 	return r

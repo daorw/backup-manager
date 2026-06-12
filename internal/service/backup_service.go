@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,13 +96,19 @@ func (s *BackupService) Trigger(repoID string) (result *BackupResult, err error)
 
 	totalChanges := removed + changed
 	if totalChanges == 0 {
-		// Nothing to commit
-		now := time.Now()
-		return &BackupResult{
-			RepoID:      repoID,
-			CompletedAt: now.Format(time.RFC3339),
-			Pushed:      false,
-		}, nil
+		status, statusErr := s.gitEngine.Status(repo.Path)
+		if statusErr != nil || status == "" {
+			now := time.Now()
+			return &BackupResult{
+				RepoID:      repoID,
+				CompletedAt: now.Format(time.RFC3339),
+				Pushed:      false,
+			}, nil
+		}
+		// There are uncommitted files (e.g., initial data/ copy at symlink
+		// creation time was never committed) — count them and proceed.
+		changed = len(strings.Split(strings.TrimSpace(status), "\n"))
+		totalChanges = changed
 	}
 
 	// Step 3: git add -A

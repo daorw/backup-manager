@@ -71,7 +71,7 @@ const statusTagConfig: Record<string, { color: string; icon: React.ReactNode }> 
 const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const backupProgress = useAppStore((s) => s.backupProgress);
   const backupHistory = useAppStore((s) => s.backupHistory);
-  const commitFiles = useAppStore((s) => s.commitFiles);
+  const commitFilesByHash = useAppStore((s) => s.commitFilesByHash);
   const rollbackResult = useAppStore((s) => s.rollbackResult);
   const rollbackLoading = useAppStore((s) => s.rollbackLoading);
 
@@ -209,17 +209,20 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const handleExpandRow = async (expanded: boolean, record: CommitEntry) => {
     if (expanded) {
       setExpandedCommitHash(record.hash);
-      setCommitFilesLoading(true);
       // Clear file-level preview state when switching to a different commit
       setExpandedFilePath(null);
       setFileContentCache({});
       clearCommitFileContent();
-      try {
-        await fetchCommitFiles(repoId, record.hash);
-      } catch (err) {
-        // Error handled by store
-      } finally {
-        setCommitFilesLoading(false);
+      // Check if we already have cached data for this commit
+      if (!commitFilesByHash[record.hash]) {
+        setCommitFilesLoading(true);
+        try {
+          await fetchCommitFiles(repoId, record.hash);
+        } catch (err) {
+          // Error handled by store
+        } finally {
+          setCommitFilesLoading(false);
+        }
       }
     } else {
       setExpandedCommitHash(null);
@@ -469,6 +472,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   ];
 
   const expandedRowRender = (record: CommitEntry) => {
+    const recordFiles = commitFilesByHash[record.hash] || [];
+
     if (commitFilesLoading && expandedCommitHash === record.hash) {
       return (
         <div style={{ textAlign: 'center', padding: 24 }}>
@@ -480,16 +485,16 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       );
     }
 
-    if (commitFiles.length === 0 && expandedCommitHash === record.hash) {
+    if (recordFiles.length === 0 && expandedCommitHash === record.hash) {
       return <Empty description="No changed files in this commit" />;
     }
 
-    const symlinkGroups = getUniqueSymlinks(commitFiles);
+    const symlinkGroups = getUniqueSymlinks(recordFiles);
 
     return (
       <div style={{ padding: '8px 0' }}>
         <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>
-          Files changed ({commitFiles.length})
+          Files changed ({recordFiles.length})
         </Typography.Text>
 
         {symlinkGroups.map((group) => (
@@ -646,7 +651,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   };
 
   const isBackingUp = backupProgress?.status === 'running';
-  const isGitInit = currentRepo?.git_initialized ?? true;
+  const isGitInit = currentRepo?.git_initialized ?? false;
   const hasRemote = !!(currentRepo?.remote_url || currentRepo?.has_remote);
 
   return (

@@ -363,7 +363,7 @@ func (s *RollbackService) GetCommitFile(repoID, commitHash, relPath string) (*Co
 	}
 
 	// Read file content from git
-	content, mimeType, isText, err := s.gitEngine.ReadFileContent(repo.Path, commitHash, gitFilePath, 0)
+	content, mimeType, isText, err := s.gitEngine.ReadFileContent(repo.Path, commitHash, gitFilePath, maxCommitFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file content: %w", err)
 	}

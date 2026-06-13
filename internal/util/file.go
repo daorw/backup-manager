@@ -41,6 +41,11 @@ func CopyFile(src, dst string) error {
 		return fmt.Errorf("failed to copy data: %w", err)
 	}
 
+	// Sync to ensure data is written to disk
+	if err := dstFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync file: %w", err)
+	}
+
 	// Preserve file permissions and modification time
 	if err := os.Chmod(dst, srcInfo.Mode()); err != nil {
 		return fmt.Errorf("failed to set permissions: %w", err)

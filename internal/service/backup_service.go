@@ -118,8 +118,31 @@ func (s *BackupService) Trigger(repoID string, commitMessage string) (result *Ba
 			}, nil
 		}
 		// There are uncommitted files (e.g., initial data/ copy at symlink
-		// creation time was never committed) — count them and proceed.
-		changed = len(strings.Split(strings.TrimSpace(status), "\n"))
+		// creation time was never committed) — parse status to properly
+		// distinguish added vs changed files.
+		changed = 0
+		filesAdded = 0
+		for _, line := range strings.Split(status, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if len(line) < 2 {
+				continue
+			}
+			// git status --porcelain format: XY filename
+			// X = index status, Y = work tree status
+			// "??" = untracked, "A " = added, " M" = modified (worktree)
+			statusFlag := line[:2]
+			if strings.HasPrefix(statusFlag, "??") || statusFlag[0] == 'A' {
+				filesAdded++
+				changed++
+			} else if statusFlag[0] == 'M' || statusFlag[1] == 'M' {
+				changed++
+			} else if statusFlag[0] == 'D' || statusFlag[1] == 'D' {
+				changed++
+			}
+		}
 		totalChanges = changed
 	}
 

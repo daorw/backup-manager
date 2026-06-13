@@ -201,9 +201,19 @@ func (s *SymlinkService) UpdateTarget(id, newTarget string) (*model.Symlink, err
 	linkPath := filepath.Join(repo.Path, ".links", sym.RelativePath)
 	dataPath := filepath.Join(repo.Path, "data", sym.RelativePath)
 
-	// Remove old data and symlink
-	os.Remove(linkPath)
-	os.RemoveAll(dataPath)
+	// Remove old symlink
+	if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to remove old symlink: %w", err)
+	}
+
+	// Remove old data
+	if err := os.RemoveAll(dataPath); err != nil {
+		return nil, fmt.Errorf("failed to remove old data: %w", err)
+	}
+
+	// Clean up empty parent directories after removal
+	s.cleanEmptyParentDirs(filepath.Join(repo.Path, ".links"), sym.RelativePath)
+	s.cleanEmptyParentDirs(filepath.Join(repo.Path, "data"), sym.RelativePath)
 
 	// Create new symlink
 	if err := os.Symlink(targetAbs, linkPath); err != nil {
@@ -214,11 +224,13 @@ func (s *SymlinkService) UpdateTarget(id, newTarget string) (*model.Symlink, err
 	if symType == model.SymlinkTypeDirectory {
 		if err := util.CopyDir(targetAbs, dataPath); err != nil {
 			os.Remove(linkPath)
+			s.cleanEmptyParentDirs(filepath.Join(repo.Path, ".links"), sym.RelativePath)
 			return nil, fmt.Errorf("failed to copy directory: %w", err)
 		}
 	} else {
 		if err := util.CopyFile(targetAbs, dataPath); err != nil {
 			os.Remove(linkPath)
+			s.cleanEmptyParentDirs(filepath.Join(repo.Path, ".links"), sym.RelativePath)
 			return nil, fmt.Errorf("failed to copy file: %w", err)
 		}
 	}
@@ -299,9 +311,38 @@ func (s *SymlinkService) SyncDeletedSource(repoID string) (int, error) {
 }
 
 // resolveTargetPath safely resolves a user-provided target path by
-// standardizing it and preventing path traversal via SafeResolve.
+// standardizing it and preventing path traversal. Since symlink targets
+// do not need to exist on disk (dead symlinks are valid), we only need
+// to clean the path, convert to absolute, and prevent "../" traversal.
 func resolveTargetPath(targetPath string) (string, error) {
-	return util.SafeResolve("/", targetPath)
+	if targetPath == "" {
+		return "", fmt.Errorf("target_path is required")
+	}
+
+	// Clean to remove any ../ traversal
+	cleaned := filepath.Clean(targetPath)
+
+	// Ensure path is absolute
+	if !filepath.IsAbs(cleaned) {
+		var err error
+		cleaned, err = filepath.Abs(cleaned)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve absolute path: %w", err)
+		}
+	}
+
+	// Verify no path traversal — the cleaned path should not differ from
+	// what we'd get by resolving it relative to root
+	resolved, err := filepath.EvalSymlinks(cleaned)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist yet — that's OK for symlink targets
+			return cleaned, nil
+		}
+		return "", fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	return resolved, nil
 }
 
 // cleanEmptyParentDirs removes empty parent directories starting from the

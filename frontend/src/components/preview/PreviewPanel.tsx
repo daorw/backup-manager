@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Tree, Spin, Empty, Typography, Tag, Space, Button, message } from 'antd';
 import {
   FileOutlined,
@@ -125,7 +125,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
     }
   }, [repoId, fetchSymlinks]);
 
-  const baseTreeData = buildPreviewTree(symlinks);
+  const baseTreeData = useMemo(() => buildPreviewTree(symlinks), [symlinks]);
 
   const handleFileSelect = useCallback(
     async (path: string) => {
@@ -279,11 +279,23 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
     });
   };
 
-  const treeData = mergeTreeData(baseTreeData);
-
-  const selectedSymlink = symlinks.find(
-    (s) => s.relative_path === selectedFile
+  const treeData = useMemo(
+    () => mergeTreeData(baseTreeData),
+    [baseTreeData, dynamicChildren],
   );
+
+  const selectedSymlink = useMemo(() => {
+    const exact = symlinks.find((s) => s.relative_path === selectedFile);
+    if (exact) return exact;
+    // Try to find parent directory symlink
+    if (selectedFile) {
+      const dirSym = symlinks
+        .filter((s) => s.type === 'directory')
+        .find((s) => selectedFile.startsWith(s.relative_path + '/'));
+      if (dirSym) return dirSym;
+    }
+    return undefined;
+  }, [symlinks, selectedFile]);
 
   const handleExpand = async (keys: React.Key[], info: { expanded: boolean; node: PreviewTreeNode }) => {
     setExpandedKeys(keys);
@@ -401,24 +413,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
             defaultExpandAll={false}
             showIcon
             selectedKeys={selectedFile ? [selectedFile] : []}
-            onSelect={(keys) => {
+            onSelect={(keys, info) => {
               if (keys.length > 0) {
-                const key = keys[0] as string;
-                // Find the node to check if it's a file (leaf)
-                // Traverse treeData to find the node
-                const findNode = (nodes: PreviewTreeNode[]): PreviewTreeNode | null => {
-                  for (const n of nodes) {
-                    if (n.key === key) return n;
-                    if (n.children) {
-                      const found = findNode(n.children as PreviewTreeNode[]);
-                      if (found) return found;
-                    }
-                  }
-                  return null;
-                };
-                const node = findNode(treeData);
+                const node = info.node as PreviewTreeNode;
                 if (node && node.isLeaf) {
-                  handleFileSelect(key);
+                  handleFileSelect(keys[0] as string);
                 }
               }
             }}
@@ -442,6 +441,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
               </Typography.Text>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 → {selectedSymlink.target_path}
+                {!symlinks.find((s) => s.relative_path === selectedFile) && (
+                  <Tag style={{ marginLeft: 4 }}>via directory symlink</Tag>
+                )}
               </Typography.Text>
             </Space>
           )}

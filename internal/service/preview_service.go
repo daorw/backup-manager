@@ -50,35 +50,45 @@ func (s *PreviewService) ResolveSource(repoID, relPath string) (*ResolvedSource,
 	}
 
 	// Case 2: Prefix match - directory symlink inner file
+	// Use longest prefix match to correctly handle overlapping directory
+	// symlinks (e.g., "docs/" and "docs/work/").
 	all, err := s.store.ListSymlinks(repoID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list symlinks: %w", err)
 	}
 
+	var bestMatch *model.Symlink
+	var bestPrefixLen int
 	for _, sym := range all {
 		if sym.Type != model.SymlinkTypeDirectory {
 			continue
 		}
 		prefix := sym.RelativePath + "/"
-		if strings.HasPrefix(relPath, prefix) {
-			suffix := strings.TrimPrefix(relPath, prefix)
-			sourcePath, err := util.SafeJoin(sym.TargetPath, suffix)
-			if err != nil {
-				return nil, fmt.Errorf("failed to resolve file inside directory symlink: %w", err)
-			}
-			info, err := os.Stat(sourcePath)
-			if err != nil {
-				return nil, fmt.Errorf("source file not found: %w", err)
-			}
-			if info.IsDir() {
-				return nil, fmt.Errorf("cannot preview a directory")
-			}
-			return &ResolvedSource{
-				SourcePath:       sourcePath,
-				RepoRelativePath: relPath,
-				SymlinkID:        nil,
-			}, nil
+		if strings.HasPrefix(relPath, prefix) && len(prefix) > bestPrefixLen {
+			bestMatch = sym
+			bestPrefixLen = len(prefix)
 		}
+	}
+
+	if bestMatch != nil {
+		prefix := bestMatch.RelativePath + "/"
+		suffix := strings.TrimPrefix(relPath, prefix)
+		sourcePath, err := util.SafeJoin(bestMatch.TargetPath, suffix)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve file inside directory symlink: %w", err)
+		}
+		info, err := os.Stat(sourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("source file not found: %w", err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("cannot preview a directory")
+		}
+		return &ResolvedSource{
+			SourcePath:       sourcePath,
+			RepoRelativePath: relPath,
+			SymlinkID:        nil,
+		}, nil
 	}
 
 	return nil, fmt.Errorf("no symlink found for path: %s", relPath)

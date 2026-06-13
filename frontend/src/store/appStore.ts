@@ -36,7 +36,7 @@ interface AppState {
   dirEntriesCache: Record<string, SymlinkDirEntry[]>;
 
   // Rollback state
-  commitFiles: CommitFileChange[];
+  commitFilesByHash: Record<string, CommitFileChange[]>;
   rollbackResult: RollbackResult | null;
   rollbackLoading: boolean;
 
@@ -97,7 +97,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   dirEntriesCache: {},
 
   // Rollback initial state
-  commitFiles: [],
+  commitFilesByHash: {},
   rollbackResult: null,
   rollbackLoading: false,
 
@@ -388,7 +388,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ error: null });
     try {
       const files = await api.fetchCommitChangedFiles(repoId, commitHash);
-      set({ commitFiles: files });
+      set((state) => ({
+        commitFilesByHash: { ...state.commitFilesByHash, [commitHash]: files },
+      }));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to fetch commit files';
       set({ error: message });
@@ -408,7 +410,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  clearRollbackResult: () => set({ rollbackResult: null, commitFiles: [] }),
+  clearRollbackResult: () => set({ rollbackResult: null }),
 
   // Commit file preview actions
   fetchCommitFileContent: async (repoId: string, commitHash: string, path: string) => {

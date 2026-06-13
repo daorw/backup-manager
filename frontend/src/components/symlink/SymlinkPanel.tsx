@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Tree,
   Button,
@@ -109,7 +109,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
     }
   }, [repoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const treeData = buildTree(symlinks);
+  const treeData = useMemo(() => buildTree(symlinks), [symlinks]);
 
   const handleAddSymlink = useCallback(
     async (targetPath: string, relativePath: string) => {
@@ -422,7 +422,11 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
     });
   };
 
-  const finalTreeData = mergeTreeData(convertToAntdTreeData(treeData));
+  const finalTreeData = useMemo(
+    () => mergeTreeData(convertToAntdTreeData(treeData)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [treeData, dynamicChildren, editingPath, editValue],
+  );
 
   const handleExpand = async (keys: React.Key[], info: { expanded: boolean; node: ExtendedDataNode }) => {
     setExpandedKeys(keys);

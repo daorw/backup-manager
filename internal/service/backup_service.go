@@ -310,11 +310,11 @@ func (s *BackupService) syncOneFile(repo *model.Repo, sym *model.Symlink) (bool,
 }
 
 // syncDirectoryFiles performs incremental per-file sync for a directory-type
-// symlink. It walks the source directory tree, compares each file against the
-// corresponding file in data/ by mtime and size, and copies only changed or
-// new files. Files that exist in data/ but not in source are removed.
-// It updates the symlink's aggregated metadata (FileSize = total size of all
-// files, ModifiedAt = latest modification time across all files).
+// symlink. It walks the source directory tree, follows nested symlinks, compares
+// each file against the corresponding file in data/ by mtime and size, and
+// copies only changed or new files. Files that exist in data/ but not in source
+// are removed. It updates the symlink's aggregated metadata (FileSize = total
+// size of all files, ModifiedAt = latest modification time across all files).
 //
 // Errors for individual files are logged but do not abort the entire sync.
 func (s *BackupService) syncDirectoryFiles(repo *model.Repo, sym *model.Symlink) (*SyncStats, error) {
@@ -330,33 +330,15 @@ func (s *BackupService) syncDirectoryFiles(repo *model.Repo, sym *model.Symlink)
 	var latestModTime time.Time
 	var totalSize int64
 
-	// Collect all source files (relative paths)
+	// Collect all source files (relative paths) using walkSourceDir
 	type sourceFile struct {
-		relPath  string
-		fi       os.FileInfo
+		relPath string
+		fi      os.FileInfo
 	}
 	var sourceFiles []sourceFile
 
-	if err := filepath.Walk(sym.TargetPath, func(path string, fi os.FileInfo, err error) error {
-		if err != nil {
-			// Skip files that can't be accessed
-			log.Printf("[backup] warning: cannot access %q: %v", path, err)
-			return nil
-		}
-		if fi.IsDir() {
-			return nil
-		}
-		// Skip hidden files (dot-prefixed) to stay consistent with the
-		// browsing interface which also filters them out.
-		if len(fi.Name()) > 0 && fi.Name()[0] == '.' {
-			return nil
-		}
-		rel, err := filepath.Rel(sym.TargetPath, path)
-		if err != nil {
-			log.Printf("[backup] warning: cannot compute relative path for %q: %v", path, err)
-			return nil
-		}
-		sourceFiles = append(sourceFiles, sourceFile{relPath: rel, fi: fi})
+	if err := walkSourceDir(sym.TargetPath, sym.TargetPath, func(relPath string, fi os.FileInfo) error {
+		sourceFiles = append(sourceFiles, sourceFile{relPath: relPath, fi: fi})
 		totalSize += fi.Size()
 		if fi.ModTime().After(latestModTime) {
 			latestModTime = fi.ModTime()
@@ -465,6 +447,123 @@ func (s *BackupService) cleanEmptyDataDirs(dir string) {
 	if len(entries) == 0 {
 		os.Remove(dir)
 	}
+}
+
+// walkSourceDir walks a source directory tree, following symlinks and detecting
+// cycles. It calls the callback for each regular file found, skipping hidden
+// files and handling errors gracefully.
+func walkSourceDir(baseDir, currentDir string, callback func(relPath string, fi os.FileInfo) error) error {
+	return walkSourceDirRecursive(baseDir, currentDir, callback, make(map[string]bool), 0)
+}
+
+// walkSourceDirRecursive is the recursive implementation of walkSourceDir with
+// cycle detection and depth limiting.
+func walkSourceDirRecursive(baseDir, currentDir string, callback func(relPath string, fi os.FileInfo) error, visited map[string]bool, depth int) error {
+	if depth > maxDirDepth {
+		log.Printf("[backup] warning: skipping directory %q (depth limit exceeded)", currentDir)
+		return nil
+	}
+
+	resolvedDir, err := filepath.EvalSymlinks(currentDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("[backup] warning: skipping non-existent directory %q", currentDir)
+			return nil
+		}
+		return fmt.Errorf("failed to evaluate symlinks for %q: %w", currentDir, err)
+	}
+
+	if visited[resolvedDir] {
+		log.Printf("[backup] warning: skipping directory %q (cycle detected)", currentDir)
+		return nil
+	}
+	visited[resolvedDir] = true
+
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		log.Printf("[backup] warning: cannot read directory %q: %v", currentDir, err)
+		return nil
+	}
+
+	for _, entry := range entries {
+		if len(entry.Name()) > 0 && entry.Name()[0] == '.' {
+			continue
+		}
+
+		fullPath := filepath.Join(currentDir, entry.Name())
+		info, err := os.Lstat(fullPath)
+		if err != nil {
+			log.Printf("[backup] warning: cannot lstat %q: %v", fullPath, err)
+			continue
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolved, chain, err := util.ResolveNestedSymlink(fullPath)
+			if err != nil {
+				log.Printf("[backup] warning: skipping symlink %q: %v", fullPath, err)
+				continue
+			}
+
+			if detectCycle(chain) {
+				log.Printf("[backup] warning: skipping symlink %q (cycle detected)", fullPath)
+				continue
+			}
+
+			resolvedInfo, err := os.Stat(resolved)
+			if err != nil {
+				log.Printf("[backup] warning: cannot stat resolved symlink %q: %v", resolved, err)
+				continue
+			}
+
+			if resolvedInfo.IsDir() {
+				if err := walkSourceDirRecursive(baseDir, fullPath, callback, visited, depth+1); err != nil {
+					return err
+				}
+			} else {
+				relPath, err := filepath.Rel(baseDir, fullPath)
+				if err != nil {
+					log.Printf("[backup] warning: cannot compute relative path for %q: %v", fullPath, err)
+					continue
+				}
+				if err := callback(relPath, resolvedInfo); err != nil {
+					return err
+				}
+			}
+		} else if info.IsDir() {
+			if err := walkSourceDirRecursive(baseDir, fullPath, callback, visited, depth+1); err != nil {
+				return err
+			}
+		} else {
+			relPath, err := filepath.Rel(baseDir, fullPath)
+			if err != nil {
+				log.Printf("[backup] warning: cannot compute relative path for %q: %v", fullPath, err)
+				continue
+			}
+			if err := callback(relPath, info); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// detectCycleInBackup checks if following symlinks from currentPath would create
+// a cycle within the context of baseDir. This is a simple check - more complex
+// cycle detection is handled by walkSourceDirRecursive.
+func detectCycleInBackup(currentPath, baseDir string) bool {
+	resolved, err := filepath.EvalSymlinks(currentPath)
+	if err != nil {
+		return false
+	}
+
+	baseResolved, err := filepath.EvalSymlinks(baseDir)
+	if err != nil {
+		return false
+	}
+
+	// Check if resolved path is the same as base
+	return resolved == baseResolved
 }
 
 // getRepoMutex returns the per-repo mutex from the shared manager.

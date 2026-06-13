@@ -243,6 +243,74 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
       const entries = await fetchDirEntries(repoId, linkId, browseRelPath || '');
       const children: ExtendedDataNode[] = entries.map((entry: SymlinkDirEntry) => {
         const nodeKey = `${key}/${entry.name}`;
+
+        // Handle nested symlink entries
+        if (entry.is_nested_symlink) {
+          const isError = entry.type === 'symlink_error';
+          const isCycle = entry.has_cycle;
+          const isDir = entry.type === 'symlink_directory';
+          const isFile = entry.type === 'symlink_file';
+
+          const iconColor = isError || isCycle ? '#ff4d4f' : isDir ? '#1890ff' : '#52c41a';
+          const linkIcon = <LinkOutlined style={{ color: iconColor }} />;
+
+          const titleContent = (
+            <Typography.Text>
+              {linkIcon}{' '}
+              {entry.name}
+              {isCycle && (
+                <Tag color="red" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>cycle</Tag>
+              )}
+              {isError && !isCycle && (
+                <Tag color="red" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>depth limit</Tag>
+              )}
+              {entry.nested_target && (
+                <Typography.Text
+                  type="secondary"
+                  style={{ fontSize: 11, marginLeft: 8 }}
+                >
+                  → {entry.nested_target}
+                  {entry.nested_depth && entry.nested_depth > 1 && (
+                    <Typography.Text type="secondary" style={{ fontSize: 10 }}>
+                      {' '}(depth: {entry.nested_depth})
+                    </Typography.Text>
+                  )}
+                </Typography.Text>
+              )}
+              {!isError && entry.is_new && (
+                <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>new</Tag>
+              )}
+            </Typography.Text>
+          );
+
+          // Nested symlink directories are expandable
+          if (isDir && !isError) {
+            return {
+              key: nodeKey,
+              title: titleContent,
+              isLeaf: false,
+              icon: <FolderOutlined style={{ color: '#1890ff' }} />,
+              linkId: linkId,
+              browseRelPath: browseRelPath
+                ? `${browseRelPath}/${entry.name}`
+                : entry.name,
+            };
+          }
+
+          // Nested symlink files and errors are leaf nodes
+          return {
+            key: nodeKey,
+            title: titleContent,
+            isLeaf: true,
+            icon: isFile ? <FileOutlined style={{ color: '#52c41a' }} /> : <LinkOutlined style={{ color: '#ff4d4f' }} />,
+            linkId: linkId,
+            browseRelPath: browseRelPath
+              ? `${browseRelPath}/${entry.name}`
+              : entry.name,
+          };
+        }
+
+        // Regular directory entries
         if (entry.type === 'directory') {
           return {
             key: nodeKey,
@@ -255,6 +323,8 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
               : entry.name,
           };
         }
+
+        // Regular file entries
         return {
           key: nodeKey,
           title: (

@@ -132,3 +132,114 @@ func SafeResolveFile(allowedRoot, userPath string) (string, error) {
 
 	return resolved, nil
 }
+
+const maxSymlinkDepth = 10
+
+// ResolveNestedSymlink resolves a symlink chain, following each symlink until
+// a non-symlink target is found. It returns the final resolved path (with
+// symlinks evaluated) and the chain of symlink paths visited. It detects
+// cycles and enforces a depth limit.
+func ResolveNestedSymlink(linkPath string) (string, []string, error) {
+	visited := make(map[string]bool)
+	var chain []string
+
+	current := linkPath
+	for depth := 0; depth < maxSymlinkDepth; depth++ {
+		if visited[current] {
+			return "", nil, fmt.Errorf("symlink cycle detected at %q", current)
+		}
+		visited[current] = true
+
+		fi, err := os.Lstat(current)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to lstat %q: %w", current, err)
+		}
+
+		if fi.Mode()&os.ModeSymlink == 0 {
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", nil, fmt.Errorf("failed to evaluate symlinks on %q: %w", current, err)
+			}
+			return resolved, chain, nil
+		}
+
+		chain = append(chain, current)
+
+		target, err := os.Readlink(current)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to readlink %q: %w", current, err)
+		}
+
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(current), target)
+		}
+		target = filepath.Clean(target)
+		current = target
+	}
+
+	return "", nil, fmt.Errorf("symlink depth exceeds maximum (%d)", maxSymlinkDepth)
+}
+
+// SafeResolveNestedSymlink resolves a nested symlink chain while ensuring the
+// final resolved path stays within allowedRoot. It detects cycles and enforces
+// the depth limit.
+func SafeResolveNestedSymlink(allowedRoot, linkPath string) (string, []string, error) {
+	resolved, chain, err := ResolveNestedSymlink(linkPath)
+	if err != nil {
+		return "", nil, err
+	}
+
+	absRoot, err := filepath.Abs(allowedRoot)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to resolve absolute root: %w", err)
+	}
+
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		realRoot = absRoot
+	}
+
+	rootPrefix := realRoot
+	if realRoot != "/" {
+		rootPrefix += string(filepath.Separator)
+	}
+
+	if resolved != realRoot && !strings.HasPrefix(resolved, rootPrefix) {
+		return "", nil, fmt.Errorf("symlink target %q is outside allowed root %q", resolved, allowedRoot)
+	}
+
+	return resolved, chain, nil
+}
+
+// SafeResolveWithSymlinkChain resolves a path that may contain symlinks,
+// returning both the final resolved path and any symlink chain encountered.
+// It combines SafeResolve with nested symlink resolution, ensuring the final
+// path stays within allowedRoot.
+func SafeResolveWithSymlinkChain(allowedRoot, userPath string) (string, []string, error) {
+	absPath, err := filepath.Abs(userPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	fi, err := os.Lstat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			resolved, err := SafeResolve(allowedRoot, userPath)
+			if err != nil {
+				return "", nil, err
+			}
+			return resolved, nil, nil
+		}
+		return "", nil, fmt.Errorf("failed to lstat path: %w", err)
+	}
+
+	if fi.Mode()&os.ModeSymlink == 0 {
+		resolved, err := SafeResolve(allowedRoot, userPath)
+		if err != nil {
+			return "", nil, err
+		}
+		return resolved, nil, nil
+	}
+
+	return SafeResolveNestedSymlink(allowedRoot, absPath)
+}

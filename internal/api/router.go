@@ -50,6 +50,7 @@ func SetupRouter(
 		v1.PUT("/repos/:id/symlinks/:linkId", symlinkHandler.UpdateTarget)
 		v1.POST("/repos/:id/symlinks/batch", symlinkHandler.BatchImport)
 		v1.GET("/repos/:id/symlinks/:linkId/entries", symlinkHandler.BrowseDirEntries)
+		v1.POST("/repos/:id/symlinks/:linkId/nested", symlinkHandler.AddNestedSymlink)
 
 		// File browsing
 		v1.GET("/browse", browseHandler.Browse)

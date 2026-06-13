@@ -196,3 +196,24 @@ func (h *SymlinkHandler) BatchImport(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{"data": items})
 }
+
+// AddNestedSymlink handles POST /api/v1/repos/:id/symlinks/:linkId/nested
+// Creates a symlink within an existing directory symlink's source directory.
+func (h *SymlinkHandler) AddNestedSymlink(c *gin.Context) {
+	repoID := c.Param("id")
+	linkID := c.Param("linkId")
+
+	var req service.AddNestedSymlinkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+
+	sym, err := h.symSvc.AddNestedSymlink(repoID, linkID, &req)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"data": symlinkToResponse(sym)})
+}

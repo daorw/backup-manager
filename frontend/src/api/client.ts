@@ -117,6 +117,23 @@ export async function batchImportSymlinks(
   return data;
 }
 
+export interface AddNestedSymlinkRequest {
+  target_path: string;
+  sub_path: string;
+}
+
+export async function addNestedSymlink(
+  repoId: string,
+  linkId: string,
+  req: AddNestedSymlinkRequest
+): Promise<Symlink> {
+  const { data } = await api.post<Symlink>(
+    `/repos/${repoId}/symlinks/${linkId}/nested`,
+    req
+  );
+  return data;
+}
+
 // Directory symlink browsing API
 export async function fetchDirEntries(
   repoId: string,

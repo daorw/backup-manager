@@ -330,10 +330,16 @@ func (s *SymlinkService) cleanEmptyParentDirs(base, relativePath string) {
 type SymlinkDirEntry struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
-	Type       string `json:"type"` // "file" or "directory"
+	Type       string `json:"type"` // "file", "directory", "symlink_file", "symlink_directory", "symlink_error"
 	Size       int64  `json:"size,omitempty"`
 	ModifiedAt string `json:"modified_at,omitempty"`
 	IsNew      bool   `json:"is_new"`
+
+	// Nested symlink fields
+	IsNestedSymlink bool   `json:"is_nested_symlink"`
+	NestedTarget    string `json:"nested_target,omitempty"`
+	NestedDepth     int    `json:"nested_depth,omitempty"`
+	HasCycle        bool   `json:"has_cycle,omitempty"`
 }
 
 // compareFileWithData compares a source file against its data/ copy.
@@ -358,6 +364,70 @@ func compareFileWithData(sourcePath, dataPath string) (bool, error) {
 		return true, nil
 	}
 	return sourceInfo.Size() != dataInfo.Size() || !sourceInfo.ModTime().Equal(dataInfo.ModTime()), nil
+}
+
+// detectNestedSymlink analyzes a filesystem entry and returns a SymlinkDirEntry
+// with nested symlink information. If the entry is a symlink, it resolves the
+// chain to determine depth, target, and whether there's a cycle.
+func detectNestedSymlink(entryPath string, info os.FileInfo) SymlinkDirEntry {
+	entry := SymlinkDirEntry{
+		Name: info.Name(),
+		Path: entryPath,
+	}
+
+	if info.Mode()&os.ModeSymlink == 0 {
+		if info.IsDir() {
+			entry.Type = "directory"
+		} else {
+			entry.Type = "file"
+			entry.Size = info.Size()
+			entry.ModifiedAt = info.ModTime().Format("2006-01-02T15:04:05Z07:00")
+		}
+		return entry
+	}
+
+	entry.IsNestedSymlink = true
+
+	resolved, chain, err := util.ResolveNestedSymlink(entryPath)
+	if err != nil {
+		entry.Type = "symlink_error"
+		if strings.Contains(err.Error(), "cycle") {
+			entry.HasCycle = true
+		}
+		return entry
+	}
+
+	entry.NestedDepth = len(chain)
+	entry.NestedTarget = resolved
+
+	resolvedInfo, err := os.Stat(resolved)
+	if err != nil {
+		entry.Type = "symlink_error"
+		return entry
+	}
+
+	if resolvedInfo.IsDir() {
+		entry.Type = "symlink_directory"
+	} else {
+		entry.Type = "symlink_file"
+		entry.Size = resolvedInfo.Size()
+		entry.ModifiedAt = resolvedInfo.ModTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+
+	return entry
+}
+
+// detectCycle checks if a symlink chain contains a cycle by looking for
+// duplicate paths in the chain.
+func detectCycle(chain []string) bool {
+	seen := make(map[string]bool)
+	for _, p := range chain {
+		if seen[p] {
+			return true
+		}
+		seen[p] = true
+	}
+	return false
 }
 
 const maxDirDepth = 50
@@ -438,27 +508,21 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Symli
 			continue
 		}
 
-		e := SymlinkDirEntry{
-			Name: entry.Name(),
-			Path: filepath.Join(targetDir, entry.Name()),
+		fullPath := filepath.Join(targetDir, entry.Name())
+		info, err := os.Lstat(fullPath)
+		if err != nil {
+			log.Printf("[symlink] warning: cannot lstat %q: %v", fullPath, err)
+			continue
 		}
 
-		if entry.IsDir() {
-			e.Type = "directory"
-		} else {
-			e.Type = "file"
-			fi, err := entry.Info()
-			if err == nil {
-				e.Size = fi.Size()
-				e.ModifiedAt = fi.ModTime().Format("2006-01-02T15:04:05Z07:00")
-			}
-			// Compare source file with data copy
+		e := detectNestedSymlink(fullPath, info)
+
+		// For non-symlink file entries, compare source with data copy
+		if !e.IsNestedSymlink && e.Type == "file" {
 			dataPath := filepath.Join(dataDir, entry.Name())
 			if changed, err := compareFileWithData(filepath.Join(targetDir, entry.Name()), dataPath); err == nil {
 				e.IsNew = changed
 			} else {
-				// On stat failure, conservatively mark as new so the user knows
-				// something may be off with this file.
 				e.IsNew = true
 				log.Printf("[symlink] warning: compareFileWithData(%q, %q): %v",
 					filepath.Join(targetDir, entry.Name()), dataPath, err)
@@ -468,13 +532,19 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Symli
 		result = append(result, e)
 	}
 
-	// Sort: directories first, then by name
+	// Sort: directories first, then symlinks, then files, by name within each group
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].Type != result[j].Type {
-			if result[i].Type == "directory" {
-				return true
-			}
-			return false
+		typeOrder := map[string]int{
+			"directory":         0,
+			"symlink_directory": 1,
+			"symlink_file":     2,
+			"symlink_error":    3,
+			"file":             4,
+		}
+		orderI := typeOrder[result[i].Type]
+		orderJ := typeOrder[result[j].Type]
+		if orderI != orderJ {
+			return orderI < orderJ
 		}
 		return result[i].Name < result[j].Name
 	})
@@ -494,6 +564,111 @@ func (s *SymlinkService) ComputeSymlinkIsNew(sym *model.Symlink) (bool, error) {
 	}
 	dataPath := filepath.Join(repo.Path, "data", sym.RelativePath)
 	return compareFileWithData(sym.TargetPath, dataPath)
+}
+
+// AddNestedSymlinkRequest is the input for adding a nested symlink within an
+// existing directory symlink.
+type AddNestedSymlinkRequest struct {
+	TargetPath string `json:"target_path"`
+	SubPath    string `json:"sub_path"`
+}
+
+// AddNestedSymlink creates a symlink within an existing directory symlink's
+// source directory. The new symlink points to the specified target and is
+// placed at sub_path within the existing symlink's directory.
+func (s *SymlinkService) AddNestedSymlink(repoID, linkID string, req *AddNestedSymlinkRequest) (*model.Symlink, error) {
+	if req.TargetPath == "" {
+		return nil, fmt.Errorf("target_path is required")
+	}
+	if req.SubPath == "" {
+		return nil, fmt.Errorf("sub_path is required")
+	}
+
+	repo, err := s.store.GetRepo(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	sym, err := s.store.GetSymlink(linkID)
+	if err != nil {
+		return nil, err
+	}
+
+	if sym.RepoID != repoID {
+		return nil, fmt.Errorf("symlink does not belong to repo")
+	}
+
+	if sym.Type != model.SymlinkTypeDirectory {
+		return nil, fmt.Errorf("symlink is not a directory")
+	}
+
+	targetAbs, err := resolveTargetPath(req.TargetPath)
+	if err != nil {
+		return nil, err
+	}
+
+	subPath := filepath.Clean(req.SubPath)
+	if subPath == "." || subPath == ".." || strings.HasPrefix(subPath, "../") {
+		return nil, fmt.Errorf("invalid sub_path: %s", subPath)
+	}
+
+	nestedLinkPath := filepath.Join(sym.TargetPath, subPath)
+	nestedDataPath := filepath.Join(repo.Path, "data", sym.RelativePath, subPath)
+
+	nestedLinkParent := filepath.Dir(nestedLinkPath)
+	nestedDataParent := filepath.Dir(nestedDataPath)
+	if err := os.MkdirAll(nestedLinkParent, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create parent directories: %w", err)
+	}
+	if err := os.MkdirAll(nestedDataParent, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create parent directories: %w", err)
+	}
+
+	if _, err := os.Lstat(nestedLinkPath); err == nil {
+		return nil, fmt.Errorf("path already exists: %s", subPath)
+	}
+
+	if err := os.Symlink(targetAbs, nestedLinkPath); err != nil {
+		return nil, fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	sourceInfo, err := os.Stat(targetAbs)
+	if err != nil {
+		os.Remove(nestedLinkPath)
+		return nil, fmt.Errorf("cannot access target path: %w", err)
+	}
+
+	symType := model.SymlinkTypeFile
+	if sourceInfo.IsDir() {
+		symType = model.SymlinkTypeDirectory
+		if err := util.CopyDir(targetAbs, nestedDataPath); err != nil {
+			os.Remove(nestedLinkPath)
+			return nil, fmt.Errorf("failed to copy directory: %w", err)
+		}
+	} else {
+		if err := util.CopyFile(targetAbs, nestedDataPath); err != nil {
+			os.Remove(nestedLinkPath)
+			return nil, fmt.Errorf("failed to copy file: %w", err)
+		}
+	}
+
+	newSym := &model.Symlink{
+		ID:           uuid.New().String(),
+		RepoID:       repoID,
+		RelativePath: filepath.Join(sym.RelativePath, subPath),
+		TargetPath:   targetAbs,
+		Type:         symType,
+		FileSize:     sourceInfo.Size(),
+		ModifiedAt:   func() *time.Time { t := sourceInfo.ModTime(); return &t }(),
+	}
+
+	if err := s.store.CreateSymlink(newSym); err != nil {
+		os.Remove(nestedLinkPath)
+		os.RemoveAll(nestedDataPath)
+		return nil, fmt.Errorf("failed to save symlink: %w", err)
+	}
+
+	return newSym, nil
 }
 
 

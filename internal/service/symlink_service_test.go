@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -333,6 +334,377 @@ func TestComputeSymlinkIsNew(t *testing.T) {
 		}
 		if isNew {
 			t.Fatal("expected is_new=false for directory symlink")
+		}
+	})
+}
+
+func TestDetectNestedSymlink(t *testing.T) {
+	t.Run("detects regular file as not nested symlink", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "file.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+
+		info, err := os.Lstat(target)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(target, info)
+		if entry.IsNestedSymlink {
+			t.Fatal("expected IsNestedSymlink=false for regular file")
+		}
+		if entry.Type != "file" {
+			t.Fatalf("expected type 'file', got %s", entry.Type)
+		}
+	})
+
+	t.Run("detects regular directory as not nested symlink", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dir := filepath.Join(tmpDir, "subdir")
+		os.MkdirAll(dir, 0755)
+
+		info, err := os.Lstat(dir)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(dir, info)
+		if entry.IsNestedSymlink {
+			t.Fatal("expected IsNestedSymlink=false for regular directory")
+		}
+		if entry.Type != "directory" {
+			t.Fatalf("expected type 'directory', got %s", entry.Type)
+		}
+	})
+
+	t.Run("detects symlink to file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+
+		link := filepath.Join(tmpDir, "link.txt")
+		os.Symlink(target, link)
+
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(link, info)
+		if !entry.IsNestedSymlink {
+			t.Fatal("expected IsNestedSymlink=true for symlink")
+		}
+		if entry.Type != "symlink_file" {
+			t.Fatalf("expected type 'symlink_file', got %s", entry.Type)
+		}
+		if entry.NestedTarget == "" {
+			t.Fatal("expected NestedTarget to be set")
+		}
+		if entry.NestedDepth != 1 {
+			t.Fatalf("expected NestedDepth=1, got %d", entry.NestedDepth)
+		}
+	})
+
+	t.Run("detects symlink to directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target_dir")
+		os.MkdirAll(target, 0755)
+
+		link := filepath.Join(tmpDir, "link_dir")
+		os.Symlink(target, link)
+
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(link, info)
+		if !entry.IsNestedSymlink {
+			t.Fatal("expected IsNestedSymlink=true for symlink")
+		}
+		if entry.Type != "symlink_directory" {
+			t.Fatalf("expected type 'symlink_directory', got %s", entry.Type)
+		}
+	})
+
+	t.Run("detects nested symlinks", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+
+		link1 := filepath.Join(tmpDir, "link1")
+		link2 := filepath.Join(tmpDir, "link2")
+		os.Symlink(target, link1)
+		os.Symlink(link1, link2)
+
+		info, err := os.Lstat(link2)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(link2, info)
+		if !entry.IsNestedSymlink {
+			t.Fatal("expected IsNestedSymlink=true for nested symlink")
+		}
+		if entry.NestedDepth != 2 {
+			t.Fatalf("expected NestedDepth=2, got %d", entry.NestedDepth)
+		}
+	})
+
+	t.Run("detects cycle in symlinks", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		link1 := filepath.Join(tmpDir, "link1")
+		link2 := filepath.Join(tmpDir, "link2")
+		os.Symlink(link2, link1)
+		os.Symlink(link1, link2)
+
+		info, err := os.Lstat(link1)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(link1, info)
+		if !entry.HasCycle {
+			t.Fatal("expected HasCycle=true for cyclic symlink")
+		}
+		if entry.Type != "symlink_error" {
+			t.Fatalf("expected type 'symlink_error', got %s", entry.Type)
+		}
+	})
+
+	t.Run("detects depth limit exceeded", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+
+		// Create a chain of 11 symlinks to exceed the limit of 10
+		prev := target
+		for i := 0; i < 11; i++ {
+			link := filepath.Join(tmpDir, fmt.Sprintf("link%d", i))
+			os.Symlink(prev, link)
+			prev = link
+		}
+
+		info, err := os.Lstat(prev)
+		if err != nil {
+			t.Fatalf("failed to lstat: %v", err)
+		}
+
+		entry := detectNestedSymlink(prev, info)
+		if entry.Type != "symlink_error" {
+			t.Fatalf("expected type 'symlink_error', got %s", entry.Type)
+		}
+	})
+}
+
+func TestDetectCycle(t *testing.T) {
+	t.Run("no cycle in linear chain", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+
+		link1 := filepath.Join(tmpDir, "link1")
+		link2 := filepath.Join(tmpDir, "link2")
+		os.Symlink(target, link1)
+		os.Symlink(link1, link2)
+
+		chain := []string{link2, link1}
+		if detectCycle(chain) {
+			t.Fatal("expected no cycle in linear chain")
+		}
+	})
+
+	t.Run("detects cycle in chain", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		link1 := filepath.Join(tmpDir, "link1")
+		link2 := filepath.Join(tmpDir, "link2")
+
+		chain := []string{link1, link2, link1}
+		if !detectCycle(chain) {
+			t.Fatal("expected cycle to be detected")
+		}
+	})
+
+	t.Run("empty chain has no cycle", func(t *testing.T) {
+		if detectCycle(nil) {
+			t.Fatal("expected no cycle in empty chain")
+		}
+	})
+}
+
+func TestListDirEntries_NestedSymlinks(t *testing.T) {
+	svc, _, repo, cleanup := setupSymlinkServiceTest(t)
+	defer cleanup()
+
+	// Create source directory with nested symlinks
+	sourceDir := filepath.Join(t.TempDir(), "src")
+	os.MkdirAll(sourceDir, 0755)
+
+	// Create a regular file
+	os.WriteFile(filepath.Join(sourceDir, "regular.txt"), []byte("regular"), 0644)
+
+	// Create a symlink to a file
+	targetFile := filepath.Join(t.TempDir(), "target.txt")
+	os.WriteFile(targetFile, []byte("target content"), 0644)
+	os.Symlink(targetFile, filepath.Join(sourceDir, "link_file.txt"))
+
+	// Create a symlink to a directory
+	targetDir := filepath.Join(t.TempDir(), "target_dir")
+	os.MkdirAll(targetDir, 0755)
+	os.WriteFile(filepath.Join(targetDir, "inner.txt"), []byte("inner"), 0644)
+	os.Symlink(targetDir, filepath.Join(sourceDir, "link_dir"))
+
+	// Create a directory symlink in the repo
+	sym, err := svc.Create(repo.ID, &CreateSymlinkRequest{
+		TargetPath: sourceDir,
+		RelPath:    "nested_test",
+	})
+	if err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	t.Run("lists entries with nested symlink info", func(t *testing.T) {
+		entries, err := svc.ListDirEntries(repo.ID, sym.ID, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(entries) != 3 {
+			t.Fatalf("expected 3 entries, got %d", len(entries))
+		}
+
+		// Find each entry and verify its type
+		for _, e := range entries {
+			switch e.Name {
+			case "regular.txt":
+				if e.Type != "file" {
+					t.Fatalf("expected regular.txt type 'file', got %s", e.Type)
+				}
+				if e.IsNestedSymlink {
+					t.Fatal("expected regular.txt IsNestedSymlink=false")
+				}
+			case "link_file.txt":
+				if e.Type != "symlink_file" {
+					t.Fatalf("expected link_file.txt type 'symlink_file', got %s", e.Type)
+				}
+				if !e.IsNestedSymlink {
+					t.Fatal("expected link_file.txt IsNestedSymlink=true")
+				}
+				if e.NestedTarget == "" {
+					t.Fatal("expected link_file.txt NestedTarget to be set")
+				}
+			case "link_dir":
+				if e.Type != "symlink_directory" {
+					t.Fatalf("expected link_dir type 'symlink_directory', got %s", e.Type)
+				}
+				if !e.IsNestedSymlink {
+					t.Fatal("expected link_dir IsNestedSymlink=true")
+				}
+			default:
+				t.Fatalf("unexpected entry: %s", e.Name)
+			}
+		}
+	})
+}
+
+func TestAddNestedSymlink(t *testing.T) {
+	svc, s, repo, cleanup := setupSymlinkServiceTest(t)
+	defer cleanup()
+
+	// Create a source directory with a subdirectory
+	sourceDir := filepath.Join(t.TempDir(), "src")
+	os.MkdirAll(filepath.Join(sourceDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(sourceDir, "sub", "file.txt"), []byte("content"), 0644)
+
+	// Create a directory symlink in the repo
+	sym, err := svc.Create(repo.ID, &CreateSymlinkRequest{
+		TargetPath: sourceDir,
+		RelPath:    "parent",
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent symlink: %v", err)
+	}
+
+	t.Run("nested symlink is persisted to database", func(t *testing.T) {
+		// Create a target for the nested symlink
+		nestedTarget := filepath.Join(t.TempDir(), "nested_target")
+		os.MkdirAll(nestedTarget, 0755)
+		os.WriteFile(filepath.Join(nestedTarget, "data.txt"), []byte("nested data"), 0644)
+
+		nestedSym, err := svc.AddNestedSymlink(repo.ID, sym.ID, &AddNestedSymlinkRequest{
+			TargetPath: nestedTarget,
+			SubPath:    "sub/nested_link",
+		})
+		if err != nil {
+			t.Fatalf("failed to add nested symlink: %v", err)
+		}
+
+		// Verify the symlink exists in the database
+		dbSym, err := s.GetSymlink(nestedSym.ID)
+		if err != nil {
+			t.Fatalf("nested symlink not found in database: %v", err)
+		}
+
+		if dbSym.ID != nestedSym.ID {
+			t.Fatalf("expected symlink ID %s, got %s", nestedSym.ID, dbSym.ID)
+		}
+		if dbSym.RepoID != repo.ID {
+			t.Fatalf("expected repo ID %s, got %s", repo.ID, dbSym.RepoID)
+		}
+		expectedRelPath := filepath.Join("parent", "sub", "nested_link")
+		if dbSym.RelativePath != expectedRelPath {
+			t.Fatalf("expected relative path %s, got %s", expectedRelPath, dbSym.RelativePath)
+		}
+		// Use EvalSymlinks to resolve the path for macOS (/var -> /private/var)
+		resolvedTarget, _ := filepath.EvalSymlinks(nestedTarget)
+		if dbSym.TargetPath != resolvedTarget {
+			t.Fatalf("expected target path %s, got %s", resolvedTarget, dbSym.TargetPath)
+		}
+		if dbSym.Type != model.SymlinkTypeDirectory {
+			t.Fatalf("expected type directory, got %s", dbSym.Type)
+		}
+	})
+
+	t.Run("nested symlink appears in repo symlinks list", func(t *testing.T) {
+		symlinks, err := s.ListSymlinks(repo.ID)
+		if err != nil {
+			t.Fatalf("failed to list symlinks: %v", err)
+		}
+
+		found := false
+		for _, s := range symlinks {
+			if s.RelativePath == filepath.Join("parent", "sub", "nested_link") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("nested symlink not found in repo symlinks list")
+		}
+	})
+
+	t.Run("nested symlink can be deleted from database", func(t *testing.T) {
+		// Create another nested symlink to delete
+		nestedTarget := filepath.Join(t.TempDir(), "to_delete")
+		os.MkdirAll(nestedTarget, 0755)
+
+		nestedSym, err := svc.AddNestedSymlink(repo.ID, sym.ID, &AddNestedSymlinkRequest{
+			TargetPath: nestedTarget,
+			SubPath:    "sub/to_delete",
+		})
+		if err != nil {
+			t.Fatalf("failed to add nested symlink: %v", err)
+		}
+
+		// Delete it
+		if err := svc.Delete(nestedSym.ID); err != nil {
+			t.Fatalf("failed to delete nested symlink: %v", err)
+		}
+
+		// Verify it's gone from database
+		_, err = s.GetSymlink(nestedSym.ID)
+		if err == nil {
+			t.Fatal("expected error when getting deleted symlink")
 		}
 	})
 }

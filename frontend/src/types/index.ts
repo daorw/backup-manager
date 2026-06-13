@@ -72,10 +72,14 @@ export interface BrowseEntry {
 export interface SymlinkDirEntry {
   name: string;
   path: string;
-  type: 'file' | 'directory';
+  type: 'file' | 'directory' | 'symlink_file' | 'symlink_directory' | 'symlink_error';
   size: number;
   modified_at: string;
   is_new: boolean;
+  is_nested_symlink: boolean;
+  nested_target?: string;
+  nested_depth?: number;
+  has_cycle?: boolean;
 }
 
 export interface PreviewResult {

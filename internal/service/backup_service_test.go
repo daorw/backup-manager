@@ -266,3 +266,230 @@ func TestSyncChangedFiles_DispatchByType(t *testing.T) {
 		t.Fatalf("expected 1 file added from directory, got %d", added)
 	}
 }
+
+func TestWalkSourceDir(t *testing.T) {
+	t.Run("walks regular directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("aaa"), 0644)
+		os.MkdirAll(filepath.Join(tmpDir, "sub"), 0755)
+		os.WriteFile(filepath.Join(tmpDir, "sub", "b.txt"), []byte("bbb"), 0644)
+
+		var files []walkResult
+		err := walkSourceDir(tmpDir, tmpDir, func(relPath string, fi os.FileInfo) error {
+			files = append(files, walkResult{relPath: relPath, fi: fi})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 2 {
+			t.Fatalf("expected 2 files, got %d", len(files))
+		}
+	})
+
+	t.Run("follows symlinks to files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(t.TempDir(), "target.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+		os.Symlink(target, filepath.Join(tmpDir, "link.txt"))
+
+		var files []walkResult
+		err := walkSourceDir(tmpDir, tmpDir, func(relPath string, fi os.FileInfo) error {
+			files = append(files, walkResult{relPath: relPath, fi: fi})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 1 {
+			t.Fatalf("expected 1 file, got %d", len(files))
+		}
+		if files[0].fi.Name() != "target.txt" {
+			t.Fatalf("expected target.txt, got %s", files[0].fi.Name())
+		}
+	})
+
+	t.Run("follows symlinks to directories", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		targetDir := filepath.Join(t.TempDir(), "target_dir")
+		os.MkdirAll(targetDir, 0755)
+		os.WriteFile(filepath.Join(targetDir, "inner.txt"), []byte("inner"), 0644)
+		os.Symlink(targetDir, filepath.Join(tmpDir, "link_dir"))
+
+		var files []walkResult
+		err := walkSourceDir(tmpDir, tmpDir, func(relPath string, fi os.FileInfo) error {
+			files = append(files, walkResult{relPath: relPath, fi: fi})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 1 {
+			t.Fatalf("expected 1 file, got %d", len(files))
+		}
+		if files[0].relPath != "link_dir/inner.txt" {
+			t.Fatalf("expected link_dir/inner.txt, got %s", files[0].relPath)
+		}
+	})
+
+	t.Run("handles nested symlinks", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(t.TempDir(), "target.txt")
+		os.WriteFile(target, []byte("content"), 0644)
+
+		link1 := filepath.Join(t.TempDir(), "link1")
+		link2 := filepath.Join(tmpDir, "link2")
+		os.Symlink(target, link1)
+		os.Symlink(link1, link2)
+
+		var files []walkResult
+		err := walkSourceDir(tmpDir, tmpDir, func(relPath string, fi os.FileInfo) error {
+			files = append(files, walkResult{relPath: relPath, fi: fi})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 1 {
+			t.Fatalf("expected 1 file, got %d", len(files))
+		}
+	})
+
+	t.Run("skips hidden files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(filepath.Join(tmpDir, "visible.txt"), []byte("visible"), 0644)
+		os.WriteFile(filepath.Join(tmpDir, ".hidden"), []byte("hidden"), 0644)
+
+		var files []walkResult
+		err := walkSourceDir(tmpDir, tmpDir, func(relPath string, fi os.FileInfo) error {
+			files = append(files, walkResult{relPath: relPath, fi: fi})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 1 {
+			t.Fatalf("expected 1 file (hidden excluded), got %d", len(files))
+		}
+	})
+
+	t.Run("skips inaccessible files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("aaa"), 0644)
+
+		// Create a symlink to a non-existent target
+		os.Symlink("/nonexistent/path", filepath.Join(tmpDir, "broken"))
+
+		var files []walkResult
+		err := walkSourceDir(tmpDir, tmpDir, func(relPath string, fi os.FileInfo) error {
+			files = append(files, walkResult{relPath: relPath, fi: fi})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) != 1 {
+			t.Fatalf("expected 1 file (broken symlink skipped), got %d", len(files))
+		}
+	})
+}
+
+func TestDetectCycleInBackup(t *testing.T) {
+	t.Run("no cycle in regular path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target")
+		os.MkdirAll(target, 0755)
+		if detectCycleInBackup(target, tmpDir) {
+			t.Fatal("expected no cycle in regular path")
+		}
+	})
+
+	t.Run("detects cycle when symlink points to base", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		link := filepath.Join(tmpDir, "link")
+		os.Symlink(tmpDir, link)
+
+		if !detectCycleInBackup(link, tmpDir) {
+			t.Fatal("expected cycle to be detected")
+		}
+	})
+
+	t.Run("no false positive for valid symlinks", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target")
+		os.MkdirAll(target, 0755)
+		os.WriteFile(filepath.Join(target, "file.txt"), []byte("content"), 0644)
+
+		link := filepath.Join(tmpDir, "link")
+		os.Symlink(target, link)
+
+		if detectCycleInBackup(link, tmpDir) {
+			t.Fatal("expected no cycle for valid symlink")
+		}
+	})
+}
+
+func TestSyncDirectoryFiles_NestedSymlinks(t *testing.T) {
+	svc, _, repo, symSvc, cleanup := setupBackupServiceTest(t)
+	defer cleanup()
+
+	// Create source directory with nested symlinks
+	sourceDir := filepath.Join(t.TempDir(), "src")
+	os.MkdirAll(sourceDir, 0755)
+
+	// Regular file
+	os.WriteFile(filepath.Join(sourceDir, "regular.txt"), []byte("regular"), 0644)
+
+	// Symlink to file
+	targetFile := filepath.Join(t.TempDir(), "target.txt")
+	os.WriteFile(targetFile, []byte("target content"), 0644)
+	os.Symlink(targetFile, filepath.Join(sourceDir, "link_file.txt"))
+
+	// Symlink to directory
+	targetDir := filepath.Join(t.TempDir(), "target_dir")
+	os.MkdirAll(targetDir, 0755)
+	os.WriteFile(filepath.Join(targetDir, "inner.txt"), []byte("inner"), 0644)
+	os.Symlink(targetDir, filepath.Join(sourceDir, "link_dir"))
+
+	// Create directory symlink
+	sym, err := symSvc.Create(repo.ID, &CreateSymlinkRequest{
+		TargetPath: sourceDir,
+		RelPath:    "nested_backup",
+	})
+	if err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Initial sync happens during Create, so we should have all files
+	// Modify a file and add a new one to test incremental sync
+	os.WriteFile(filepath.Join(sourceDir, "regular.txt"), []byte("modified"), 0644)
+	os.WriteFile(filepath.Join(targetFile), []byte("modified target"), 0644)
+
+	// Sync should handle nested symlinks
+	stats, err := svc.syncDirectoryFiles(repo, sym)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have at least 2 changed files (regular.txt and link_file.txt)
+	if stats.FilesChanged < 2 {
+		t.Fatalf("expected at least 2 files changed, got %d", stats.FilesChanged)
+	}
+
+	// Verify files exist in data directory
+	dataDir := filepath.Join(repo.Path, "data", "nested_backup")
+	if _, err := os.Stat(filepath.Join(dataDir, "regular.txt")); os.IsNotExist(err) {
+		t.Fatal("expected regular.txt in data/")
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "link_file.txt")); os.IsNotExist(err) {
+		t.Fatal("expected link_file.txt in data/")
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "link_dir", "inner.txt")); os.IsNotExist(err) {
+		t.Fatal("expected link_dir/inner.txt in data/")
+	}
+}
+
+type walkResult struct {
+	relPath string
+	fi      os.FileInfo
+}

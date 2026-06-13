@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -184,6 +185,236 @@ func TestSafeResolveFile(t *testing.T) {
 		_, err := SafeResolveFile(root, "nonexistent.txt")
 		if err == nil {
 			t.Fatal("expected error for non-existent file")
+		}
+	})
+}
+
+func TestResolveNestedSymlink(t *testing.T) {
+	t.Run("resolves single symlink", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		link := filepath.Join(tmpDir, "link.txt")
+		os.Symlink(target, link)
+
+		resolved, chain, err := ResolveNestedSymlink(link)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expectedTarget, _ := filepath.EvalSymlinks(target)
+		if resolved != expectedTarget {
+			t.Fatalf("expected %s, got %s", expectedTarget, resolved)
+		}
+		if len(chain) != 1 {
+			t.Fatalf("expected chain length 1, got %d", len(chain))
+		}
+		if chain[0] != link {
+			t.Fatalf("expected chain[0]=%s, got %s", link, chain[0])
+		}
+	})
+
+	t.Run("resolves nested symlinks", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		link1 := filepath.Join(tmpDir, "link1.txt")
+		link2 := filepath.Join(tmpDir, "link2.txt")
+		link3 := filepath.Join(tmpDir, "link3.txt")
+
+		os.Symlink(target, link1)
+		os.Symlink(link1, link2)
+		os.Symlink(link2, link3)
+
+		resolved, chain, err := ResolveNestedSymlink(link3)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expectedTarget, _ := filepath.EvalSymlinks(target)
+		if resolved != expectedTarget {
+			t.Fatalf("expected %s, got %s", expectedTarget, resolved)
+		}
+		if len(chain) != 3 {
+			t.Fatalf("expected chain length 3, got %d", len(chain))
+		}
+	})
+
+	t.Run("detects cycle", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		link1 := filepath.Join(tmpDir, "link1")
+		link2 := filepath.Join(tmpDir, "link2")
+
+		os.Symlink(link2, link1)
+		os.Symlink(link1, link2)
+
+		_, _, err := ResolveNestedSymlink(link1)
+		if err == nil {
+			t.Fatal("expected error for cycle")
+		}
+	})
+
+	t.Run("returns non-symlink path as-is", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		target := filepath.Join(tmpDir, "regular.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		resolved, chain, err := ResolveNestedSymlink(target)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expectedTarget, _ := filepath.EvalSymlinks(target)
+		if resolved != expectedTarget {
+			t.Fatalf("expected %s, got %s", expectedTarget, resolved)
+		}
+		if len(chain) != 0 {
+			t.Fatalf("expected empty chain, got %d", len(chain))
+		}
+	})
+
+	t.Run("respects depth limit", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Create a chain of 11 symlinks to exceed the limit of 10
+		target := filepath.Join(tmpDir, "target.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		prev := target
+		for i := 0; i < 11; i++ {
+			link := filepath.Join(tmpDir, fmt.Sprintf("link%d", i))
+			os.Symlink(prev, link)
+			prev = link
+		}
+
+		_, _, err := ResolveNestedSymlink(prev)
+		if err == nil {
+			t.Fatal("expected error for exceeding depth limit")
+		}
+	})
+}
+
+func TestSafeResolveNestedSymlink(t *testing.T) {
+	t.Run("resolves symlink within allowed root", func(t *testing.T) {
+		root := t.TempDir()
+		target := filepath.Join(root, "target.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		link := filepath.Join(root, "link.txt")
+		os.Symlink(target, link)
+
+		resolved, chain, err := SafeResolveNestedSymlink(root, link)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expectedTarget, _ := filepath.EvalSymlinks(target)
+		if resolved != expectedTarget {
+			t.Fatalf("expected %s, got %s", expectedTarget, resolved)
+		}
+		if len(chain) != 1 {
+			t.Fatalf("expected chain length 1, got %d", len(chain))
+		}
+	})
+
+	t.Run("blocks symlink escaping root", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		target := filepath.Join(outside, "secret.txt")
+		os.WriteFile(target, []byte("secret"), 0644)
+
+		link := filepath.Join(root, "escape.txt")
+		os.Symlink(target, link)
+
+		_, _, err := SafeResolveNestedSymlink(root, link)
+		if err == nil {
+			t.Fatal("expected error for symlink escaping root")
+		}
+	})
+
+	t.Run("blocks nested symlink escaping root", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		target := filepath.Join(outside, "secret.txt")
+		os.WriteFile(target, []byte("secret"), 0644)
+
+		link1 := filepath.Join(root, "link1")
+		link2 := filepath.Join(root, "link2")
+		os.Symlink(target, link1)
+		os.Symlink(link1, link2)
+
+		_, _, err := SafeResolveNestedSymlink(root, link2)
+		if err == nil {
+			t.Fatal("expected error for nested symlink escaping root")
+		}
+	})
+
+	t.Run("detects cycle within allowed root", func(t *testing.T) {
+		root := t.TempDir()
+		link1 := filepath.Join(root, "link1")
+		link2 := filepath.Join(root, "link2")
+
+		os.Symlink(link2, link1)
+		os.Symlink(link1, link2)
+
+		_, _, err := SafeResolveNestedSymlink(root, link1)
+		if err == nil {
+			t.Fatal("expected error for cycle")
+		}
+	})
+}
+
+func TestSafeResolveWithSymlinkChain(t *testing.T) {
+	t.Run("returns chain for nested symlinks", func(t *testing.T) {
+		root := t.TempDir()
+		target := filepath.Join(root, "target.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		link1 := filepath.Join(root, "link1.txt")
+		link2 := filepath.Join(root, "link2.txt")
+		os.Symlink(target, link1)
+		os.Symlink(link1, link2)
+
+		resolved, chain, err := SafeResolveWithSymlinkChain(root, link2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expectedTarget, _ := filepath.EvalSymlinks(target)
+		if resolved != expectedTarget {
+			t.Fatalf("expected %s, got %s", expectedTarget, resolved)
+		}
+		if len(chain) != 2 {
+			t.Fatalf("expected chain length 2, got %d", len(chain))
+		}
+	})
+
+	t.Run("returns empty chain for non-symlink", func(t *testing.T) {
+		root := t.TempDir()
+		target := filepath.Join(root, "regular.txt")
+		os.WriteFile(target, []byte("hello"), 0644)
+
+		resolved, chain, err := SafeResolveWithSymlinkChain(root, target)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expectedTarget, _ := filepath.EvalSymlinks(target)
+		if resolved != expectedTarget {
+			t.Fatalf("expected %s, got %s", expectedTarget, resolved)
+		}
+		if len(chain) != 0 {
+			t.Fatalf("expected empty chain, got %d", len(chain))
+		}
+	})
+
+	t.Run("blocks escaping symlinks", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		target := filepath.Join(outside, "secret.txt")
+		os.WriteFile(target, []byte("secret"), 0644)
+
+		link := filepath.Join(root, "escape.txt")
+		os.Symlink(target, link)
+
+		_, _, err := SafeResolveWithSymlinkChain(root, link)
+		if err == nil {
+			t.Fatal("expected error for escaping symlink")
 		}
 	})
 }

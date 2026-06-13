@@ -173,7 +173,7 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
             },
           ]}
         >
-          <Input placeholder="Please enter a file path relative to the repository for storing the backup files, e.g: data/opencode/opencode.json" />
+          <Input placeholder="Please enter a file path relative to the repository for storing the backup files, e.g: opencode/opencode.json" />
         </Form.Item>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           The content below in File Browser shows the currently backed-up files, which are stored under the relative root directory specified by Link Name.

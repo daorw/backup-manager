@@ -156,7 +156,7 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
           rules={[{ required: true, message: 'Please select a source file or directory' }]}
         >
           <Input
-            placeholder="Select a file or directory from the browser below, or type a path"
+            placeholder="Please enter the file or directories you want to back up, e.g: ~/.config/opencode/opencode.json"
             value={selectedPath}
             onChange={(e) => setSelectedPath(e.target.value)}
           />
@@ -172,12 +172,10 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
             },
           ]}
         >
-          <Input placeholder="docs/notes.txt" />
+          <Input placeholder="Please enter a file path relative to the repository for storing the backup files, e.g: data/opencode/opencode.json" />
         </Form.Item>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          The link name is the relative path under the{' '}
-          <Typography.Text code>.links/</Typography.Text> directory. You can use
-          slashes to organize links in subdirectories.
+          The content below in File Browser shows the currently backed-up files, which are stored under the relative root directory specified by Link Name.
         </Typography.Text>
       </Form>
 

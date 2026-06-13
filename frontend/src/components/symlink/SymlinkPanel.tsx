@@ -29,6 +29,7 @@ import SymlinkAddModal from './SymlinkAddModal';
 
 interface SymlinkPanelProps {
   repoId: string;
+  repoPath: string;
 }
 
 interface ExtendedDataNode extends DataNode {
@@ -82,7 +83,7 @@ function buildTree(symlinks: Symlink[]): SymlinkTreeNode[] {
   return root;
 }
 
-const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
+const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId, repoPath }) => {
   const symlinks = useAppStore((s) => s.symlinks);
   const loading = useAppStore((s) => s.loading);
   const error = useAppStore((s) => s.error);
@@ -516,6 +517,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId }) => {
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onSubmit={handleAddSymlink}
+        repoPath={repoPath}
       />
     </div>
   );

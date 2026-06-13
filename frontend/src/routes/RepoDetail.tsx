@@ -81,7 +81,7 @@ const RepoDetail: React.FC = () => {
           <span>Symlinks</span>
         </Space>
       ),
-      children: <SymlinkPanel repoId={currentRepo.id} />,
+      children: <SymlinkPanel repoId={currentRepo.id} repoPath={currentRepo.path} />,
     },
     {
       key: 'preview',

@@ -17,12 +17,13 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { browsePath, fetchAllowedRoots } from '../../api/client';
+import { browsePath } from '../../api/client';
 
 interface SymlinkAddModalProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (targetPath: string, relativePath: string) => Promise<void>;
+  repoPath: string;
 }
 
 interface FileBrowserNode extends DataNode {
@@ -48,6 +49,7 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
   open,
   onClose,
   onSubmit,
+  repoPath,
 }) => {
   const [form] = Form.useForm();
   const [treeData, setTreeData] = useState<FileBrowserNode[]>([]);
@@ -59,10 +61,9 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
   const loadRoot = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch allowed roots from the backend API
-      const roots = await fetchAllowedRoots();
-      const rootPath = (roots && roots.length > 0) ? roots[0] : '/';
-      const nodes = await loadChildren(rootPath);
+      // Browse the repo's data/ directory to show currently backed-up files
+      const dataPath = repoPath ? `${repoPath}/data` : '/';
+      const nodes = await loadChildren(dataPath);
       setTreeData(nodes);
     } catch {
       // Fallback: try OS home directory
@@ -75,7 +76,7 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [repoPath]);
 
   useEffect(() => {
     if (open) {

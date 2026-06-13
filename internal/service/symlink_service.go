@@ -467,13 +467,17 @@ func (s *SymlinkService) ListDirEntries(repoID, linkID, subPath string) ([]Symli
 	targetDir := symSourceDir
 	dataDir := symDataDir
 	if subPath != "" {
-		resolved, err := util.SafeResolve(symSourceDir, subPath)
+		resolved, err := util.SafeJoin(symSourceDir, subPath)
 		if err != nil {
 			return nil, fmt.Errorf("invalid subpath: %w", err)
 		}
 		targetDir = resolved
-		// Compute corresponding data directory (may not exist, handled gracefully)
-		dataDir = filepath.Join(symDataDir, subPath)
+
+		dataResolved, err := util.SafeJoin(symDataDir, subPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid subpath: %w", err)
+		}
+		dataDir = dataResolved
 	}
 
 	info, err := os.Stat(targetDir)

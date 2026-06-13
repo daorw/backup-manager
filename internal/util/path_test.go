@@ -7,6 +7,149 @@ import (
 	"testing"
 )
 
+func TestSafeJoin(t *testing.T) {
+	root := t.TempDir()
+
+	t.Run("relative path join", func(t *testing.T) {
+		resolved, err := SafeJoin(root, "foo/bar")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := filepath.Join(root, "foo", "bar")
+		if resolved != expected {
+			t.Fatalf("expected %s, got %s", expected, resolved)
+		}
+	})
+
+	t.Run("rejects simple traversal", func(t *testing.T) {
+		if _, err := SafeJoin(root, "../etc/passwd"); err == nil {
+			t.Fatal("expected error for ../ traversal")
+		}
+	})
+
+	t.Run("rejects complex traversal", func(t *testing.T) {
+		cases := []string{
+			"foo/../../etc/passwd",
+			"foo/../..",
+			"foo/bar/../../..",
+			"..",
+		}
+		for _, c := range cases {
+			if _, err := SafeJoin(root, c); err == nil {
+				t.Fatalf("expected error for %q", c)
+			}
+		}
+	})
+
+	t.Run("allows nested symlink pointing outside root", func(t *testing.T) {
+		outsideDir := t.TempDir()
+		outsideFile := filepath.Join(outsideDir, "allowed.txt")
+		os.WriteFile(outsideFile, []byte("allowed"), 0644)
+
+		// Simulate a directory symlink that contains a nested symlink to outsideDir
+		dirSymlink := filepath.Join(root, "dir_link")
+		os.Symlink(outsideDir, dirSymlink)
+
+		resolved, err := SafeJoin(dirSymlink, "allowed.txt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := filepath.Join(dirSymlink, "allowed.txt")
+		if resolved != expected {
+			t.Fatalf("expected %s, got %s", expected, resolved)
+		}
+	})
+
+	t.Run("absolute path within root", func(t *testing.T) {
+		resolved, err := SafeJoin(root, filepath.Join(root, "a.txt"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := filepath.Join(root, "a.txt")
+		if resolved != expected {
+			t.Fatalf("expected %s, got %s", expected, resolved)
+		}
+	})
+
+	t.Run("absolute path outside root", func(t *testing.T) {
+		outside := t.TempDir()
+		if _, err := SafeJoin(root, filepath.Join(outside, "a.txt")); err == nil {
+			t.Fatal("expected error for absolute path outside root")
+		}
+	})
+
+	t.Run("dot path resolves to root", func(t *testing.T) {
+		resolved, err := SafeJoin(root, ".")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		absRoot, _ := filepath.Abs(root)
+		if resolved != absRoot {
+			t.Fatalf("expected %s, got %s", absRoot, resolved)
+		}
+	})
+
+	t.Run("empty subPath resolves to root", func(t *testing.T) {
+		resolved, err := SafeJoin(root, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		absRoot, _ := filepath.Abs(root)
+		if resolved != absRoot {
+			t.Fatalf("expected %s, got %s", absRoot, resolved)
+		}
+	})
+
+	t.Run("subPath cleanable to root is allowed", func(t *testing.T) {
+		resolved, err := SafeJoin(root, "foo/..")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		absRoot, _ := filepath.Abs(root)
+		if resolved != absRoot {
+			t.Fatalf("expected %s, got %s", absRoot, resolved)
+		}
+	})
+
+	t.Run("relative allowedRoot", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("failed to get working directory: %v", err)
+		}
+		relRoot, err := filepath.Rel(cwd, root)
+		if err != nil {
+			t.Fatalf("failed to compute relative root: %v", err)
+		}
+
+		resolved, err := SafeJoin(relRoot, "foo")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := filepath.Join(root, "foo")
+		realExpected, _ := filepath.EvalSymlinks(expected)
+		if resolved != expected && resolved != realExpected {
+			t.Fatalf("expected %s or %s, got %s", expected, realExpected, resolved)
+		}
+	})
+
+	t.Run("allowedRoot is symlink", func(t *testing.T) {
+		realRoot := t.TempDir()
+		linkRoot := filepath.Join(t.TempDir(), "linkroot")
+		if err := os.Symlink(realRoot, linkRoot); err != nil {
+			t.Fatalf("failed to create symlink: %v", err)
+		}
+
+		resolved, err := SafeJoin(linkRoot, "foo")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := filepath.Join(linkRoot, "foo")
+		if resolved != expected {
+			t.Fatalf("expected %s, got %s", expected, resolved)
+		}
+	})
+}
+
 func TestSafeResolve(t *testing.T) {
 	// Create temp dir structure
 	root := t.TempDir()

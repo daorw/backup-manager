@@ -62,9 +62,16 @@ func (s *PreviewService) ResolveSource(repoID, relPath string) (*ResolvedSource,
 		prefix := sym.RelativePath + "/"
 		if strings.HasPrefix(relPath, prefix) {
 			suffix := strings.TrimPrefix(relPath, prefix)
-			sourcePath, err := util.SafeResolveFile(sym.TargetPath, suffix)
+			sourcePath, err := util.SafeJoin(sym.TargetPath, suffix)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve file inside directory symlink: %w", err)
+			}
+			info, err := os.Stat(sourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("source file not found: %w", err)
+			}
+			if info.IsDir() {
+				return nil, fmt.Errorf("cannot preview a directory")
 			}
 			return &ResolvedSource{
 				SourcePath:       sourcePath,

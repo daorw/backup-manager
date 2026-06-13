@@ -7,6 +7,48 @@ import (
 	"strings"
 )
 
+// SafeJoin securely joins a sub-path to an allowed root directory.
+// It performs the following checks:
+//   1. Cleans the subPath using filepath.Clean
+//   2. Rejects path traversal attempts (.. or ../)
+//   3. If subPath is absolute, ensures it is within allowedRoot
+//   4. Joins subPath to allowedRoot and ensures result is within allowedRoot
+//
+// Unlike SafeResolve, SafeJoin does NOT call filepath.EvalSymlinks.
+// This is intentional for directory symlink traversal: when the user has
+// already authorized a directory symlink, nested symlinks inside it may
+// legitimately point outside the allowedRoot, and we should not reject them.
+func SafeJoin(allowedRoot, subPath string) (string, error) {
+	cleaned := filepath.Clean(subPath)
+
+	if !filepath.IsAbs(cleaned) && !filepath.IsLocal(cleaned) {
+		return "", fmt.Errorf("path traversal not allowed: %s", subPath)
+	}
+
+	absRoot, err := filepath.Abs(allowedRoot)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve allowed root: %w", err)
+	}
+
+	var result string
+	if filepath.IsAbs(cleaned) {
+		result = cleaned
+	} else {
+		result = filepath.Join(absRoot, cleaned)
+	}
+
+	// Ensure result is within allowedRoot
+	rootPrefix := absRoot
+	if !strings.HasSuffix(rootPrefix, string(filepath.Separator)) {
+		rootPrefix += string(filepath.Separator)
+	}
+	if result != absRoot && !strings.HasPrefix(result, rootPrefix) {
+		return "", fmt.Errorf("path outside allowed root: %s", subPath)
+	}
+
+	return result, nil
+}
+
 // SafeResolve resolves userPath relative to allowedRoot and ensures the
 // resolved path does not escape allowedRoot via symlinks or ".." traversal.
 //

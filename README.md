@@ -38,6 +38,8 @@
 
 ## 快速开始
 
+详细图文指南请参考 [Quick Start Guide](docs/quick-start.md)。
+
 ### 前置条件
 
 - Go 1.22+

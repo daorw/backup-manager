@@ -8,7 +8,7 @@ Backup Manager is a file/directory aggregation backup visualization management t
 
 The main dashboard shows all your backup repositories with their status and basic information.
 
-![Dashboard](images/dashboard.png)
+![Dashboard](assets/dashboard.png)
 
 - View all backup repositories
 - See repository status (active/inactive)
@@ -27,13 +27,13 @@ The main dashboard shows all your backup repositories with their status and basi
 
 Once you open a repository, you'll see four main tabs:
 
-![Repository Detail](images/repository-detail.png)
+![Repository Detail](assets/repository-detail.png)
 
 ## Symlinks Tab
 
 The Symlinks tab shows all files and directories that are backed up via symlinks.
 
-![Symlinks Tab](images/symlinks-tab.png)
+![Symlinks Tab](assets/symlinks-tab.png)
 
 ### Features:
 - View symlink hierarchy
@@ -50,7 +50,7 @@ The Symlinks tab shows all files and directories that are backed up via symlinks
 
 The Preview tab allows you to view and edit backed-up files directly.
 
-![Preview Tab](images/preview-tab.png)
+![Preview Tab](assets/preview-tab.png)
 
 ### Features:
 - Browse file structure
@@ -69,7 +69,7 @@ The Preview tab allows you to view and edit backed-up files directly.
 
 The Backup tab shows backup history and provides backup controls.
 
-![Backup Tab](images/backup-tab.png)
+![Backup Tab](assets/backup-tab.png)
 
 ### Features:
 - View last backup time
@@ -93,7 +93,7 @@ The Backup tab shows backup history and provides backup controls.
 
 The Config tab manages repository configuration settings.
 
-![Config Tab](images/config-tab.png)
+![Config Tab](assets/config-tab.png)
 
 ### Configuration Options:
 - **Remote URL**: Git remote repository URL
@@ -106,7 +106,7 @@ The Config tab manages repository configuration settings.
 
 Configure Git authentication for remote repositories.
 
-![Git Authentication](images/git-authentication.png)
+![Git Authentication](assets/git-authentication.png)
 
 ### Authentication Types:
 - **SSH Key**: Use SSH private key for authentication
@@ -124,7 +124,7 @@ Configure Git authentication for remote repositories.
 
 ⚠️ **Warning**: These actions are irreversible!
 
-![Danger Zone](images/danger-zone.png)
+![Danger Zone](assets/danger-zone.png)
 
 ### Delete Repository:
 - Permanently removes all data

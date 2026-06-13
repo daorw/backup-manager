@@ -8,20 +8,11 @@ import CreateRepoModal from '../components/repo/CreateRepoModal';
 const Dashboard: React.FC = () => {
   const repos = useAppStore((s) => s.repos);
   const fetchRepos = useAppStore((s) => s.fetchRepos);
-  const deleteRepo = useAppStore((s) => s.deleteRepo);
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
   useEffect(() => {
     fetchRepos();
   }, [fetchRepos]);
-
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteRepo(id);
-    } catch {
-      // Error is handled by the store
-    }
-  };
 
   return (
     <div>
@@ -82,7 +73,7 @@ const Dashboard: React.FC = () => {
         <Row gutter={[16, 16]}>
           {repos.map((repo) => (
             <Col key={repo.id} xs={24} sm={12} lg={8} xl={6}>
-              <RepoCard repo={repo} onDelete={handleDelete} />
+              <RepoCard repo={repo} />
             </Col>
           ))}
         </Row>

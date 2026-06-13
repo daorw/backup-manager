@@ -1,10 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Tag, Typography, Space, Button, Popconfirm } from 'antd';
+import { Card, Tag, Typography, Space, Button } from 'antd';
 import {
   FolderOutlined,
   RightCircleOutlined,
-  DeleteOutlined,
   ClockCircleOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
@@ -20,7 +19,6 @@ dayjs.locale('zh-cn');
 
 interface RepoCardProps {
   repo: BackupRepo;
-  onDelete: (id: string) => void;
 }
 
 const statusConfig: Record<
@@ -44,7 +42,7 @@ const statusConfig: Record<
   },
 };
 
-const RepoCard: React.FC<RepoCardProps> = ({ repo, onDelete }) => {
+const RepoCard: React.FC<RepoCardProps> = ({ repo }) => {
   const navigate = useNavigate();
   const status = statusConfig[repo.status] || statusConfig.active;
 
@@ -60,18 +58,6 @@ const RepoCard: React.FC<RepoCardProps> = ({ repo, onDelete }) => {
         >
           Open
         </Button>,
-        <Popconfirm
-          title="Delete repository?"
-          description="This will permanently delete the repository and all its data."
-          onConfirm={() => onDelete(repo.id)}
-          okText="Delete"
-          cancelText="Cancel"
-          okButtonProps={{ danger: true }}
-        >
-          <Button type="link" danger icon={<DeleteOutlined />}>
-            Delete
-          </Button>
-        </Popconfirm>,
       ]}
     >
       <Card.Meta

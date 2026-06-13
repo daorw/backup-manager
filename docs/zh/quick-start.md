@@ -40,9 +40,15 @@ Symlinks 标签页展示所有通过软链接备份的文件和目录。
 - 查看源文件原始路径
 
 ### 添加软链接：
-1. 点击 "+ Add Symlink"
-2. 浏览或输入目标文件/目录路径
-3. 确认添加
+
+点击 Symlinks 标签页中的 "+ Add Symlink" 按钮，打开添加软链接对话框：
+
+![添加软链接对话框](../assets/add-symlink.jpeg)
+
+1. **Source Path**：输入或浏览选择要备份的文件或目录路径（如 `~/.config/opencode/opencode.json`）
+2. **Link Name**：指定备份文件在 `.links/` 中的相对存储路径（如 `opencode/opencode.json`），用于定义仓库内的目录结构
+3. **File Browser**：预览当前 Link Name 根目录下已备份的文件
+4. 点击 **Add** 确认添加，或 **Cancel** 取消
 
 ## Preview Tab
 

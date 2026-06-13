@@ -42,9 +42,15 @@ The Symlinks tab displays all files and directories backed up via symlinks.
 - View the original path of the source file
 
 ### Adding a Symlink:
-1. Click "+ Add Symlink"
-2. Browse or enter the target file/directory path
-3. Confirm the addition
+
+Click the "+ Add Symlink" button in the Symlinks tab to open the Add Symlink dialog:
+
+![Add Symlink Dialog](assets/add-symlink.jpeg)
+
+1. **Source Path**: Enter or browse to select the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`)
+2. **Link Name**: Specify the relative path within `.links/` for storing the backup files (e.g. `opencode/opencode.json`). This defines the directory structure inside the repository.
+3. **File Browser**: Preview the currently backed-up files under the specified Link Name root directory.
+4. Click **Add** to confirm, or **Cancel** to discard.
 
 ## Preview Tab
 

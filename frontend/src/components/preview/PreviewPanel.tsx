@@ -5,6 +5,7 @@ import {
   FolderOutlined,
   ReloadOutlined,
   FileTextOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { useAppStore } from '../../store/appStore';
@@ -158,6 +159,35 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
       const entries = await fetchDirEntries(repoId, linkId, browseRelPath || '');
       const children: PreviewTreeNode[] = entries.map((entry: SymlinkDirEntry) => {
         const nodeKey = `${key}/${entry.name}`;
+
+        // Nested symlink directory: render as an expandable folder so its
+        // contents can be traversed (and it cannot be previewed as a file).
+        if (entry.type === 'symlink_directory') {
+          return {
+            key: nodeKey,
+            title: (
+              <span>
+                {entry.name}
+                {entry.is_new && (
+                  <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>new</Tag>
+                )}
+                {entry.nested_target && (
+                  <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                    → {entry.nested_target}
+                  </Typography.Text>
+                )}
+              </span>
+            ),
+            isLeaf: false,
+            icon: <FolderOutlined style={{ color: '#1890ff' }} />,
+            linkId: linkId,
+            browseRelPath: browseRelPath
+              ? `${browseRelPath}/${entry.name}`
+              : entry.name,
+            children: [],
+          };
+        }
+
         if (entry.type === 'directory') {
           return {
             key: nodeKey,
@@ -171,6 +201,30 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
             children: [],
           };
         }
+
+        // Broken or cycle nested symlink: render as a non-selectable leaf.
+        if (entry.type === 'symlink_error') {
+          return {
+            key: nodeKey,
+            title: (
+              <span>
+                {entry.name}
+                <Tag color="red" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>
+                  {entry.has_cycle ? 'cycle' : 'depth limit'}
+                </Tag>
+              </span>
+            ),
+            isLeaf: true,
+            selectable: false,
+            disabled: true,
+            icon: <LinkOutlined style={{ color: '#ff4d4f' }} />,
+            linkId: linkId,
+            browseRelPath: browseRelPath
+              ? `${browseRelPath}/${entry.name}`
+              : entry.name,
+          };
+        }
+
         return {
           key: nodeKey,
           title: (
@@ -179,10 +233,19 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
               {entry.is_new && (
                 <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>new</Tag>
               )}
+              {entry.is_nested_symlink && entry.nested_target && (
+                <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                  → {entry.nested_target}
+                </Typography.Text>
+              )}
             </span>
           ),
           isLeaf: true,
-          icon: <FileTextOutlined />,
+          icon: entry.is_nested_symlink ? (
+            <FileOutlined style={{ color: '#52c41a' }} />
+          ) : (
+            <FileOutlined />
+          ),
           linkId: linkId,
           browseRelPath: browseRelPath
             ? `${browseRelPath}/${entry.name}`
@@ -212,7 +275,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
       if (processedChildren && processedChildren.length > 0) {
         return { ...node, children: mergeTreeData(processedChildren) };
       }
-      return { ...node, children: processedChildren || [] };
+      return { ...node, children: processedChildren };
     });
   };
 

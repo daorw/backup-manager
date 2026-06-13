@@ -1,152 +1,154 @@
 # Backup Manager - Quick Start Guide
 
+> 🇨🇳 [中文文档](zh/quick-start.md)
+
 ## Overview
 
-Backup Manager 是一个文件/目录聚合备份可视化管理工具。基于 Git 的反向追踪模式（白名单机制），让用户以"指定要备份什么"而非"排除什么"的直观方式管理备份。
+Backup Manager is a visual management tool for file/directory aggregated backup. Based on Git's reverse tracking mode (whitelist mechanism), it allows users to manage backups intuitively by "specifying what to back up" rather than "what to exclude".
 
 ## Dashboard
 
-主界面展示所有备份仓库的状态和基本信息。
+The main interface shows the status and basic information of all backup repositories.
 
 ![Dashboard](assets/repository-dashboard.png)
 
-- 查看所有备份仓库
-- 查看仓库状态（active/inactive）
-- 快速操作（Open, Delete）
-- 创建新仓库
+- View all backup repositories
+- View repository status (active/inactive)
+- Quick actions (Open, Delete)
+- Create a new repository
 
 ## Repository Management
 
 ### Creating a Repository
 
-1. 点击 Dashboard 右上角 "+ Create Repository" 按钮
-2. 输入仓库名称和路径
-3. 配置基本设置
+1. Click the "+ Create Repository" button in the top right of the Dashboard
+2. Enter the repository name and path
+3. Configure basic settings
 
 ### Repository Detail View
 
-打开仓库后，可以看到四个主要标签页：**Symlinks**、**Preview**、**Backup**、**Config**。
+After opening a repository, you can see four main tabs: **Symlinks**, **Preview**, **Backup**, **Config**.
 
 ## Symlinks Tab
 
-Symlinks 标签页展示所有通过软链接备份的文件和目录。
+The Symlinks tab displays all files and directories backed up via symlinks.
 
 ![Symlinks Tab](assets/symlinks.png)
 
-### 功能：
-- 树形展示软链接层级
-- 点击 "+ Add Symlink" 添加新软链接
-- 点击 "Refresh" 刷新列表
-- 查看源文件原始路径
+### Features:
+- Tree view of symlink hierarchy
+- Click "+ Add Symlink" to add a new symlink
+- Click "Refresh" to refresh the list
+- View the original path of the source file
 
-### 添加软链接：
-1. 点击 "+ Add Symlink"
-2. 浏览或输入目标文件/目录路径
-3. 确认添加
+### Adding a Symlink:
+1. Click "+ Add Symlink"
+2. Browse or enter the target file/directory path
+3. Confirm the addition
 
 ## Preview Tab
 
-Preview 标签页允许您直接查看和编辑备份的文件。
+The Preview tab allows you to directly view and edit backed up files.
 
 ![Preview Tab](assets/preview.png)
 
-### 功能：
-- 浏览文件结构
-- 预览文件内容
-- 点击 "Edit" 编辑文件
-- 点击 "Save" 保存更改
-- 查看文件元数据
+### Features:
+- Browse the file structure
+- Preview file content
+- Click "Edit" to edit the file
+- Click "Save" to save changes
+- View file metadata
 
-### 文件操作：
-1. 在左侧树形视图选择文件
-2. 右侧预览文件内容
-3. 点击 "Edit" 进入编辑模式
-4. 点击 "Save" 保存更改
+### File Operations:
+1. Select a file in the left tree view
+2. Preview the file content on the right
+3. Click "Edit" to enter edit mode
+4. Click "Save" to save changes
 
 ## Backup Tab
 
-Backup 标签页显示备份历史和备份控制按钮。
+The Backup tab displays backup history and backup control buttons.
 
 ![Backup Tab](assets/backup.png)
 
-### 功能：
-- 查看上次备份时间
-- 查看总备份次数
-- 监控备份状态
-- 执行备份操作
+### Features:
+- View the last backup time
+- View the total number of backups
+- Monitor backup status
+- Execute backup operations
 
-### 备份控制：
-- **Git Init**: 初始化 Git 仓库
-- **Trigger Backup**: 手动触发备份
-- **Push to Remote**: 推送到远程仓库
-- **Force Push**: 强制推送（谨慎使用）
+### Backup Controls:
+- **Git Init**: Initialize the Git repository
+- **Trigger Backup**: Manually trigger a backup
+- **Push to Remote**: Push to the remote repository
+- **Force Push**: Force push (use with caution)
 
-### 备份历史：
-- 查看 commit hash
-- 查看提交作者
-- 查看提交日期
-- 查看提交信息
+### Backup History:
+- View the commit hash
+- View the commit author
+- View the commit date
+- View the commit message
 
 ## Config Tab
 
-Config 标签页管理仓库配置设置。
+The Config tab manages repository configuration settings.
 
 ![Config Tab](assets/git-remote-config.png)
 
-### 配置选项：
-- **Remote URL**: Git 远程仓库地址
-- **Branch**: 备份目标分支
-- **Git User Name**: 提交作者名称
-- **Git User Email**: 提交作者邮箱
-- **Automatic Backup**: 启用/禁用定时自动备份
+### Configuration Options:
+- **Remote URL**: Git remote repository address
+- **Branch**: Target branch for backup
+- **Git User Name**: Commit author name
+- **Git User Email**: Commit author email
+- **Automatic Backup**: Enable/disable scheduled automatic backup
 
 ## Git Authentication & Danger Zone
 
-配置 Git 认证信息，以及危险操作区域。
+Configure Git authentication information, and the danger zone.
 
 ![Git Authentication & Danger Zone](assets/git-auth-config.png)
 
-### 认证类型：
-- **SSH Key**: 使用 SSH 私钥认证
-- **HTTPS**: 使用用户名/密码认证
+### Authentication Types:
+- **SSH Key**: Authenticate using an SSH private key
+- **HTTPS**: Authenticate using username/password
 
-### SSH Key 配置：
-1. 在 Authentication Type 下拉框选择 "SSH Key"
-2. 输入 SSH 私钥路径（如 `~/.ssh/id_ed25519`）
-3. 点击 "Save Authentication"
+### SSH Key Configuration:
+1. Select "SSH Key" from the Authentication Type dropdown
+2. Enter the SSH private key path (e.g. `~/.ssh/id_ed25519`)
+3. Click "Save Authentication"
 
-### 清除认证：
-- 点击 "Clear" 删除已保存的认证信息
+### Clear Authentication:
+- Click "Clear" to delete saved authentication information
 
 ### Danger Zone ⚠️
-- **Delete Repository**: 永久删除仓库所有数据（软链接、备份数据、Git 历史），此操作不可逆
-- **Back to Dashboard**: 返回仓库列表
+- **Delete Repository**: Permanently delete all repository data (symlinks, backup data, Git history). This operation is irreversible.
+- **Back to Dashboard**: Return to the repository list
 
 ## Getting Started Workflow
 
-1. **安装运行**: 下载并启动 Backup Manager
-2. **创建仓库**: 设置第一个备份仓库
-3. **添加软链接**: 指定要备份的文件/目录
-4. **配置 Git**: 设置远程仓库和认证信息
-5. **执行备份**: 运行第一次备份
-6. **监控状态**: 查看备份状态和历史记录
+1. **Install & Run**: Download and start Backup Manager
+2. **Create Repository**: Set up your first backup repository
+3. **Add Symlinks**: Specify the files/directories to back up
+4. **Configure Git**: Set up remote repository and authentication information
+5. **Run Backup**: Execute the first backup
+6. **Monitor Status**: View backup status and history
 
 ## Best Practices
 
-- 从少量重要文件开始
-- 使用有意义的 commit message
-- 为关键数据配置自动备份
-- 定期验证备份完整性
-- 妥善保管认证凭据
+- Start with a few important files
+- Use meaningful commit messages
+- Configure automatic backup for critical data
+- Regularly verify backup integrity
+- Safely store authentication credentials
 
 ## Troubleshooting
 
-### 常见问题：
-- **备份失败**: 检查 Git 配置和认证信息
-- **软链接不显示**: 验证文件权限和路径
-- **远程推送失败**: 确保远程仓库存在且凭据正确
+### Common Issues:
+- **Backup Failed**: Check Git configuration and authentication information
+- **Symlinks Not Displaying**: Verify file permissions and paths
+- **Remote Push Failed**: Ensure the remote repository exists and credentials are correct
 
-### 获取帮助：
-- 查看应用日志获取详细错误信息
-- 确认所有依赖已正确安装
-- 确保文件权限正确
+### Getting Help:
+- Check the application logs for detailed error information
+- Ensure all dependencies are properly installed
+- Ensure file permissions are correct

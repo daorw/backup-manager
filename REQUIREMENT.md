@@ -1,136 +1,138 @@
-# 需求分析文档 — Backup Manager
+# Requirements Analysis Document — Backup Manager
 
-## 1. 产品概述
+> 🇨🇳 [中文文档](docs/zh/REQUIREMENT.md)
 
-| 项目 | 内容 |
+## 1. Product Overview
+
+| Field | Content |
 |------|------|
-| 产品名称 | Backup Manager（备份管理器） |
-| 产品定位 | 文件/目录聚合备份可视化管理软件 |
-| 一句话描述 | 基于 Git 的反向追踪模式（白名单机制），通过软链接聚合管理源文件，并提供可视化界面的备份管理工具。 |
-| 核心价值 | 让用户以"指定要备份什么"（而非"排除什么"）的直观方式管理备份，同时提供可视化操作界面，降低备份管理门槛。 |
+| Product Name | Backup Manager |
+| Product Positioning | File/directory aggregated backup visual management software |
+| One-line Description | A backup management tool based on Git's reverse tracking mode (whitelist mechanism), aggregating and managing source files through symlinks, with a visual interface. |
+| Core Value | Enables users to manage backups intuitively by "specifying what to back up" (rather than "what to exclude"), while providing a visual operation interface to lower the barrier to backup management. |
 
-### 1.1 核心设计理念
+### 1.1 Core Design Principles
 
-**反向追踪模型**：与 `.gitignore` 的"排除模式"相反，用户主动指定哪些文件/目录需要被追踪备份，未被指定的文件自动忽略。类似于一个白名单系统。
+**Reverse Tracking Model**: Contrary to `.gitignore`'s "exclusion mode", users proactively specify which files/directories need to be tracked and backed up; unspecified files are automatically ignored. Similar to a whitelist system.
 
-**软链接聚合**：用户创建的备份仓库（repo）内部使用软链接来"指向"源文件，软链接集中管理在 `.links/` 目录下。实际备份时，系统将软链接指向的源文件内容同步到 `data/` 目录，然后通过 Git 进行版本管理。
+**Symlink Aggregation**: Inside a backup repository (repo) created by the user, symlinks are used to "point to" source files, centrally managed under the `.links/` directory. During actual backup, the system syncs the content of the source files pointed to by the symlinks to the `data/` directory, which is then version-controlled via Git.
 
-**前后端一体**：系统采用前后端一体架构，单进程一键启动，无需分别部署前端和后端服务。
+**Unified Frontend and Backend**: The system adopts a unified frontend-backend architecture, running as a single process with one-click startup, eliminating the need to deploy frontend and backend services separately.
 
 ---
 
-## 2. 用户角色
+## 2. User Roles
 
-| 角色 | 描述 | 核心诉求 |
+| Role | Description | Core Needs |
 |------|------|----------|
-| **普通用户** | 个人用户，希望备份自己的文件/目录 | 简单易用，可视化操作，快速预览文件内容 |
-| **高级用户** | 有一定技术背景，了解 Git 概念 | 精细控制备份策略，查看 Git 提交历史，手动管理软链接，回滚源文件 |
+| **Regular User** | Individual users who want to back up their own files/directories | Simple and easy to use, visual operations, quick file content preview |
+| **Advanced User** | Users with some technical background who understand Git concepts | Fine-grained control over backup strategies, view Git commit history, manually manage symlinks, roll back source files |
 
 ---
 
-## 3. 功能需求
+## 3. Functional Requirements
 
-### 3.1 备份仓库管理
+### 3.1 Backup Repository Management
 
-| ID | 功能 | 描述 | 优先级 |
+| ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-1 | 创建备份仓库 | 用户通过 UI 创建一个新的备份仓库，选择本地路径作为 repo 根目录 | P0 |
-| FR-2 | 查看仓库列表 | 展示所有已创建的备份仓库，包含基本信息 | P0 |
-| FR-3 | 删除备份仓库 | 删除一个已创建的备份仓库（仅移除数据库记录，保留文件系统数据） | P1 |
-| FR-4 | 编辑仓库配置 | 可视化编辑仓库配置：远程仓库地址、分支、Git 用户名/邮箱、定时备份开关和间隔 | P0 |
+| FR-1 | Create Backup Repository | User creates a new backup repository via UI, selecting a local path as the repo root directory | P0 |
+| FR-2 | View Repository List | Display all created backup repositories with basic information | P0 |
+| FR-3 | Delete Backup Repository | Delete an existing backup repository (only removes database records, preserves filesystem data) | P1 |
+| FR-4 | Edit Repository Config | Visually edit repository configuration: remote URL, branch, Git username/email, scheduled backup toggle and interval | P0 |
 
-### 3.2 软链接管理（.links/ 目录）
+### 3.2 Symlink Management (.links/ directory)
 
-| ID | 功能 | 描述 | 优先级 |
+| ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-5 | 添加软链接 | 用户通过 UI 选择源文件/目录，自动在 `.links/` 下创建对应的软链接，同时复制源文件到 `data/` | P0 |
-| FR-6 | 查看软链接列表 | 以树形结构展示 `.links/` 目录下的所有软链接 | P0 |
-| FR-7 | 删除软链接 | 删除指定的软链接，同步删除 `data/` 中的对应文件 | P0 |
-| FR-8 | 修改软链接目标 | 修改软链接指向的源文件/目录路径 | P1 |
-| FR-9 | 批量导入软链接 | 支持批量选择多个源文件/目录添加软链接，部分失败时自动回滚 | P1 |
-| FR-10 | 已删除源文件同步清理 | 检测源文件已被删除的软链接，同步清理 `data/` 中的对应文件并生成 Git 提交 | P2 |
+| FR-5 | Add Symlink | User selects source files/directories via UI, automatically creates corresponding symlinks under `.links/` and copies source files to `data/` | P0 |
+| FR-6 | View Symlink List | Display all symlinks under `.links/` directory in a tree structure | P0 |
+| FR-7 | Delete Symlink | Delete a specified symlink and synchronously remove the corresponding file in `data/` | P0 |
+| FR-8 | Modify Symlink Target | Change the source file/directory path that the symlink points to | P1 |
+| FR-9 | Batch Import Symlinks | Support batch selection of multiple source files/directories to add symlinks, with automatic rollback on partial failure | P1 |
+| FR-10 | Clean Up Deleted Source Files | Detect symlinks whose source files have been deleted, synchronously clean up corresponding files in `data/` and generate a Git commit | P2 |
 
-### 3.3 文件预览与编辑
+### 3.3 File Preview and Editing
 
-| ID | 功能 | 描述 | 优先级 |
+| ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-11 | 纯文本文件预览与编辑 | 在 UI 中阅览和编辑纯文本源文件内容（如 .txt, .log, .json, .yaml, .py 等），支持编辑保存到源文件。操作对象为软链接指向的源文件。 | P0 |
-| FR-12 | Markdown 渲染预览与编辑 | 渲染显示 Markdown 源文件（.md），支持本地图片显示。支持编辑模式与预览模式切换，编辑保存到源文件。操作对象为软链接指向的源文件。 | P0 |
-| FR-13 | 二进制文件标识 | 对于非文本文件显示文件类型信息和大小，不尝试预览内容 | P2 |
+| FR-11 | Plain Text File Preview and Edit | View and edit plain text source file contents in the UI (e.g., .txt, .log, .json, .yaml, .py, etc.), with save-to-source-file support. The operation targets the source file pointed to by the symlink. | P0 |
+| FR-12 | Markdown Rendered Preview and Edit | Render and display Markdown source files (.md) with local image support. Supports toggling between edit mode and preview mode, saving edits to the source file. The operation targets the source file pointed to by the symlink. | P0 |
+| FR-13 | Binary File Identification | Display file type information and size for non-text files, without attempting to preview content | P2 |
 
-### 3.4 备份执行
+### 3.4 Backup Execution
 
-| ID | 功能 | 描述 | 优先级 |
+| ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-14 | 执行备份 | 手动触发一次备份操作：增量检测（mtime+size）→ 同步变更到 `data/` → `git add` → `git commit` →（可选）`git push`，支持进度展示 | P0 |
-| FR-15 | 定时/自动备份 | 按配置的 cron 表达式定时自动执行备份，应用启动时自动加载已启用的仓库 | P1 |
-| FR-16 | 备份历史查看 | 查看仓库的 Git 提交历史，支持分页 | P1 |
-| FR-17 | 源文件回滚 | 选择历史提交版本，将源文件恢复到指定提交中的版本。支持选择部分文件回滚或全量回滚 | P1 |
+| FR-14 | Execute Backup | Manually trigger a backup operation: incremental detection (mtime+size) → sync changes to `data/` → `git add` → `git commit` → (optional) `git push`, with progress display | P0 |
+| FR-15 | Scheduled/Auto Backup | Automatically execute backups at scheduled times based on configured cron expression, auto-load enabled repositories on application startup | P1 |
+| FR-16 | View Backup History | View the repository's Git commit history with pagination support | P1 |
+| FR-17 | Source File Rollback | Select a historical commit version and restore source files to the version in the specified commit. Supports partial or full rollback. | P1 |
 
-### 3.5 配置管理
+### 3.5 Configuration Management
 
-| ID | 功能 | 描述 | 优先级 |
+| ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-18 | Git 远程仓库配置 | 可视化配置 Git 远程仓库地址和目标分支 | P0 |
-| FR-19 | Git 认证配置 | 配置 Git 操作所需的认证信息（SSH 私钥 或 HTTPS 用户名密码），加密存储在 SQLite | P1 |
-| FR-20 | 应用全局设置 | 应用级别的基本设置（端口号、主题、是否自动打开浏览器） | P1 |
+| FR-18 | Git Remote Repository Config | Visually configure the Git remote repository URL and target branch | P0 |
+| FR-19 | Git Authentication Config | Configure authentication information required for Git operations (SSH private key or HTTPS username/password), stored encrypted in SQLite | P1 |
+| FR-20 | Application Global Settings | Application-level basic settings (port number, theme, whether to auto-open browser) | P1 |
 
-### 3.6 系统管理
+### 3.6 System Management
 
-| ID | 功能 | 描述 | 优先级 |
+| ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-21 | 应用启动/停止 | 一键启动和停止整个应用，启动后自动打开浏览器 | P0 |
-| FR-22 | 本地文件浏览 | 安全浏览本地文件系统，用于选择软链接源文件和预览文件，限定在用户主目录和仓库根目录 | P0 |
-| FR-23 | 健康检查 | 提供 `/health` 端点，返回应用运行状态、启动时间和版本信息 | P2 |
+| FR-21 | Application Start/Stop | One-click start and stop of the entire application, auto-open browser after startup | P0 |
+| FR-22 | Local File Browser | Safely browse the local filesystem for selecting symlink source files and previewing files, limited to the user's home directory and repo root directory | P0 |
+| FR-23 | Health Check | Provide `/health` endpoint returning application running status, startup time, and version information | P2 |
 
 ---
 
-## 4. 非功能需求
+## 4. Non-Functional Requirements
 
-| ID | 需求 | 描述 |
+| ID | Requirement | Description |
 |----|------|------|
-| NFR-1 | **前后端一体架构** | 前端 UI 和后端服务整合为一个应用，单进程运行 |
-| NFR-2 | **跨平台支持** | 至少支持 macOS 和 Linux |
-| NFR-3 | **响应式 UI** | 界面适配不同屏幕尺寸 |
-| NFR-4 | **安全性** | 删除软链接和删除仓库前二次确认；预览和编辑源文件时需通过路径安全校验 |
-| NFR-5 | **数据一致性** | `.links/` 和 `data/` 目录结构镜像一致 |
-| NFR-6 | **备份原子性** | 备份失败应有清晰的提示和错误状态 |
-| NFR-7 | **易用性** | 核心功能在 3 次点击内可完成 |
-| NFR-8 | **启动方式** | 启动后自动打开浏览器 |
-| NFR-9 | **路径安全** | 四层路径校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越 |
-| NFR-10 | **并发安全** | 每个仓库独立互斥锁防止并发备份；预览/编辑接口限流（最大 5 并发） |
-| NFR-11 | **敏感信息加密** | SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密后存储在 SQLite，密钥文件权限 0600 |
+| NFR-1 | **Unified Frontend and Backend Architecture** | Frontend UI and backend service integrated into a single application, running as a single process |
+| NFR-2 | **Cross-Platform Support** | Support at least macOS and Linux |
+| NFR-3 | **Responsive UI** | Interface adapts to different screen sizes |
+| NFR-4 | **Security** | Require confirmation before deleting symlinks and repositories; path safety checks required when previewing and editing source files |
+| NFR-5 | **Data Consistency** | `.links/` and `data/` directory structures must be mirror-consistent |
+| NFR-6 | **Backup Atomicity** | Failed backups should have clear prompts and error status |
+| NFR-7 | **Usability** | Core features should be completable within 3 clicks |
+| NFR-8 | **Startup Behavior** | Auto-open browser after startup |
+| NFR-9 | **Path Safety** | Four-layer path validation (Clean→Abs→EvalSymlinks→Prefix) to prevent path traversal |
+| NFR-10 | **Concurrency Safety** | Independent mutex per repository to prevent concurrent backups; preview/edit API rate-limited (max 5 concurrent) |
+| NFR-11 | **Sensitive Information Encryption** | SSH private keys and HTTPS passwords encrypted with AES-256-GCM before storage in SQLite, key file permissions 0600 |
 
 ---
 
-## 5. 核心概念 / 数据模型
+## 5. Core Concepts / Data Model
 
-### 5.1 目录结构
+### 5.1 Directory Structure
 
 ```
 <repo-root>/
-├── .links/              # 软链接目录，结构与 data/ 完全复刻
+├── .links/              # Symlink directory, structure mirrors data/ exactly
 │   ├── documents/
 │   │   ├── report.docx -> /Users/xxx/Documents/report.docx
 │   │   └── notes.txt -> /Users/xxx/Documents/notes.txt
 │   └── config/
 │       └── settings.json -> /Users/xxx/.config/settings.json
-├── data/                # 实际备份数据目录，结构与 .links/ 完全复刻
+├── data/                # Actual backup data directory, structure mirrors .links/ exactly
 │   ├── documents/
 │   │   ├── report.docx
 │   │   └── notes.txt
 │   └── config/
 │       └── settings.json
-└── .git/                # Git 版本库
+└── .git/                # Git repository
 ```
 
-### 5.2 核心实体
+### 5.2 Core Entities
 
 ```
 BackupRepo
 ├── id: string
 ├── name: string
-├── path: string          # repo 根目录绝对路径
+├── path: string          # Absolute path to the repo root directory
 ├── createdAt: timestamp
 ├── updatedAt: timestamp
 ├── lastBackupAt: timestamp|null
@@ -139,7 +141,7 @@ BackupRepo
 │   ├── remoteUrl: string
 │   ├── branch: string (default: main)
 │   ├── autoBackup: boolean
-│   ├── autoBackupInterval: string (cron 表达式)
+│   ├── autoBackupInterval: string (cron expression)
 │   ├── gitUserName: string
 │   └── gitUserEmail: string
 └── symlinks: Symlink[]
@@ -147,71 +149,71 @@ BackupRepo
 Symlink
 ├── id: string
 ├── repoId: string
-├── relativePath: string   # 在 .links/ 下的相对路径（含文件名）
-├── targetPath: string     # 源文件/目录的绝对路径（预览和编辑操作的对象）
+├── relativePath: string   # Relative path under .links/ (including filename)
+├── targetPath: string     # Absolute path to the source file/directory (target for preview and edit operations)
 ├── type: 'file' | 'directory'
-├── size: number           # 源文件大小
-├── modifiedAt: timestamp  # 源文件最后修改时间
+├── size: number           # Source file size
+├── modifiedAt: timestamp  # Source file's last modification time
 └── createdAt: timestamp
 ```
 
-### 5.3 数据库 Schema
+### 5.3 Database Schema
 
-4 张核心表，外键级联删除：
+4 core tables with foreign key cascading deletes:
 
 ```sql
-repos         — 仓库: id, name, path, created_at, updated_at, last_backup_at, status
-repo_configs  — 配置: repo_id(FK), remote_url, branch, auto_backup, auto_backup_interval, git_user_name, git_user_email
-repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_private_key_path, username, password_encrypted(BLOB)
-symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path, type, file_size, modified_at, created_at
+repos         — Repository: id, name, path, created_at, updated_at, last_backup_at, status
+repo_configs  — Config: repo_id(FK), remote_url, branch, auto_backup, auto_backup_interval, git_user_name, git_user_email
+repo_auths    — Auth: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_private_key_path, username, password_encrypted(BLOB)
+symlinks      — Symlink: id, repo_id(FK), relative_path(UNIQUE), target_path, type, file_size, modified_at, created_at
 ```
 
 ---
 
-## 6. 用户确认的关键决策
+## 6. Key Decisions Confirmed by User
 
-| 问题 | 决策 |
+| Issue | Decision |
 |------|------|
-| Git 远程仓库 | `git push` 为可选项。未配置远程仓库时只做本地 commit 不 push |
-| 源文件删除后策略 | `data/` 中对应文件同步删除，并生成 Git 提交 |
-| 文件冲突 | 如果两个软链接指向同一个源文件，不做特别处理，正常执行 |
-| 备份粒度 | 增量同步，只同步修改过的文件（对比 mtime+size） |
-| 前端技术选型 | React 18 + TypeScript + Vite + Ant Design 5 |
-| 启动方式 | 启动后自动打开浏览器 |
-| Markdown 图片 | 支持 Markdown 中的本地图片显示 |
-| 多仓库 | 支持多个仓库并行管理 |
-| 后端框架 | Gin（Go 轻量高性能 HTTP 框架） |
-| 数据库 | SQLite（纯 Go 实现 modernc.org/sqlite，无需 CGO） |
-| 认证加密 | SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储 |
-| 源文件回滚 | 回滚操作会覆写源文件（需要用户确认），回滚前展示变更文件列表 |
-| 仓库删除 | 删除仓库仅移除数据库记录和调度任务，保留文件系统上的数据不丢失 |
-| **预览/编辑目标** | 预览和编辑操作的对象是**软链接指向的源文件**（target_path），而非 data/ 目录中的副本 |
+| Git Remote Repository | `git push` is optional. When remote is not configured, only local commits are made without push |
+| Strategy After Source File Deletion | Corresponding files in `data/` are deleted synchronously, and a Git commit is generated |
+| File Conflict | If two symlinks point to the same source file, no special handling is needed — proceed normally |
+| Backup Granularity | Incremental sync, only sync modified files (compare mtime+size) |
+| Frontend Technology Stack | React 18 + TypeScript + Vite + Ant Design 5 |
+| Startup Behavior | Auto-open browser after startup |
+| Markdown Images | Support local image display in Markdown |
+| Multiple Repositories | Support parallel management of multiple repositories |
+| Backend Framework | Gin (Go lightweight high-performance HTTP framework) |
+| Database | SQLite (pure Go implementation via modernc.org/sqlite, no CGO required) |
+| Authentication Encryption | SSH private keys and HTTPS passwords stored encrypted with AES-256-GCM |
+| Source File Rollback | Rollback overwrites source files (requires user confirmation), displays list of changed files before rollback |
+| Repository Deletion | Deleting a repository only removes database records and scheduled tasks, preserving filesystem data without loss |
+| **Preview/Edit Target** | Preview and edit operations target the **source file pointed to by the symlink** (target_path), not the copy in the data/ directory |
 
 ---
 
-## 7. 预览与编辑功能需求详情
+## 7. Preview and Edit Feature Details
 
-### 7.1 功能描述
+### 7.1 Feature Description
 
-在仓库详情页的预览（Preview）标签页中，用户可以通过文件树选择软链接文件，实现：
-- **纯文本文件**：查看文件内容（只读预览），并可切换至编辑模式修改内容后保存到源文件
-- **Markdown 文件**：在渲染预览模式与原始文本编辑模式之间切换，编辑后可保存到源文件
-- **二进制文件**：仅显示文件类型信息，不可编辑
+In the Preview tab of the repository detail page, users can select symlink files through the file tree to:
+- **Plain text files**: View file contents (read-only preview) and switch to edit mode to modify and save to the source file
+- **Markdown files**: Toggle between rendered preview mode and raw text edit mode, save changes to the source file after editing
+- **Binary files**: Only display file type information, not editable
 
-### 7.2 操作对象说明
+### 7.2 Operation Target Description
 
-| 操作 | 对象 | 说明 |
+| Operation | Target | Description |
 |------|------|------|
-| 预览（读取） | 软链接指向的源文件（`symlink.target_path`） | 读取源文件的当前内容展示给用户 |
-| 编辑（保存） | 软链接指向的源文件（`symlink.target_path`） | 将编辑后的内容写回源文件 |
-| 备份 | data/ 目录中的副本 | Git 版本管理的是 data/ 中的副本，与预览/编辑无关 |
+| Preview (Read) | Source file pointed to by the symlink (`symlink.target_path`) | Read the current content of the source file and display it to the user |
+| Edit (Save) | Source file pointed to by the symlink (`symlink.target_path`) | Write the edited content back to the source file |
+| Backup | Copy in the data/ directory | Git version management operates on the copy in data/, unrelated to preview/edit |
 
-### 7.3 与备份的关系
+### 7.3 Relationship with Backup
 
-编辑源文件后，不会自动触发备份。用户对源文件的修改将在下一次手动或定时备份时被增量检测（mtime+size 变化）发现，同步到 `data/` 目录后进入 Git 版本管理。这是合理的设计——用户编辑源文件是独立行为，备份时机由用户自主控制。
+Editing the source file does not automatically trigger a backup. The user's modifications to the source file will be detected by incremental checking (mtime+size changes) during the next manual or scheduled backup, synced to the `data/` directory, and then tracked by Git version management. This is a reasonable design — editing source files is an independent action, and the backup timing is controlled by the user.
 
 ---
 
-**文档版本**：v1.2  
-**状态**：已确认  
-**编制日期**：2026-06-12
+**Document Version**: v1.2  
+**Status**: Confirmed  
+**Date Prepared**: 2026-06-12

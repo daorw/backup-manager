@@ -139,7 +139,7 @@ const TextPreview: React.FC<TextPreviewProps> = ({
   }
 
   return (
-    <div>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       {editable && !truncated && (
         <Button
           type="text"
@@ -162,12 +162,13 @@ const TextPreview: React.FC<TextPreviewProps> = ({
           borderRadius: 6,
           padding: 16,
           overflow: 'auto',
-          maxHeight: 600,
+          flex: 1,
           fontSize: 13,
           lineHeight: 1.5,
           fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-all',
+          margin: 0,
         }}
       >
         <code className={`language-${language}`}>{content}</code>

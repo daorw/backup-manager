@@ -371,7 +371,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
   };
 
   return (
-    <div style={{ display: 'flex', gap: 16, minHeight: 400 }}>
+    <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
       <div
         style={{
           width: 280,
@@ -379,8 +379,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
           border: '1px solid #f0f0f0',
           borderRadius: 6,
           padding: 12,
-          maxHeight: 600,
+          flex: 1,
           overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         <Space
@@ -405,6 +407,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
           <Empty
             description="No files to preview"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
+            style={{ flex: 1 }}
           />
         ) : (
           <Tree
@@ -422,16 +425,18 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
               }
             }}
             onExpand={handleExpand}
+            style={{ flex: 1 }}
           />
         )}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div
           style={{
             border: '1px solid #f0f0f0',
             borderRadius: 6,
             padding: 12,
-            minHeight: 400,
+            flex: 1,
+            overflow: 'auto',
           }}
         >
           {selectedFile && selectedSymlink && (

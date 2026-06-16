@@ -375,11 +375,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
       <div
         style={{
           width: 280,
+          maxWidth: '40%',
           flexShrink: 0,
           border: '1px solid #f0f0f0',
           borderRadius: 6,
           padding: 12,
-          flex: 1,
           overflow: 'auto',
           display: 'flex',
           flexDirection: 'column',
@@ -425,7 +425,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
               }
             }}
             onExpand={handleExpand}
-            style={{ flex: 1 }}
+            style={{ flex: 1, overflow: 'auto' }}
           />
         )}
       </div>

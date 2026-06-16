@@ -55,7 +55,8 @@ body {
   flex-direction: column !important;
 }
 
-.repo-detail-tabs .ant-tabs-tabpane {
+/* 仅对激活的 Tab 面板启用 flex 布局，非激活面板保持 Ant Design 默认行为 */
+.repo-detail-tabs .ant-tabs-tabpane-active {
   flex: 1;
   display: flex !important;
   flex-direction: column !important;

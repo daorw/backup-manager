@@ -10,6 +10,15 @@ html, body, #root {
   width: 100%;
 }
 
+/* AppLayout Spin wrapper height chain */
+.app-content-spin,
+.app-content-spin > .ant-spin-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
@@ -23,12 +32,15 @@ body {
  * 这些覆盖用于实现特定的布局需求，可能在 Ant Design 升级时失效。
  * 
  * 依赖版本：Ant Design ^5.20.0
- * 最后验证：2026-06-15
+ * 最后验证：2026-06-16
  * 
  * 覆盖说明：
  * 1. .ant-tree-node-content-wrapper: 修复文件树节点文本溢出问题
  * 2. .ant-layout-sider: 响应式侧边栏宽度调整
- * 3. .repo-detail-tabs: 仅对激活的 Tab 面板启用 flex 布局
+ * 3. .repo-detail-tabs: 仅对激活的 Tab 面板启用 flex 布局（依赖 Ant Design
+ *    Tabs 内部 DOM 结构：.ant-tabs-content-holder > .ant-tabs-content >
+ *    .ant-tabs-tabpane-active）
+ * 4. .markdown-preview-tabs: Markdown 预览器内部 Tabs 高度链覆盖
  * 
  * 注意：Ant Design 5.x 提供 Design Token 和 CSS 变量来自定义样式，
  * 但部分内部 DOM 结构的覆盖仍需使用 CSS 选择器。这些覆盖已尽可能
@@ -49,41 +61,52 @@ body {
  * 仅对激活的 Tab 面板启用 flex 布局，避免影响非激活 Tab。
  * 这确保了 Symlinks Tab 的 flex 布局不会干扰其他 Tab 的布局。
  * ============================================================ */
-.repo-detail-tabs .ant-tabs-content {
+.repo-detail-tabs > .ant-tabs-content-holder,
+.markdown-preview-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.repo-detail-tabs > .ant-tabs-content-holder > .ant-tabs-content {
   flex: 1;
   display: flex !important;
   flex-direction: column !important;
 }
 
 /* 仅对激活的 Tab 面板启用 flex 布局，非激活面板保持 Ant Design 默认行为 */
-.repo-detail-tabs .ant-tabs-tabpane-active {
+.repo-detail-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
   flex: 1;
   display: flex !important;
   flex-direction: column !important;
 }
 
-.repo-detail-tabs .ant-spin-nested-loading {
+/* ============================================================
+ * Markdown Preview Tabs Height Chain
+ * ============================================================
+ * MarkdownPreview 组件使用内部 Tabs 切换 Preview/Edit，需要覆盖 Ant Design
+ * Tabs 内部 DOM 结构使 Tab 内容区占满父容器高度。
+ * 依赖 DOM：.ant-tabs-content-holder > .ant-tabs-content >
+ * .ant-tabs-tabpane-active
+ * 最后验证：2026-06-16
+ * ============================================================ */
+.markdown-preview-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.markdown-preview-tabs > .ant-tabs-content-holder > .ant-tabs-content {
   flex: 1;
   display: flex !important;
   flex-direction: column !important;
 }
 
-.repo-detail-tabs .ant-spin-container {
+.markdown-preview-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
   flex: 1;
   display: flex !important;
   flex-direction: column !important;
-}
-
-.repo-detail-tabs .ant-empty {
-  flex: 1;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-}
-
-.repo-detail-tabs .ant-tree {
-  flex: 1;
-  min-height: 200px;
 }
 
 /* Markdown preview styles */

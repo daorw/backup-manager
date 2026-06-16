@@ -150,11 +150,11 @@ const RepoDetail: React.FC = () => {
         </div>
       </Space>
 
-      <Tabs 
-        defaultActiveKey="symlinks" 
+      <Tabs
+        defaultActiveKey="symlinks"
         items={tabItems}
         className="repo-detail-tabs"
-        style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
       />
     </div>
   );

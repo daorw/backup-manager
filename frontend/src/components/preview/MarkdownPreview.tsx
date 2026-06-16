@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Typography, Button, Space, Tabs } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
@@ -13,11 +13,26 @@ interface MarkdownPreviewProps {
   saving?: boolean;
 }
 
+const textareaStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 200,
+  width: '100%',
+  overflow: 'auto',
+  resize: 'none',
+  fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
+  fontSize: 13,
+  lineHeight: 1.5,
+  padding: 16,
+  border: '1px solid #d9d9d9',
+  borderRadius: 6,
+};
+
 const previewContainerStyle: React.CSSProperties = {
   padding: 16,
   border: '1px solid #f0f0f0',
   borderRadius: 6,
-  maxHeight: 600,
+  flex: 1,
+  minHeight: 0,
   overflow: 'auto',
 };
 
@@ -32,6 +47,12 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
   const [activeTab, setActiveTab] = useState<string>('preview');
   const [editContent, setEditContent] = useState(content);
 
+  useEffect(() => {
+    if (activeTab !== 'edit') {
+      setEditContent(content);
+    }
+  }, [content, activeTab]);
+
   const displayContent = editable && activeTab === 'edit' ? editContent : content;
 
   const handleSave = async () => {
@@ -45,13 +66,13 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
     setActiveTab('preview');
   };
 
-  if (!content) {
-    return <Typography.Text type="secondary">Empty file</Typography.Text>;
-  }
-
-  const markdownElement = (
+  const markdownElement = content ? (
     <div className="markdown-preview" style={previewContainerStyle}>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+    </div>
+  ) : (
+    <div className="markdown-preview" style={{ ...previewContainerStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Typography.Text type="secondary">Empty file</Typography.Text>
     </div>
   );
 
@@ -69,7 +90,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
       key: 'edit',
       label: 'Edit',
       children: (
-        <div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Space style={{ marginBottom: 8 }}>
             <Button
               type="primary"
@@ -91,18 +112,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             disabled={saving}
-            style={{
-              width: '100%',
-              minHeight: 400,
-              maxHeight: 600,
-              fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
-              fontSize: 13,
-              lineHeight: 1.5,
-              padding: 16,
-              border: '1px solid #d9d9d9',
-              borderRadius: 6,
-              resize: 'vertical',
-            }}
+            style={textareaStyle}
           />
         </div>
       ),
@@ -111,9 +121,12 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
 
   return (
     <Tabs
+      className="markdown-preview-tabs"
+      animated={false}
       activeKey={activeTab}
       onChange={setActiveTab}
       items={tabItems}
+      style={{ flex: 1, minHeight: 0 }}
     />
   );
 };

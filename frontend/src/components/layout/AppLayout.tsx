@@ -25,7 +25,7 @@ const AppLayout: React.FC = () => {
               style={{ marginBottom: 16 }}
             />
           )}
-          <Spin spinning={loading} size="large" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Spin spinning={loading} size="large" wrapperClassName="app-content-spin">
             <Outlet />
           </Spin>
         </Content>

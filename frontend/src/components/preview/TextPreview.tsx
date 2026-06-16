@@ -11,6 +11,22 @@ interface TextPreviewProps {
   saving?: boolean;
 }
 
+const textareaStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 200,
+  width: '100%',
+  overflow: 'auto',
+  resize: 'none',
+  fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
+  fontSize: 13,
+  lineHeight: 1.5,
+  padding: 16,
+  border: '1px solid #d9d9d9',
+  borderRadius: 6,
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+};
+
 const LANGUAGE_MAP: Record<string, string> = {
   js: 'javascript',
   jsx: 'javascript',
@@ -92,7 +108,7 @@ const TextPreview: React.FC<TextPreviewProps> = ({
 
   if (isEditing) {
     return (
-      <div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {truncated && (
           <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
             File was truncated. Only the first 10MB is shown.
@@ -119,27 +135,14 @@ const TextPreview: React.FC<TextPreviewProps> = ({
           value={editContent}
           onChange={(e) => setEditContent(e.target.value)}
           disabled={saving}
-          style={{
-            width: '100%',
-            minHeight: 400,
-            maxHeight: 600,
-            fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
-            fontSize: 13,
-            lineHeight: 1.5,
-            padding: 16,
-            border: '1px solid #d9d9d9',
-            borderRadius: 6,
-            resize: 'vertical',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
+          style={textareaStyle}
         />
       </div>
     );
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {editable && !truncated && (
         <Button
           type="text"

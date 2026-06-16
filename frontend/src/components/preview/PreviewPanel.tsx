@@ -349,8 +349,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
 
     if (ext === 'md' || ext === 'markdown') {
       return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <MarkdownPreview
+            key={selectedFile}
             content={content}
             repoId={repoId}
             filePath={selectedFile}
@@ -363,8 +364,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
     }
 
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <TextPreview
+          key={selectedFile}
           content={content}
           fileName={fileName}
           truncated={previewResult.truncated || false}
@@ -442,9 +444,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
             borderRadius: 6,
             padding: 12,
             flex: 1,
-            overflow: 'auto',
+            overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
+            minHeight: 0,
           }}
         >
           {selectedFile && selectedSymlink && (
@@ -470,7 +473,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
               </Typography.Text>
             </Space>
           )}
-          {renderPreview()}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {renderPreview()}
+          </div>
         </div>
       </div>
     </div>

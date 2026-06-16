@@ -307,7 +307,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
   const renderPreview = () => {
     if (previewLoading) {
       return (
-        <div style={{ textAlign: 'center', padding: 48 }}>
+        <div style={{ textAlign: 'center', padding: 48, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Spin size="large" />
         </div>
       );
@@ -315,7 +315,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
 
     if (previewError) {
       return (
-        <div style={{ textAlign: 'center', padding: 48 }}>
+        <div style={{ textAlign: 'center', padding: 48, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Typography.Text type="danger">{previewError}</Typography.Text>
         </div>
       );
@@ -323,7 +323,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
 
     if (!previewResult || !selectedFile) {
       return (
-        <div style={{ textAlign: 'center', padding: 64 }}>
+        <div style={{ textAlign: 'center', padding: 64, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           <FileOutlined style={{ fontSize: 48, color: '#d9d9d9' }} />
           <Typography.Paragraph type="secondary" style={{ marginTop: 16 }}>
             Select a file from the tree to preview its contents
@@ -334,7 +334,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
 
     if (!previewResult.text) {
       return (
-        <BinaryInfo preview={previewResult} fileName={selectedFile.split('/').pop() || selectedFile} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <BinaryInfo preview={previewResult} fileName={selectedFile.split('/').pop() || selectedFile} />
+        </div>
       );
     }
 
@@ -347,26 +349,30 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
 
     if (ext === 'md' || ext === 'markdown') {
       return (
-        <MarkdownPreview
-          content={content}
-          repoId={repoId}
-          filePath={selectedFile}
-          editable={isEditable}
-          onSave={handleSave}
-          saving={saving}
-        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <MarkdownPreview
+            content={content}
+            repoId={repoId}
+            filePath={selectedFile}
+            editable={isEditable}
+            onSave={handleSave}
+            saving={saving}
+          />
+        </div>
       );
     }
 
     return (
-      <TextPreview
-        content={content}
-        fileName={fileName}
-        truncated={previewResult.truncated || false}
-        editable={isEditable}
-        onSave={handleSave}
-        saving={saving}
-      />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <TextPreview
+          content={content}
+          fileName={fileName}
+          truncated={previewResult.truncated || false}
+          editable={isEditable}
+          onSave={handleSave}
+          saving={saving}
+        />
+      </div>
     );
   };
 
@@ -429,7 +435,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
           />
         )}
       </div>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div
           style={{
             border: '1px solid #f0f0f0',
@@ -437,6 +443,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ repoId }) => {
             padding: 12,
             flex: 1,
             overflow: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
           {selectedFile && selectedSymlink && (

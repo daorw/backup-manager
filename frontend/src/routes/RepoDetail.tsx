@@ -116,7 +116,7 @@ const RepoDetail: React.FC = () => {
   ];
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Space style={{ marginBottom: 24 }} align="start">
         <Button
           icon={<ArrowLeftOutlined />}
@@ -150,7 +150,12 @@ const RepoDetail: React.FC = () => {
         </div>
       </Space>
 
-      <Tabs defaultActiveKey="symlinks" items={tabItems} />
+      <Tabs 
+        defaultActiveKey="symlinks" 
+        items={tabItems}
+        className="repo-detail-tabs"
+        style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+      />
     </div>
   );
 };

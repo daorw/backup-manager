@@ -14,8 +14,8 @@ const AppLayout: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sidebar />
-      <Layout style={{ marginLeft: 240 }}>
-        <Content style={{ margin: 24, minHeight: 280 }}>
+      <Layout style={{ marginLeft: 240, display: 'flex', flexDirection: 'column' }}>
+        <Content style={{ margin: 24, minHeight: 280, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {error && (
             <Alert
               message={error}
@@ -25,7 +25,7 @@ const AppLayout: React.FC = () => {
               style={{ marginBottom: 16 }}
             />
           )}
-          <Spin spinning={loading} size="large">
+          <Spin spinning={loading} size="large" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <Outlet />
           </Spin>
         </Content>

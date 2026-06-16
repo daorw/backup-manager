@@ -437,7 +437,7 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId, repoPath }) => {
   };
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
         <Typography.Title level={5} style={{ margin: 0 }}>
           Symlinks ({symlinks.length})
@@ -470,11 +470,11 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId, repoPath }) => {
         </Typography.Text>
       )}
 
-      <Spin spinning={loading}>
+      <Spin spinning={loading} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {treeData.length === 0 ? (
           <Empty
             description="No symlinks yet. Add files to start backing up."
-            style={{ marginTop: 48 }}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginTop: 48 }}
           >
             <Button
               type="primary"
@@ -490,7 +490,8 @@ const SymlinkPanel: React.FC<SymlinkPanelProps> = ({ repoId, repoPath }) => {
               border: '1px solid #f0f0f0',
               borderRadius: 6,
               padding: 12,
-              maxHeight: 500,
+              flex: 1,
+              minHeight: 200,
               overflow: 'auto',
             }}
           >

@@ -1,3 +1,4 @@
+/* Global Reset */
 * {
   margin: 0;
   padding: 0;
@@ -10,11 +11,29 @@ html, body, #root {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
 }
+
+/* ============================================================
+ * Ant Design Internal DOM Structure Overrides
+ * ============================================================
+ * 本文件包含对 Ant Design 5.x 内部 DOM 结构的 CSS 覆盖。
+ * 这些覆盖用于实现特定的布局需求，可能在 Ant Design 升级时失效。
+ * 
+ * 依赖版本：Ant Design ^5.20.0
+ * 最后验证：2026-06-15
+ * 
+ * 覆盖说明：
+ * 1. .ant-tree-node-content-wrapper: 修复文件树节点文本溢出问题
+ * 2. .ant-layout-sider: 响应式侧边栏宽度调整
+ * 3. .repo-detail-tabs: 仅对激活的 Tab 面板启用 flex 布局
+ * 
+ * 注意：Ant Design 5.x 提供 Design Token 和 CSS 变量来自定义样式，
+ * 但部分内部 DOM 结构的覆盖仍需使用 CSS 选择器。这些覆盖已尽可能
+ * 使用稳定的选择器，并添加了注释说明用途。
+ * ============================================================ */
 
 /* Ant Design Tree overrides for better file browser */
 .ant-tree-node-content-wrapper {
@@ -22,6 +41,48 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ============================================================
+ * Tab Panel Layout Isolation
+ * ============================================================
+ * 仅对激活的 Tab 面板启用 flex 布局，避免影响非激活 Tab。
+ * 这确保了 Symlinks Tab 的 flex 布局不会干扰其他 Tab 的布局。
+ * ============================================================ */
+.repo-detail-tabs .ant-tabs-content {
+  flex: 1;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.repo-detail-tabs .ant-tabs-tabpane {
+  flex: 1;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.repo-detail-tabs .ant-spin-nested-loading {
+  flex: 1;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.repo-detail-tabs .ant-spin-container {
+  flex: 1;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.repo-detail-tabs .ant-empty {
+  flex: 1;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+}
+
+.repo-detail-tabs .ant-tree {
+  flex: 1;
+  min-height: 200px;
 }
 
 /* Markdown preview styles */

@@ -193,6 +193,14 @@ body {
   background: #f6f8fa;
 }
 
+.markdown-preview table tbody tr:nth-child(2n) {
+  background: #f6f8fa;
+}
+
+.markdown-preview input[type="checkbox"] {
+  margin-right: 0.4em;
+}
+
 /* Scrollbar styles */
 ::-webkit-scrollbar {
   width: 8px;

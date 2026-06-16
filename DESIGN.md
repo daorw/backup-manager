@@ -495,7 +495,7 @@ export async function saveFile(repoId: string, req: SaveFileRequest): Promise<Sa
 
 - Added `editable`, `onContentChange`, `onSave`, `saving` props
 - Use Ant Design Tabs for Preview/Edit mode switching
-- Preview mode: render HTML (existing logic)
+- Preview mode: render Markdown using react-markdown + remark-gfm; local references (images/docs) are rendered by browser default without path rewriting
 - Edit mode: Markdown source textarea
 - Switching tabs does not lose edit content
 

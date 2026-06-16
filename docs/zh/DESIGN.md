@@ -493,7 +493,7 @@ export async function saveFile(repoId: string, req: SaveFileRequest): Promise<Sa
 
 - 新增 `editable`, `onContentChange`, `onSave`, `saving` props
 - 使用 Ant Design Tabs 实现 Preview/Edit 模式切换
-- 预览模式：渲染 HTML（现有逻辑）
+- 预览模式：使用 react-markdown + remark-gfm 渲染 Markdown；本地引用（图片/文档）按浏览器默认行为处理，不做路径重写
 - 编辑模式：Markdown 源码 textarea
 - 切换 Tab 不丢失编辑内容
 

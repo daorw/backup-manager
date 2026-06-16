@@ -29,7 +29,7 @@ Specify which files to back up → Auto-create symlinks to aggregate → Increme
 
 - **Repo Management** — Create/delete/view backup repos, visual config (remote URL, branch, Git user)
 - **Symlink Management** — Tree view, add/delete/batch import, modify target path, auto-cleanup for deleted source files
-- **File Preview** — Plain text/code syntax highlighting, Markdown rendering (with local images), binary file identification
+- **File Preview** — Plain text/code syntax highlighting, Markdown rendering, binary file identification
 - **Backup Execution** — Manual trigger or scheduled auto-backup (second-precision cron), incremental sync, optional Git push
 - **Backup History** — View Git commit history with pagination
 - **Source File Rollback** — Select a historical commit and restore source files to that version

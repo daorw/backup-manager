@@ -46,7 +46,7 @@
 | 状态管理 | Zustand | 轻量级状态管理 |
 | HTTP 客户端 | axios | — |
 | 前后端一体 | Go embed.FS + Gin 静态文件服务 | 单二进制部署 |
-| Markdown 渲染 | react-markdown + remark-gfm | 含本地图片支持 |
+| Markdown 渲染 | react-markdown + remark-gfm | 基础 Markdown 渲染，本地引用按浏览器默认行为处理 |
 
 ## 项目目录结构
 

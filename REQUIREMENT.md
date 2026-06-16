@@ -57,7 +57,7 @@
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
 | FR-11 | Plain Text File Preview and Edit | View and edit plain text source file contents in the UI (e.g., .txt, .log, .json, .yaml, .py, etc.), with save-to-source-file support. The operation targets the source file pointed to by the symlink. | P0 |
-| FR-12 | Markdown Rendered Preview and Edit | Render and display Markdown source files (.md) with local image support. Supports toggling between edit mode and preview mode, saving edits to the source file. The operation targets the source file pointed to by the symlink. | P0 |
+| FR-12 | Markdown Rendered Preview and Edit | Render and display Markdown source files (.md) using react-markdown + remark-gfm. Supports toggling between edit mode and preview mode, saving edits to the source file. The operation targets the source file pointed to by the symlink. Local references (images/docs) are rendered by browser default without path rewriting. | P0 |
 | FR-13 | Binary File Identification | Display file type information and size for non-text files, without attempting to preview content | P2 |
 
 ### 3.4 Backup Execution

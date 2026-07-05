@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Modal, Form, Input, Typography, message } from 'antd';
+import { Modal, Form, Input, Typography, message, Button } from 'antd';
 import { FolderOpenOutlined } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
+import DirectoryPickerModal from '../common/DirectoryPickerModal';
 
 interface CreateRepoModalProps {
   open: boolean;
@@ -12,6 +13,7 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
   const [form] = Form.useForm();
   const createRepo = useAppStore((s) => s.createRepo);
   const [submitting, setSubmitting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const handleOk = async () => {
     try {
@@ -35,61 +37,85 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
     onClose();
   };
 
+  const handlePickDirectory = (path: string) => {
+    form.setFieldsValue({ path });
+  };
+
   return (
-    <Modal
-      title="Create Repository"
-      open={open}
-      onOk={handleOk}
-      onCancel={handleCancel}
-      confirmLoading={submitting}
-      okText="Create"
-      width={520}
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{ name: '', path: '' }}
+    <>
+      <Modal
+        title="Create Repository"
+        open={open}
+        onOk={handleOk}
+        onCancel={handleCancel}
+        confirmLoading={submitting}
+        okText="Create"
+        width={520}
       >
-        <Form.Item
-          name="name"
-          label="Repository Name"
-          rules={[
-            { required: true, message: 'Please enter a repository name' },
-            { min: 1, max: 100, message: 'Name must be 1-100 characters' },
-            {
-              pattern: /^[a-zA-Z0-9_\-\s]+$/,
-              message:
-                'Name can only contain letters, numbers, spaces, underscores and hyphens',
-            },
-          ]}
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ name: '', path: '' }}
         >
-          <Input placeholder="My Backups" />
-        </Form.Item>
-        <Form.Item
-          name="path"
-          label="Repository Path"
-          rules={[
-            { required: true, message: 'Please enter a repository path' },
-            {
-              pattern: /^\/|^~\/|^\.\.\/|^\.\//,
-              message: 'Please enter an absolute path starting with /',
-            },
-          ]}
-        >
-          <Input
-            placeholder="/home/user/backups/my-repo"
-            prefix={<FolderOpenOutlined />}
-          />
-        </Form.Item>
-        <Form.Item>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            The repository will be created at the specified path. A{' '}
-            <Typography.Text code>.links/</Typography.Text> directory and Git
-            repository will be initialized automatically.
-          </Typography.Text>
-        </Form.Item>
-      </Form>
-    </Modal>
+          <Form.Item
+            name="name"
+            label="Repository Name"
+            rules={[
+              { required: true, message: 'Please enter a repository name' },
+              { min: 1, max: 100, message: 'Name must be 1-100 characters' },
+              {
+                pattern: /^[a-zA-Z0-9_\-\s]+$/,
+                message:
+                  'Name can only contain letters, numbers, spaces, underscores and hyphens',
+              },
+            ]}
+          >
+            <Input placeholder="My Backups" />
+          </Form.Item>
+          <Form.Item
+            name="path"
+            label="Repository Path"
+            rules={[
+              { required: true, message: 'Please enter a repository path' },
+              {
+                pattern: /^\/|^~\/|^\.\.\/|^\.\//,
+                message: 'Please enter an absolute path starting with /',
+              },
+            ]}
+          >
+            <Input
+              placeholder="/home/user/backups/my-repo"
+              prefix={<FolderOpenOutlined />}
+              suffix={
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => setPickerOpen(true)}
+                  style={{ padding: '0 4px' }}
+                >
+                  Browse
+                </Button>
+              }
+            />
+          </Form.Item>
+          <Form.Item>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              The repository will be created at the specified path. A{' '}
+              <Typography.Text code>.links/</Typography.Text> directory and Git
+              repository will be initialized automatically.
+            </Typography.Text>
+          </Form.Item>
+        </Form>
+      </Modal>
+      <DirectoryPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={handlePickDirectory}
+        mode="directory"
+        title="Select Repository Directory"
+      />
+    </>
   );
 };
 

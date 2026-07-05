@@ -24,9 +24,11 @@ import {
   UserOutlined,
   ClockCircleOutlined,
   LinkOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
 import type { GitAuthType, SetAuthRequest } from '../../types';
+import DirectoryPickerModal from '../common/DirectoryPickerModal';
 
 interface ConfigPanelProps {
   repoId: string;
@@ -49,6 +51,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingAuth, setSavingAuth] = useState(false);
   const [authType, setAuthType] = useState<GitAuthType>('none');
+  const [sshPickerOpen, setSshPickerOpen] = useState(false);
 
   useEffect(() => {
     if (repoId) {
@@ -263,7 +266,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
                 { required: true, message: 'Please enter SSH key path' },
               ]}
             >
-              <Input placeholder="~/.ssh/id_rsa" />
+              <Input
+                placeholder="~/.ssh/id_rsa"
+                suffix={
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<FolderOpenOutlined />}
+                    onClick={() => setSshPickerOpen(true)}
+                    style={{ padding: '0 4px' }}
+                  >
+                    Browse
+                  </Button>
+                }
+              />
             </Form.Item>
           )}
           {authType === 'password' && (
@@ -346,6 +362,16 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
           <Button onClick={handleNavigateHome}>Back to Dashboard</Button>
         </Space>
       </Card>
+      <DirectoryPickerModal
+        open={sshPickerOpen}
+        onClose={() => setSshPickerOpen(false)}
+        onSelect={(path) => {
+          authForm.setFieldsValue({ ssh_private_key_path: path });
+        }}
+        mode="file"
+        title="Select SSH Private Key"
+        initialPath={authForm.getFieldValue('ssh_private_key_path') || '~/.ssh'}
+      />
     </div>
   );
 };

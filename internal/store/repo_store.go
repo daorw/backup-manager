@@ -41,6 +41,28 @@ func (s *Store) GetRepo(id string) (*model.Repo, error) {
 	return r, nil
 }
 
+// GetRepoByPath retrieves a repository by its path.
+// Returns nil, nil if not found.
+func (s *Store) GetRepoByPath(path string) (*model.Repo, error) {
+	query := `SELECT id, name, path, created_at, updated_at, last_backup_at, status
+	           FROM repos WHERE path = ?`
+	row := s.db.QueryRow(query, path)
+
+	r := &model.Repo{}
+	var lastBackup sql.NullTime
+	err := row.Scan(&r.ID, &r.Name, &r.Path, &r.CreatedAt, &r.UpdatedAt, &lastBackup, &r.Status)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repo by path: %w", err)
+	}
+	if lastBackup.Valid {
+		r.LastBackupAt = &lastBackup.Time
+	}
+	return r, nil
+}
+
 // ListRepos returns all repositories ordered by creation time.
 func (s *Store) ListRepos() ([]*model.Repo, error) {
 	query := `SELECT id, name, path, created_at, updated_at, last_backup_at, status

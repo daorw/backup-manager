@@ -15,9 +15,11 @@ import {
   FolderOutlined,
   FileOutlined,
   ReloadOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { browsePath } from '../../api/client';
+import DirectoryPickerModal from '../common/DirectoryPickerModal';
 
 interface SymlinkAddModalProps {
   open: boolean;
@@ -57,6 +59,7 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const loadRoot = useCallback(async () => {
     setLoading(true);
@@ -141,86 +144,110 @@ const SymlinkAddModal: React.FC<SymlinkAddModalProps> = ({
   };
 
   return (
-    <Modal
-      title="Add Symlink"
-      open={open}
-      onOk={handleOk}
-      onCancel={onClose}
-      confirmLoading={submitting}
-      okText="Add"
-      width={700}
-    >
-      <Form form={form} layout="vertical">
-        <Form.Item
-          name="target_path"
-          label="Source Path"
-          rules={[{ required: true, message: 'Please select a source file or directory' }]}
-        >
-          <Input
-            placeholder="Please enter the file or directories you want to back up, e.g: ~/.config/opencode/opencode.json"
-            value={selectedPath}
-            onChange={(e) => setSelectedPath(e.target.value)}
-          />
-        </Form.Item>
-        <Form.Item
-          name="relative_path"
-          label="Link Name (in .links/)"
-          rules={[
-            { required: true, message: 'Please enter a link name' },
-            {
-              pattern: /^[a-zA-Z0-9_\/\-\.]+$/,
-              message: 'Link name can only contain letters, numbers, /, -, _, .',
-            },
-          ]}
-        >
-          <Input placeholder="Please enter a file path relative to the repository for storing the backup files, e.g: opencode/opencode.json" />
-        </Form.Item>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          The content below in File Browser shows the currently backed-up files, which are stored under the relative root directory specified by Link Name.
-        </Typography.Text>
-      </Form>
-
-      <div style={{ marginTop: 16 }}>
-        <Space style={{ marginBottom: 8 }}>
-          <Typography.Text strong>File Browser</Typography.Text>
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            onClick={loadRoot}
-            loading={loading}
+    <>
+      <Modal
+        title="Add Symlink"
+        open={open}
+        onOk={handleOk}
+        onCancel={onClose}
+        confirmLoading={submitting}
+        okText="Add"
+        width={700}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="target_path"
+            label="Source Path"
+            rules={[{ required: true, message: 'Please select a source file or directory' }]}
           >
-            Refresh
-          </Button>
-        </Space>
-        <div
-          style={{
-            border: '1px solid #d9d9d9',
-            borderRadius: 6,
-            padding: 8,
-            maxHeight: 300,
-            overflow: 'auto',
-          }}
-        >
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 24 }}>
-              <Spin />
-            </div>
-          ) : treeData.length === 0 ? (
-            <Empty description="No files found" />
-          ) : (
-            <Tree
-              treeData={treeData}
-              loadData={onLoadData as any}
-              onSelect={handleSelect as any}
-              expandedKeys={expandedKeys}
-              onExpand={(keys) => setExpandedKeys(keys)}
-              showIcon
-              defaultExpandParent={false}
+            <Input
+              placeholder="Please enter the file or directories you want to back up, e.g: ~/.config/opencode/opencode.json"
+              value={selectedPath}
+              onChange={(e) => setSelectedPath(e.target.value)}
+              suffix={
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => setPickerOpen(true)}
+                  style={{ padding: '0 4px' }}
+                >
+                  Browse
+                </Button>
+              }
             />
-          )}
+          </Form.Item>
+          <Form.Item
+            name="relative_path"
+            label="Link Name (in .links/)"
+            rules={[
+              { required: true, message: 'Please enter a link name' },
+              {
+                pattern: /^[a-zA-Z0-9_\/\-\.]+$/,
+                message: 'Link name can only contain letters, numbers, /, -, _, .',
+              },
+            ]}
+          >
+            <Input placeholder="Please enter a file path relative to the repository for storing the backup files, e.g: opencode/opencode.json" />
+          </Form.Item>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            The content below in File Browser shows the currently backed-up files, which are stored under the relative root directory specified by Link Name.
+          </Typography.Text>
+        </Form>
+
+        <div style={{ marginTop: 16 }}>
+          <Space style={{ marginBottom: 8 }}>
+            <Typography.Text strong>File Browser</Typography.Text>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={loadRoot}
+              loading={loading}
+            >
+              Refresh
+            </Button>
+          </Space>
+          <div
+            style={{
+              border: '1px solid #d9d9d9',
+              borderRadius: 6,
+              padding: 8,
+              maxHeight: 300,
+              overflow: 'auto',
+            }}
+          >
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: 24 }}>
+                <Spin />
+              </div>
+            ) : treeData.length === 0 ? (
+              <Empty description="No files found" />
+            ) : (
+              <Tree
+                treeData={treeData}
+                loadData={onLoadData as any}
+                onSelect={handleSelect as any}
+                expandedKeys={expandedKeys}
+                onExpand={(keys) => setExpandedKeys(keys)}
+                showIcon
+                defaultExpandParent={false}
+              />
+            )}
+          </div>
         </div>
-      </div>
-    </Modal>
+      </Modal>
+      <DirectoryPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(path) => {
+          setSelectedPath(path);
+          form.setFieldsValue({ target_path: path });
+        }}
+        mode="both"
+        title="Select Source File or Directory"
+        initialPath={selectedPath}
+      />
+    </>
   );
 };
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -48,6 +49,32 @@ type UpdateConfigRequest struct {
 	GitUserEmail       *string `json:"git_user_email,omitempty"`
 }
 
+// isDirEmpty checks if a directory is empty.
+func isDirEmpty(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdirnames(1)
+	if err == io.EOF {
+		return true, nil
+	}
+	return false, err
+}
+
+// hasAllRepoDirs checks if the directory contains .links, data, and .git subdirectories.
+func hasAllRepoDirs(path string) bool {
+	for _, dir := range []string{".links", "data", ".git"} {
+		info, err := os.Stat(filepath.Join(path, dir))
+		if err != nil || !info.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
 // Create creates a new backup repository.
 func (s *RepoService) Create(req *CreateRepoRequest) (*model.Repo, error) {
 	if req.Name == "" {
@@ -62,28 +89,60 @@ func (s *RepoService) Create(req *CreateRepoRequest) (*model.Repo, error) {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
 
-	_, err = os.Stat(absPath)
-	if err == nil {
-		return nil, fmt.Errorf("path already exists: %s", absPath)
-	}
-	if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to check path: %w", err)
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to check path: %w", err)
+		}
+		// Path does not exist — create it (original behavior)
+		if err := os.MkdirAll(absPath, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create repo directory: %w", err)
+		}
+	} else {
+		// Path exists
+		if !info.IsDir() {
+			return nil, fmt.Errorf("path is not a directory: %s", absPath)
+		}
+
+		if hasAllRepoDirs(absPath) {
+			// Has .links, data, .git — existing backup repo, reuse it
+		} else {
+			// Check if directory is empty
+			empty, err := isDirEmpty(absPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read directory: %w", err)
+			}
+			if !empty {
+				return nil, fmt.Errorf("directory already occupied, please choose another path: %s", absPath)
+			}
+			// Empty directory — reuse and initialize
+		}
 	}
 
-	if err := os.MkdirAll(absPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create repo directory: %w", err)
+	// Check if path is already used by another repo
+	existingRepo, err := s.store.GetRepoByPath(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing repo: %w", err)
+	}
+	if existingRepo != nil {
+		return nil, fmt.Errorf("path already used by repository \"%s\": %s", existingRepo.Name, absPath)
 	}
 
+	// Ensure .links and data directories exist
 	for _, dir := range []string{".links", "data"} {
 		if err := os.MkdirAll(filepath.Join(absPath, dir), 0755); err != nil {
 			return nil, fmt.Errorf("failed to create %s directory: %w", dir, err)
 		}
 	}
 
-	if err := s.gitEngine.Init(absPath); err != nil {
-		return nil, fmt.Errorf("failed to init git: %w", err)
+	// Initialize git repo if not already initialized
+	if _, err := os.Stat(filepath.Join(absPath, ".git")); os.IsNotExist(err) {
+		if err := s.gitEngine.Init(absPath); err != nil {
+			return nil, fmt.Errorf("failed to init git: %w", err)
+		}
 	}
 
+	// Ensure .gitignore exists
 	gitignorePath := filepath.Join(absPath, ".gitignore")
 	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
 		content := "# Backup Manager managed files\n.links/\n"

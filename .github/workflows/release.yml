@@ -9,16 +9,16 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+  build-linux:
+    name: Build (linux/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [linux, darwin, windows]
         goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
+    env:
+      GOOS: linux
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: 0
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,25 +45,114 @@ jobs:
           npm run build
 
       - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
         run: |
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
-          out="backup-manager-${GOOS}-${GOARCH}${ext}"
+          out="backup-manager-${GOOS}-${GOARCH}"
           go build -ldflags="-s -w" -o "$out" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.goos }}-${{ matrix.goarch }}
-          path: backup-manager-*
+          name: linux-${{ matrix.goarch }}
+          path: backup-manager-linux-*
+          if-no-files-found: error
+
+  build-darwin:
+    name: Build (darwin/${{ matrix.goarch }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    env:
+      GOOS: darwin
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Build binary
+        run: |
+          out="backup-manager-${GOOS}-${GOARCH}"
+          go build -ldflags="-s -w" -o "$out" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: darwin-${{ matrix.goarch }}
+          path: backup-manager-darwin-*
+          if-no-files-found: error
+
+  build-windows:
+    name: Build (windows/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64]
+    env:
+      GOOS: windows
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Build binary
+        run: |
+          out="backup-manager-${GOOS}-${GOARCH}.exe"
+          go build -ldflags="-s -w" -o "$out" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.goarch }}
+          path: backup-manager-windows-*.exe
           if-no-files-found: error
 
   release:
     name: Create Release
-    needs: build
+    needs: [build-linux, build-darwin, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -87,7 +176,7 @@ jobs:
           ## Backup Manager ${TAG}
 
           ### Changes since last release
-          
+
           RELEASENOTES
 
           PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"

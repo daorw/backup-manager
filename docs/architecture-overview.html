@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Backup Manager — 项目架构全景</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/atom-one-dark.min.css">
+<style>
+:root {
+  --c-bg: #f5f5f7;
+  --c-surface: #ffffff;
+  --c-border: #e0e0e5;
+  --c-text: #1d1d1f;
+  --c-text-2: #6e6e73;
+  --c-primary: #1677ff;
+  --c-green: #34a853;
+  --c-orange: #f9ab00;
+  --c-purple: #7b1fa2;
+  --c-red: #ea4335;
+  --c-teal: #1d9e75;
+  --c-blue-bg: #e8f0fe;
+  --c-green-bg: #e6f4ea;
+  --c-orange-bg: #fef7e0;
+  --c-purple-bg: #f3e5f5;
+  --c-red-bg: #fce8e6;
+  --c-teal-bg: #e0f5ec;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.06);
+  --shadow-md: 0 2px 8px rgba(0,0,0,.08);
+  --radius: 12px;
+  --font: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
+  --mono: 'SF Mono','Fira Code',monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--c-bg);
+  color: var(--c-text);
+  line-height: 1.6;
+  font-size: .85rem;
+}
+.container { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+
+h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: 4px; }
+h1 + p { color: var(--c-text-2); font-size: .82rem; margin-bottom: 24px; }
+h2 { font-size: 1.15rem; font-weight: 600; margin: 36px 0 14px; padding-left: 12px; border-left: 4px solid var(--c-primary); display: flex; align-items: center; gap: 8px; }
+h3 { font-size: .95rem; font-weight: 600; margin: 20px 0 8px; }
+
+.card { background: var(--c-surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 20px 24px; margin-bottom: 16px; }
+.card h3:first-child { margin-top: 0; }
+
+.arch-fig { overflow-x: auto; margin: 12px 0 8px; }
+.arch-fig svg { width: 100%; height: auto; min-width: 680px; }
+
+.styled-table { width: 100%; border-collapse: collapse; font-size: .82rem; margin: 8px 0; }
+.styled-table thead th { background: #f8f9fa; text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 2px solid var(--c-border); }
+.styled-table tbody td { padding: 8px 12px; border-bottom: 1px solid var(--c-border); }
+.styled-table tbody tr:last-child td { border-bottom: none; }
+
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .75rem; font-weight: 500; }
+.tag-blue { background: var(--c-blue-bg); color: #1a73e8; }
+.tag-green { background: var(--c-green-bg); color: #1e7e34; }
+.tag-orange { background: var(--c-orange-bg); color: #b06000; }
+.tag-purple { background: var(--c-purple-bg); color: #6a1b9a; }
+.tag-red { background: var(--c-red-bg); color: #c62828; }
+.tag-teal { background: var(--c-teal-bg); color: #156b50; }
+
+.info-box { padding: 12px 16px; border-radius: 8px; font-size: .82rem; border-left: 4px solid; margin-bottom: 12px; }
+.info-box.blue { background: var(--c-blue-bg); border-color: var(--c-primary); }
+.info-box.green { background: var(--c-green-bg); border-color: var(--c-green); }
+.info-box.orange { background: var(--c-orange-bg); border-color: var(--c-orange); }
+.info-box.purple { background: var(--c-purple-bg); border-color: var(--c-purple); }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; }
+
+/* Tabs */
+.tabs { margin: 16px 0; }
+.tab-nav { display: flex; gap: 0; border-bottom: 2px solid var(--c-border); margin-bottom: 0; }
+.tab-btn {
+  padding: 9px 20px; border: none; background: none;
+  font-size: .84rem; cursor: pointer; color: var(--c-text-2);
+  font-family: var(--font); border-bottom: 2px solid transparent; margin-bottom: -2px;
+  transition: color .15s,border-color .15s;
+}
+.tab-btn:hover { color: var(--c-text); }
+.tab-btn.active { color: var(--c-primary); border-bottom-color: var(--c-primary); font-weight: 600; }
+.tab-panel { display: none; padding-top: 16px; }
+.tab-panel.active { display: block; }
+
+/* Code */
+pre.code { background: #1e1e2e; border-radius: 8px; overflow-x: auto; margin: 8px 0 14px; position: relative; }
+pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); font-size: .72rem; line-height: 1.55; background: transparent !important; }
+.copy-btn {
+  position: absolute; top: 6px; right: 8px;
+  background: rgba(255,255,255,.1); border: none; border-radius: 6px;
+  color: #ccc; font-size: .75rem; cursor: pointer; padding: 3px 8px;
+  font-family: var(--font);
+}
+.copy-btn:hover { background: rgba(255,255,255,.2); }
+
+/* Module cards */
+.module-card { background: var(--c-surface); border-radius: 10px; box-shadow: var(--shadow-sm); padding: 14px 16px; margin-bottom: 12px; }
+.module-card .name { font-weight: 600; font-size: .88rem; }
+.module-card .path { font-family: var(--mono); font-size: .72rem; color: var(--c-text-2); margin: 2px 0 6px; }
+.module-card .desc { font-size: .8rem; color: var(--c-text-2); line-height: 1.5; }
+
+/* Progress-like inline bar */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.dot-blue { background: var(--c-primary); }
+.dot-green { background: var(--c-green); }
+.dot-orange { background: var(--c-orange); }
+.dot-purple { background: var(--c-purple); }
+.dot-red { background: var(--c-red); }
+
+.flow-step { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.flow-num { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--c-blue-bg); color: var(--c-primary); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: .8rem; }
+.flow-body { font-size: .84rem; line-height: 1.6; }
+.flow-body strong { color: var(--c-text); }
+.flow-body em { color: var(--c-text-2); font-style: normal; }
+
+.api-method { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: .7rem; font-weight: 600; font-family: var(--mono); margin-right: 8px; min-width: 44px; text-align: center; }
+.method-get { background: #e6f4ea; color: #1e7e34; }
+.method-post { background: #e8f0fe; color: #1a73e8; }
+.method-put { background: #fef7e0; color: #b06000; }
+.method-delete { background: #fce8e6; color: #c62828; }
+
+.footer { text-align: center; padding: 28px 0 12px; font-size: .75rem; color: var(--c-text-2); border-top: 1px solid var(--c-border); margin-top: 40px; }
+
+@media (max-width: 800px) {
+  .grid-2,.grid-3,.grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: 1.4rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<h1>&#128194; Backup Manager — 项目架构全景</h1>
+<p>基于 Git 反向追踪模式的文件聚合备份可视化管理工具 &middot; 2026-07-16</p>
+
+<!-- ============== Tabs ============== -->
+<div class="tabs">
+<div class="tab-nav" role="tablist">
+  <button class="tab-btn active" data-tab="overview" role="tab" aria-selected="true">总览</button>
+  <button class="tab-btn" data-tab="tech" role="tab">技术栈</button>
+  <button class="tab-btn" data-tab="modules" role="tab">模块拆解</button>
+  <button class="tab-btn" data-tab="flow" role="tab">核心流程</button>
+  <button class="tab-btn" data-tab="data" role="tab">数据模型</button>
+  <button class="tab-btn" data-tab="api" role="tab">API 接口</button>
+</div>
+
+<!-- ====== Tab: 总览 ====== -->
+<div class="tab-panel active" id="overview">
+
+<div class="card">
+  <h3>项目定位</h3>
+  <p>让用户以<strong>"指定要备份什么"</strong>（白名单）而非"排除什么"（黑名单）的直观方式管理备份。通过软链接将分散在文件系统中各处的源文件聚合到一个 Git 仓库内，实现<strong>统一版本管理 + 按需备份</strong>。</p>
+</div>
+
+<div class="info-box purple">
+  <strong>核心设计原则</strong>：反向追踪模式（Reverse Tracking）——用户主动指定哪些文件需要备份，未指定的自动忽略；软链接聚合管理源文件；前后端一体单进程运行。
+</div>
+
+<div class="arch-fig">
+<svg role="img" viewBox="0 0 680 664" width="100%">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <title>Backup Manager Architecture</title>
+  <desc>Four-layer architecture: Frontend SPA, API Layer (Gin), Service Layer (8 services), Infrastructure Layer</desc>
+
+  <!-- Browser -->
+  <rect x="240" y="10" width="200" height="34" rx="17" fill="#EEEDFE" stroke="#534AB7" stroke-width=".5"/>
+  <text x="340" y="30" text-anchor="middle" font-family="var(--font)" font-size="13" font-weight="500" fill="#26215C" dominant-baseline="central">Browser / User</text>
+  <line x1="340" y1="44" x2="340" y2="62" stroke="#534AB7" stroke-width=".5" marker-end="url(#a1)"/>
+
+  <!-- Frontend -->
+  <rect x="36" y="64" width="608" height="92" rx="20" fill="#EEEDFE" stroke="#534AB7" stroke-width=".5"/>
+  <text x="340" y="84" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#26215C">Frontend — React 18 + TypeScript + Vite</text>
+
+  <rect x="54" y="94" width="128" height="34" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width=".5"/>
+  <text x="118" y="114" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#3C3489" dominant-baseline="central">Ant Design 5 UI</text>
+
+  <rect x="196" y="94" width="128" height="34" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width=".5"/>
+  <text x="260" y="114" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#3C3489" dominant-baseline="central">Zustand Store</text>
+
+  <rect x="338" y="94" width="128" height="34" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width=".5"/>
+  <text x="402" y="114" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#3C3489" dominant-baseline="central">Axios Client</text>
+
+  <rect x="480" y="94" width="146" height="34" rx="8" fill="#CECBF6" stroke="#534AB7" stroke-width=".5"/>
+  <text x="553" y="114" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#3C3489" dominant-baseline="central">React Router (SPA)</text>
+
+  <line x1="340" y1="156" x2="340" y2="176" stroke="#534AB7" stroke-width=".5" marker-end="url(#a1)"/>
+
+  <!-- API Layer -->
+  <rect x="36" y="178" width="608" height="54" rx="12" fill="#E1F5EE" stroke="#1D9E75" stroke-width=".5"/>
+  <text x="340" y="196" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#085041">API Layer — Gin Router</text>
+  <text x="340" y="216" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#085041">embed.FS 嵌入前端产物 + SPA Fallback ｜ CORS + Error Recovery Middleware</text>
+
+  <line x1="340" y1="232" x2="340" y2="252" stroke="#1D9E75" stroke-width=".5" marker-end="url(#a1)"/>
+
+  <!-- 8 Handlers row -->
+  <rect x="36" y="254" width="608" height="42" rx="10" fill="#E1F5EE" stroke="#1D9E75" stroke-width=".5" stroke-dasharray="4,3"/>
+  <text x="340" y="278" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#085041">8 Handlers: Repo · Symlink · Browse · Preview · Backup · Auth · System · Rollback</text>
+
+  <line x1="340" y1="296" x2="340" y2="316" stroke="#1D9E75" stroke-width=".5" marker-end="url(#a1)"/>
+
+  <!-- Service Layer -->
+  <rect x="36" y="318" width="608" height="148" rx="20" fill="#E6F1FB" stroke="#378ADD" stroke-width=".5"/>
+  <text x="340" y="338" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#0C447C">Service Layer — Business Logic (8 Services)</text>
+
+  <rect x="52" y="350" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="113" y="372" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">RepoService</text>
+
+  <rect x="186" y="350" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="247" y="372" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">SymlinkService</text>
+
+  <rect x="320" y="350" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="381" y="372" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">BackupService</text>
+
+  <rect x="454" y="350" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="515" y="372" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">AuthService</text>
+
+  <rect x="52" y="398" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="113" y="420" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">BrowserService</text>
+
+  <rect x="186" y="398" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="247" y="420" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">PreviewService</text>
+
+  <rect x="320" y="398" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="381" y="420" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">RollbackService</text>
+
+  <rect x="454" y="398" width="122" height="38" rx="8" fill="#B5D4F4" stroke="#378ADD" stroke-width=".5"/>
+  <text x="515" y="420" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#0C447C" dominant-baseline="central">RepoMutexMgr</text>
+
+  <line x1="340" y1="466" x2="340" y2="488" stroke="#378ADD" stroke-width=".5" marker-end="url(#a1)"/>
+
+  <!-- Infrastructure -->
+  <rect x="36" y="490" width="608" height="108" rx="20" fill="#EAF3DE" stroke="#639922" stroke-width=".5"/>
+  <text x="340" y="510" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#27500A">Infrastructure Layer</text>
+
+  <rect x="54" y="524" width="122" height="38" rx="8" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="115" y="546" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#27500A" dominant-baseline="central">SQLite Store</text>
+
+  <rect x="188" y="524" width="122" height="38" rx="8" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="249" y="546" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#27500A" dominant-baseline="central">Git Engine</text>
+
+  <rect x="322" y="524" width="122" height="38" rx="8" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="383" y="546" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#27500A" dominant-baseline="central">Scheduler</text>
+
+  <rect x="456" y="524" width="170" height="38" rx="8" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="541" y="546" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#27500A" dominant-baseline="central">AES-GCM Crypto</text>
+</svg>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>核心价值</h3>
+    <ul style="padding-left:18px;line-height:2;font-size:.84rem">
+      <li><strong>反向追踪</strong>：白名单模式，指定备份而非排除</li>
+      <li><strong>软链接聚合</strong>：源文件分散存放，统一管理</li>
+      <li><strong>Git 版本控制</strong>：增量检测 + 自动提交 + 可选推送</li>
+      <li><strong>可视化界面</strong>：React SPA，拖拽式选择文件</li>
+      <li><strong>加密安全</strong>：AES-256-GCM 保护 Git 认证凭据</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>关键指标</h3>
+    <table class="styled-table">
+      <tbody>
+        <tr><td>后端语言</td><td>Go 1.26</td></tr>
+        <tr><td>前端框架</td><td>React 18 + TypeScript</td></tr>
+        <tr><td>数据库</td><td>SQLite (pure Go, 零 CGO)</td></tr>
+        <tr><td>外部依赖</td><td>4 个 Go 模块, ~10 个 npm 包</td></tr>
+        <tr><td>API 端点</td><td>30+ RESTful endpoints</td></tr>
+        <tr><td>核心实体表</td><td>4 张 (repos, configs, auths, symlinks)</td></tr>
+        <tr><td>默认端口</td><td>9800</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h3>目录结构速览</h3>
+  <pre class="code"><code>backup-manager/
+├── main.go                          # 入口：初始化 → 启动 HTTP → 优雅关闭
+├── go.mod / go.sum                  # Go 模块定义 (4 个直接依赖)
+├── internal/
+│   ├── api/                         # Gin 路由 + 中间件 + 8 个 Handler
+│   ├── service/                     # 8 个业务逻辑 Service
+│   ├── store/                       # SQLite 持久化 (5 个 Store 文件)
+│   ├── model/                       # 数据模型 (Repo, Symlink, Auth)
+│   ├── git/                         # Git 引擎 (os/exec 调用系统 git)
+│   ├── scheduler/                   # robfig/cron 定时调度
+│   └── util/                        # 路径安全 + 加密 + 文件工具
+├── frontend/                        # React SPA
+│   └── src/
+│       ├── main.tsx / App.tsx       # 入口 + 路由配置
+│       ├── api/client.ts            # Axios 实例 + 全部 API 函数
+│       ├── store/appStore.ts        # Zustand 状态管理
+│       ├── types/                   # TypeScript 类型定义
+│       ├── routes/                  # Dashboard, RepoDetail
+│       └── components/              # 功能组件 (repo/symlink/preview/backup/config)
+├── docs/                            # 文档
+├── DESIGN.md                        # 技术设计方案
+├── REQUIREMENT.md                   # 需求文档
+└── AGENTS.md                        # 项目规范</code></pre>
+</div>
+
+</div>
+
+<!-- ====== Tab: 技术栈 ====== -->
+<div class="tab-panel" id="tech">
+
+<div class="grid-2">
+  <div>
+    <h3>Backend</h3>
+    <table class="styled-table">
+      <thead><tr><th>组件</th><th>技术</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>语言</td><td><span class="tag tag-blue">Go 1.26</span></td><td>单二进制、跨平台编译</td></tr>
+        <tr><td>HTTP 框架</td><td><span class="tag tag-green">Gin v1.12</span></td><td>轻量高性能</td></tr>
+        <tr><td>数据库</td><td><span class="tag tag-teal">SQLite (modernc.org)</span></td><td>纯 Go 实现，零 CGO</td></tr>
+        <tr><td>定时调度</td><td><span class="tag tag-orange">robfig/cron v3</span></td><td>秒级 cron 表达式</td></tr>
+        <tr><td>Git 操作</td><td><span class="tag tag-purple">os/exec</span></td><td>复用用户本地 git</td></tr>
+        <tr><td>加密</td><td><span class="tag tag-red">crypto/aes + gcm</span></td><td>AES-256-GCM</td></tr>
+        <tr><td>UUID</td><td>google/uuid v1.6</td><td>ID 生成</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Frontend</h3>
+    <table class="styled-table">
+      <thead><tr><th>组件</th><th>技术</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>框架</td><td><span class="tag tag-blue">React 18</span></td><td>函数组件 + Hooks</td></tr>
+        <tr><td>语言</td><td><span class="tag tag-blue">TypeScript</span></td><td>类型安全</td></tr>
+        <tr><td>构建</td><td><span class="tag tag-green">Vite 5</span></td><td>开发代理 /api → 9800</td></tr>
+        <tr><td>UI 库</td><td><span class="tag tag-purple">Ant Design 5</span></td><td>企业级组件</td></tr>
+        <tr><td>状态</td><td><span class="tag tag-teal">Zustand</span></td><td>轻量级 store</td></tr>
+        <tr><td>HTTP</td><td><span class="tag tag-orange">Axios</span></td><td>30s 超时 + 响应解包</td></tr>
+        <tr><td>Markdown</td><td>react-markdown + remark-gfm</td><td>Github Flavored</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h3>开发 / 部署模式</h3>
+<div class="card">
+  <table class="styled-table">
+    <thead><tr><th>模式</th><th>前端</th><th>后端</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><strong>开发</strong></td><td>Vite Dev Server (5173)</td><td>Go 后端 (9800)</td><td>Vite proxy /api/* → localhost:9800</td></tr>
+      <tr><td><strong>生产</strong></td><td>embed.FS 嵌入</td><td>Go 静态文件服务</td><td>单二进制部署，一行命令启动</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</div>
+
+<!-- ====== Tab: 模块拆解 ====== -->
+<div class="tab-panel" id="modules">
+
+<div class="info-box blue">
+  <strong>设计哲学</strong>：Handler 只做请求解析和响应返回；Service 承载全部业务逻辑；Store 封装数据访问。各层之间通过接口解耦（实际使用具体类型注入），方便测试和替换。
+</div>
+
+<h3>API 层 — 8 个 Handler</h3>
+<div class="grid-2">
+  <div class="module-card">
+    <div class="name">&#128229; RepoHandler</div>
+    <div class="path">internal/api/handler/repo.go</div>
+    <div class="desc">仓库 CRUD + 配置更新 + Git Init。核心入口，管理备份仓库的全生命周期。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128279; SymlinkHandler</div>
+    <div class="path">internal/api/handler/symlink.go</div>
+    <div class="desc">软链接 CRUD + 批量导入 + 目录浏览。维护 .links/ 与 data/ 镜像一致性。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128269; BrowseHandler</div>
+    <div class="path">internal/api/handler/browse.go</div>
+    <div class="desc">安全文件浏览，限定 AllowedRoots ($HOME + repo 根目录)，四层路径校验。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128214; PreviewHandler</div>
+    <div class="path">internal/api/handler/preview.go</div>
+    <div class="desc">文件预览 + 编辑保存。直接操作源文件（symlink.target_path），同步写回 data/。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128190; BackupHandler</div>
+    <div class="path">internal/api/handler/backup.go</div>
+    <div class="desc">手动触发备份 + 历史查询 + Git Push。增量检测引擎的对外接口。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128274; AuthHandler</div>
+    <div class="path">internal/api/handler/auth.go</div>
+    <div class="desc">Git 认证管理。SSH 私钥 / HTTPS 密码的加密存储与设置。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#9878;&#65039; SystemHandler</div>
+    <div class="path">internal/api/handler/system.go</div>
+    <div class="desc">健康检查 /health，返回服务状态、启动时间、版本信息。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#9202; RollbackHandler</div>
+    <div class="path">internal/api/handler/rollback.go</div>
+    <div class="desc">Git 历史版本回滚到源文件。支持文件级预览和选择性恢复。</div>
+  </div>
+</div>
+
+<h3>Service 层 — 8 个业务服务</h3>
+<div class="grid-2">
+  <div class="module-card">
+    <div class="name">&#128188; RepoService</div>
+    <div class="path">internal/service/repo_service.go</div>
+    <div class="desc">仓库生命周期管理（创建/删除/配置），自动注册/注销定时备份。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128279; SymlinkService</div>
+    <div class="path">internal/service/symlink_service.go</div>
+    <div class="desc">软链接 CRUD，同步操作 data/ 确保镜像一致，处理悬空链接检测。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#9889; BackupService</div>
+    <div class="path">internal/service/backup_service.go</div>
+    <div class="desc"><strong>核心引擎</strong>：增量检测 (mtime+size) → 同步 data/ → git add/commit/push。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128274; AuthService</div>
+    <div class="path">internal/service/auth_service.go</div>
+    <div class="desc">Git 认证管理：AES-GCM 加密存储 + 环境变量注入（GIT_SSH_COMMAND / GIT_ASKPASS）。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128269; BrowserService</div>
+    <div class="path">internal/service/browser_service.go</div>
+    <div class="desc">安全文件浏览服务。限定 AllowedRoots，调用 SafeResolve 防路径穿越。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128214; PreviewService</div>
+    <div class="path">internal/service/preview_service.go</div>
+    <div class="desc">文件预览 + 编辑保存。通过 relative_path 解析源文件路径，限制 ≤10MB。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#9202; RollbackService</div>
+    <div class="path">internal/service/rollback_service.go</div>
+    <div class="desc">从 Git 历史恢复源文件。支持文件级预览 + 选择性恢复 + 全量回滚。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128274; RepoMutexManager</div>
+    <div class="path">internal/service/repo_mutex.go</div>
+    <div class="desc">每个仓库独立 sync.Mutex，防止并发备份/推送冲突。</div>
+  </div>
+</div>
+
+<h3>Infrastructure 层</h3>
+<div class="grid-2">
+  <div class="module-card">
+    <div class="name">&#128451;&#65039; SQLite Store</div>
+    <div class="path">internal/store/ (5 files)</div>
+    <div class="desc">WAL 模式 + 外键级联删除。4 张核心表。纯 Go 实现，零 CGO。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128187; Git Engine</div>
+    <div class="path">internal/git/git.go</div>
+    <div class="desc">os/exec 调用系统 git：Init/Add/Commit/Push/Log/Status/Config。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#9200; Scheduler</div>
+    <div class="path">internal/scheduler/scheduler.go</div>
+    <div class="desc">robfig/cron/v3 包装：Register/Unregister per-repo cron job + panic 恢复。</div>
+  </div>
+  <div class="module-card">
+    <div class="name">&#128737;&#65039; Security Utils</div>
+    <div class="path">internal/util/ (3 files)</div>
+    <div class="desc">SafeResolve 四层路径校验 + AES-256-GCM 加密 + CopyFile/CopyDir 文件操作。</div>
+  </div>
+</div>
+
+</div>
+
+<!-- ====== Tab: 核心流程 ====== -->
+<div class="tab-panel" id="flow">
+
+<h3>备份执行核心流程</h3>
+<div class="arch-fig">
+<svg role="img" viewBox="0 0 680 496" width="100%">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <title>Backup Execution Flow</title>
+  <desc>Step-by-step backup flow: trigger, mutex lock, incremental detection, sync, git operations</desc>
+
+  <rect x="240" y="10" width="200" height="34" rx="17" fill="#EEEDFE" stroke="#534AB7" stroke-width=".5"/>
+  <text x="340" y="30" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#26215C" dominant-baseline="central">User / Cron Triggers Backup</text>
+  <line x1="340" y1="44" x2="340" y2="62" stroke="#534AB7" stroke-width=".5" marker-end="url(#a2)"/>
+
+  <rect x="210" y="64" width="260" height="40" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width=".5"/>
+  <text x="340" y="87" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#0C447C" dominant-baseline="central">1. Per-repo Mutex Lock</text>
+  <line x1="340" y1="104" x2="340" y2="124" stroke="#378ADD" stroke-width=".5" marker-end="url(#a2)"/>
+
+  <rect x="180" y="126" width="320" height="48" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width=".5"/>
+  <text x="340" y="148" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#0C447C" dominant-baseline="central">2. SyncDeletedSource</text>
+  <text x="340" y="164" text-anchor="middle" font-family="var(--font)" font-size="10" fill="#0C447C" dominant-baseline="central">Detect dangling symlinks → remove data/ copies</text>
+  <line x1="340" y1="174" x2="340" y2="194" stroke="#378ADD" stroke-width=".5" marker-end="url(#a2)"/>
+
+  <rect x="80" y="196" width="520" height="72" rx="10" fill="#E1F5EE" stroke="#1D9E75" stroke-width=".5"/>
+  <text x="340" y="216" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#085041">3. Incremental Detection (mtime + size comparison)</text>
+  <text x="340" y="236" text-anchor="middle" font-family="var(--font)" font-size="10" fill="#085041">file symlinks: compare mtime &amp; size → CopyFile to data/</text>
+  <text x="340" y="254" text-anchor="middle" font-family="var(--font)" font-size="10" fill="#085041">directory symlinks: recursive walk + cycle detection → per-file compare</text>
+  <line x1="340" y1="268" x2="340" y2="288" stroke="#1D9E75" stroke-width=".5" marker-end="url(#a2)"/>
+
+  <rect x="230" y="290" width="220" height="40" rx="8" fill="#E1F5EE" stroke="#1D9E75" stroke-width=".5"/>
+  <text x="340" y="313" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#085041" dominant-baseline="central">4. git add -A</text>
+  <line x1="340" y1="330" x2="340" y2="350" stroke="#1D9E75" stroke-width=".5" marker-end="url(#a2)"/>
+
+  <rect x="230" y="352" width="220" height="40" rx="8" fill="#E1F5EE" stroke="#1D9E75" stroke-width=".5"/>
+  <text x="340" y="375" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#085041" dominant-baseline="central">5. git commit (with author)</text>
+
+  <line x1="565" y1="372" x2="585" y2="372" stroke="#D85A30" stroke-width=".5" stroke-dasharray="4,3"/>
+  <line x1="585" y1="372" x2="585" y2="422" stroke="#D85A30" stroke-width=".5" stroke-dasharray="4,3" marker-end="url(#a2)"/>
+  <rect x="515" y="404" width="140" height="36" rx="8" fill="#FAECE7" stroke="#D85A30" stroke-width=".5"/>
+  <text x="585" y="425" text-anchor="middle" font-family="var(--font)" font-size="11" fill="#993C1D" dominant-baseline="central">6. git push (optional)</text>
+</svg>
+</div>
+
+<div class="info-box green">
+  <strong>增量检测算法</strong>：mtime + fileSize 双字段比较。当源文件的修改时间或大小与数据库中记录不一致时，即判定为变更并同步到 data/。目录级 symlink 使用递归遍历 + 循环检测，确保安全。
+</div>
+
+<h3>镜像一致性保障</h3>
+<div class="card">
+<pre class="code"><code>CREATE Symlink:
+  1. SafeResolve 验证源路径
+  2. os.Symlink(sourcePath → .links/relativePath)
+  3. CopyFile/CopyDir(sourcePath → data/relativePath)  ← 同步复制
+  4. INSERT INTO symlinks
+
+DELETE Symlink:
+  1. os.Remove(.links/relativePath)
+  2. os.Remove(data/relativePath)
+  3. 清理空目录
+  4. DELETE FROM symlinks
+
+UPDATE Symlink Target:
+  1. 删除旧 .links/ + data/ 文件
+  2. 创建新软链接 + 复制新源文件
+  3. UPDATE symlinks SET target_path, file_size, modified_at</code></pre>
+</div>
+
+<div class="info-box orange">
+  <strong>关键决策</strong>：备份执行阶段不再重新扫描全部源文件，仅做增量同步。这得益于添加/删除/修改软链接时已经同步维护了 data/ 目录的镜像状态。
+</div>
+
+<h3>预览 &amp; 编辑流程</h3>
+<div class="grid-2">
+  <div class="card">
+    <h3>预览</h3>
+    <div class="flow-step"><div class="flow-num">1</div><div class="flow-body">用户点击文件树节点</div></div>
+    <div class="flow-step"><div class="flow-num">2</div><div class="flow-body"><strong>GET /preview?path=&lt;relPath&gt;</strong></div></div>
+    <div class="flow-step"><div class="flow-num">3</div><div class="flow-body">PreviewService.ResolveSource → 解析到<em>源文件</em>绝对路径</div></div>
+    <div class="flow-step"><div class="flow-num">4</div><div class="flow-body">读取源文件内容 → 返回 {content, mime_type, size}</div></div>
+    <div class="flow-step"><div class="flow-num">5</div><div class="flow-body">前端渲染 TextPreview / MarkdownPreview / BinaryInfo</div></div>
+  </div>
+  <div class="card">
+    <h3>编辑保存</h3>
+    <div class="flow-step"><div class="flow-num">1</div><div class="flow-body">用户编辑内容 → 点击保存</div></div>
+    <div class="flow-step"><div class="flow-num">2</div><div class="flow-body"><strong>PUT /repos/:id/save {path, content}</strong></div></div>
+    <div class="flow-step"><div class="flow-num">3</div><div class="flow-body">验证：content ≤ 10MB, path 非空</div></div>
+    <div class="flow-step"><div class="flow-num">4</div><div class="flow-body">os.WriteFile(sourcePath, content, origMode)</div></div>
+    <div class="flow-step"><div class="flow-num">5</div><div class="flow-body">os.WriteFile(dataPath, content, origMode) <em>同步 data/</em></div></div>
+    <div class="flow-step"><div class="flow-num">6</div><div class="flow-body">更新 symlink 元数据 → 前端刷新预览</div></div>
+  </div>
+</div>
+
+</div>
+
+<!-- ====== Tab: 数据模型 ====== -->
+<div class="tab-panel" id="data">
+
+<div class="arch-fig">
+<svg role="img" viewBox="0 0 680 420" width="100%">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <title>Data Model</title>
+  <desc>Four core SQLite tables with foreign key relationships</desc>
+
+  <!-- repos -->
+  <rect x="120" y="16" width="200" height="76" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width=".5"/>
+  <text x="220" y="38" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#26215C">repos</text>
+  <text x="220" y="56" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#3C3489">id TEXT PRIMARY KEY</text>
+  <text x="220" y="72" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#3C3489">name, path, status, last_backup_at</text>
+
+  <!-- repo_configs -->
+  <rect x="380" y="16" width="200" height="76" rx="10" fill="#E1F5EE" stroke="#1D9E75" stroke-width=".5"/>
+  <text x="480" y="38" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#085041">repo_configs</text>
+  <text x="480" y="56" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#085041">repo_id (FK → repos)</text>
+  <text x="480" y="72" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#085041">remote_url, branch, auto_backup, cron</text>
+
+  <!-- repo_auths -->
+  <rect x="120" y="136" width="200" height="76" rx="10" fill="#FAEEDA" stroke="#EF9F27" stroke-width=".5"/>
+  <text x="220" y="158" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#633806">repo_auths</text>
+  <text x="220" y="176" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#633806">repo_id (FK → repos)</text>
+  <text x="220" y="192" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#633806">SSH key / HTTPS (AES-GCM)</text>
+
+  <!-- symlinks -->
+  <rect x="380" y="136" width="200" height="76" rx="10" fill="#E6F1FB" stroke="#378ADD" stroke-width=".5"/>
+  <text x="480" y="158" text-anchor="middle" font-family="var(--font)" font-size="12" font-weight="500" fill="#0C447C">symlinks</text>
+  <text x="480" y="176" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#0C447C">repo_id (FK → repos)</text>
+  <text x="480" y="192" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#0C447C">relative_path, target_path, type</text>
+
+  <line x1="220" y1="92" x2="220" y2="134" stroke="#534AB7" stroke-width=".5" stroke-dasharray="4,3" marker-end="url(#a3)"/>
+  <text x="230" y="118" font-family="var(--font)" font-size="10" fill="#3C3489">1:1</text>
+
+  <line x1="480" y1="92" x2="480" y2="134" stroke="#1D9E75" stroke-width=".5" stroke-dasharray="4,3" marker-end="url(#a3)"/>
+  <text x="490" y="118" font-family="var(--font)" font-size="10" fill="#085041">1:1</text>
+
+  <line x1="320" y1="54" x2="378" y2="54" stroke="#534AB7" stroke-width=".5" stroke-dasharray="4,3"/>
+  <text x="355" y="46" font-family="var(--font)" font-size="10" fill="#534AB7">1:1</text>
+
+  <line x1="290" y1="54" x2="440" y2="155" stroke="#378ADD" stroke-width=".5" stroke-dasharray="4,3"/>
+  <text x="385" y="104" font-family="var(--font)" font-size="10" fill="#378ADD">1:N (cascade)</text>
+
+  <!-- Physical storage -->
+  <rect x="80" y="248" width="520" height="68" rx="12" fill="#EAF3DE" stroke="#639922" stroke-width=".5"/>
+  <text x="340" y="268" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#27500A">Physical Storage Mapping</text>
+
+  <rect x="100" y="282" width="150" height="24" rx="6" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="175" y="297" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#27500A" dominant-baseline="central">~/.config/backup-manager/</text>
+
+  <rect x="265" y="282" width="150" height="24" rx="6" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="340" y="297" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#27500A" dominant-baseline="central">&lt;repo&gt;/.links/</text>
+
+  <rect x="430" y="282" width="150" height="24" rx="6" fill="#C0DD97" stroke="#639922" stroke-width=".5"/>
+  <text x="505" y="297" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="#27500A" dominant-baseline="central">&lt;repo&gt;/data/</text>
+
+  <!-- Module info -->
+  <text x="340" y="370" text-anchor="middle" font-family="var(--font)" font-size="11" font-weight="500" fill="#5F5E5A">Go Module: backup-manager (Go 1.26)</text>
+  <text x="340" y="392" text-anchor="middle" font-family="var(--font)" font-size="10" fill="#888780">Deps: gin · modernc.org/sqlite · robfig/cron/v3 · google/uuid</text>
+</svg>
+</div>
+
+<h3>数据库 Schema</h3>
+<div class="card">
+<pre class="code"><code class="language-sql">CREATE TABLE repos (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    path          TEXT NOT NULL UNIQUE,
+    created_at    DATETIME DEFAULT (datetime('now')),
+    updated_at    DATETIME DEFAULT (datetime('now')),
+    last_backup_at DATETIME,
+    status        TEXT DEFAULT 'active'   -- active | error | backing_up
+);
+
+CREATE TABLE repo_configs (
+    repo_id             TEXT PRIMARY KEY,
+    remote_url          TEXT,
+    branch              TEXT DEFAULT 'main',
+    auto_backup         INTEGER DEFAULT 0,
+    auto_backup_interval TEXT,             -- cron expression
+    git_user_name       TEXT,
+    git_user_email      TEXT,
+    FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+);
+
+CREATE TABLE repo_auths (
+    repo_id              TEXT PRIMARY KEY,
+    auth_type            TEXT NOT NULL DEFAULT 'none',  -- none | ssh_key | password
+    ssh_private_key      BLOB,           -- AES-GCM encrypted
+    ssh_private_key_path TEXT,
+    username             TEXT,
+    password_encrypted   BLOB,           -- AES-GCM encrypted
+    updated_at           DATETIME,
+    FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+);
+
+CREATE TABLE symlinks (
+    id              TEXT PRIMARY KEY,
+    repo_id         TEXT NOT NULL,
+    relative_path   TEXT NOT NULL,       -- path under .links/
+    target_path     TEXT NOT NULL,       -- absolute source file path
+    type            TEXT NOT NULL,       -- file | directory
+    file_size       INTEGER,
+    modified_at     DATETIME,
+    created_at      DATETIME DEFAULT (datetime('now')),
+    FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
+    UNIQUE(repo_id, relative_path)
+);</code></pre>
+</div>
+
+<h3>Go 数据模型</h3>
+<div class="grid-2">
+  <div class="card">
+    <h3>Repo</h3>
+    <pre class="code"><code class="language-go">type Repo struct {
+    ID           string     `json:"id"`
+    Name         string     `json:"name"`
+    Path         string     `json:"path"`
+    CreatedAt    time.Time  `json:"created_at"`
+    UpdatedAt    time.Time  `json:"updated_at"`
+    LastBackupAt *time.Time `json:"last_backup_at,omitempty"`
+    Status       RepoStatus `json:"status"`
+}
+
+type RepoConfig struct {
+    RepoID             string `json:"repo_id"`
+    RemoteURL          string `json:"remote_url,omitempty"`
+    Branch             string `json:"branch,omitempty"`
+    AutoBackup         bool   `json:"auto_backup"`
+    AutoBackupInterval string `json:"auto_backup_interval,omitempty"`
+    GitUserName        string `json:"git_user_name,omitempty"`
+    GitUserEmail       string `json:"git_user_email,omitempty"`
+}</code></pre>
+  </div>
+  <div class="card">
+    <h3>Symlink</h3>
+    <pre class="code"><code class="language-go">type Symlink struct {
+    ID           string      `json:"id"`
+    RepoID       string      `json:"repo_id"`
+    RelativePath string      `json:"relative_path"`
+    TargetPath   string      `json:"target_path"`
+    Type         SymlinkType `json:"type"`
+    FileSize     int64       `json:"file_size,omitempty"`
+    ModifiedAt   *time.Time  `json:"modified_at,omitempty"`
+    CreatedAt    time.Time   `json:"created_at"`
+}
+
+type GitAuth struct {
+    RepoID              string
+    AuthType            GitAuthType
+    SSHPrivateKey       string    // AES-GCM encrypted
+    SSHPrivateKeyPath   string
+    Username            string
+    PasswordEncrypted   []byte    // AES-GCM encrypted
+}</code></pre>
+  </div>
+</div>
+
+<h3>应用配置文件</h3>
+<div class="card">
+<pre class="code"><code class="language-json">// 路径: ~/.config/backup-manager/config.json
+{
+  "port": 9800,
+  "openBrowser": true,
+  "theme": "light"
+}</code></pre>
+</div>
+
+</div>
+
+<!-- ====== Tab: API 接口 ====== -->
+<div class="tab-panel" id="api">
+
+<div class="info-box blue">
+  <strong>API 规范</strong>：所有端点前缀 <code>/api/v1</code>，响应统一格式 <code>{"data": ...}</code> 或 <code>{"error": "..."}</code>。前端 axios 拦截器自动解包 <code>data</code> 字段。
+</div>
+
+<table class="styled-table">
+  <thead><tr><th style="width:60px">方法</th><th>路径</th><th>功能</th><th style="width:80px">模块</th></tr></thead>
+  <tbody>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos</code></td><td>创建仓库</td><td><span class="tag tag-purple">Repo</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos</code></td><td>仓库列表</td><td><span class="tag tag-purple">Repo</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id</code></td><td>仓库详情</td><td><span class="tag tag-purple">Repo</span></td></tr>
+    <tr><td><span class="api-method method-delete">DELETE</span></td><td><code>/repos/:id</code></td><td>删除仓库（仅删 DB + 定时任务）</td><td><span class="tag tag-purple">Repo</span></td></tr>
+    <tr><td><span class="api-method method-put">PUT</span></td><td><code>/repos/:id/config</code></td><td>更新配置（部分更新）</td><td><span class="tag tag-purple">Repo</span></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/git-init</code></td><td>初始化 Git 仓库</td><td><span class="tag tag-purple">Repo</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/symlinks</code></td><td>添加软链接</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/symlinks</code></td><td>软链接列表</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/symlinks/:linkId</code></td><td>软链接详情</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-delete">DELETE</span></td><td><code>/repos/:id/symlinks/:linkId</code></td><td>删除软链接</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-put">PUT</span></td><td><code>/repos/:id/symlinks/:linkId</code></td><td>修改目标路径</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/symlinks/batch</code></td><td>批量导入</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/symlinks/:linkId/entries</code></td><td>目录浏览</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/symlinks/:linkId/nested</code></td><td>嵌套软链接</td><td><span class="tag tag-blue">Symlink</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/browse?path=...</code></td><td>浏览本地文件系统</td><td><span class="tag tag-teal">Browse</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/browse/allowed-roots</code></td><td>允许的根目录</td><td><span class="tag tag-teal">Browse</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/preview?path=...</code></td><td>预览文件内容</td><td><span class="tag tag-green">Preview</span></td></tr>
+    <tr><td><span class="api-method method-put">PUT</span></td><td><code>/repos/:id/save</code></td><td>保存编辑内容</td><td><span class="tag tag-green">Preview</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/backup</code></td><td>触发备份</td><td><span class="tag tag-orange">Backup</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/backup/history</code></td><td>备份历史 (limit, offset)</td><td><span class="tag tag-orange">Backup</span></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/push</code></td><td>推送到远程</td><td><span class="tag tag-orange">Backup</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/auth</code></td><td>获取认证配置</td><td><span class="tag tag-red">Auth</span></td></tr>
+    <tr><td><span class="api-method method-put">PUT</span></td><td><code>/repos/:id/auth</code></td><td>设置认证</td><td><span class="tag tag-red">Auth</span></td></tr>
+    <tr><td><span class="api-method method-delete">DELETE</span></td><td><code>/repos/:id/auth</code></td><td>清除认证</td><td><span class="tag tag-red">Auth</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/commits/:hash/changed-files</code></td><td>提交变更文件列表</td><td><span class="tag tag-purple">Rollback</span></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/repos/:id/commits/:hash/files</code></td><td>提交文件内容预览</td><td><span class="tag tag-purple">Rollback</span></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/commits/:hash/restore</code></td><td>恢复单个文件</td><td><span class="tag tag-purple">Rollback</span></td></tr>
+    <tr><td><span class="api-method method-post">POST</span></td><td><code>/repos/:id/rollback</code></td><td>批量回滚</td><td><span class="tag tag-purple">Rollback</span></td></tr>
+    <tr><td colspan="4" style="height:8px;padding:0"></td></tr>
+    <tr><td><span class="api-method method-get">GET</span></td><td><code>/health</code></td><td>健康检查</td><td><span class="tag tag-teal">System</span></td></tr>
+  </tbody>
+</table>
+
+</div>
+
+</div>
+<!-- END Tabs -->
+
+<div class="footer">
+  <p>Backup Manager — Project Architecture Overview &middot; 2026-07-16</p>
+</div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+  // Syntax highlight
+  hljs.highlightAll();
+
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var tabId = this.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+      document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+      this.classList.add('active');
+      this.setAttribute('aria-selected','true');
+      document.getElementById(tabId).classList.add('active');
+    });
+  });
+
+  // Copy buttons
+  document.querySelectorAll('pre.code').forEach(function(block) {
+    var btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    btn.onclick = function() {
+      var code = block.querySelector('code') || block;
+      navigator.clipboard.writeText(code.textContent).then(function() {
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+      }).catch(function() {
+        btn.textContent = 'Failed';
+        setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+      });
+    };
+    block.style.position = 'relative';
+    block.appendChild(btn);
+  });
+
+});
+</script>
+
+</body>
+</html>

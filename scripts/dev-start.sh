@@ -20,7 +20,7 @@ npm run build
 
 echo "Building backend..."
 cd "$ROOT_DIR"
-go build -o backup-manager .
+CGO_ENABLED=1 go build -o backup-manager .
 
 echo "Starting backend (port 9800)..."
 ./backup-manager &

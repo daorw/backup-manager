@@ -1,26 +1,24 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
-	"syscall"
-	"time"
 
 	"backup-manager/internal/api"
 	"backup-manager/internal/api/handler"
 	"backup-manager/internal/git"
 	"backup-manager/internal/scheduler"
+	"backup-manager/internal/servermgr"
 	"backup-manager/internal/service"
+	"backup-manager/internal/shortcut"
 	"backup-manager/internal/store"
+	"backup-manager/internal/tray"
 	"backup-manager/internal/util"
 )
 
@@ -85,11 +83,9 @@ func main() {
 	gitEngine := git.NewGitEngine()
 
 	// Initialize services
-	// Scheduler needs backup service callback, so we create it later
 	var backupSvc *service.BackupService
 	var sched *scheduler.Scheduler
 
-	// Create scheduler with a placeholder, will be updated after backupSvc is created
 	sched = scheduler.NewScheduler(func(repoID string) error {
 		if backupSvc == nil {
 			return fmt.Errorf("backup service not initialized")
@@ -140,42 +136,76 @@ func main() {
 	api.MountStatic(router, frontendAssets)
 	log.Println("Frontend static files mounted")
 
-	// Create HTTP server
-	addr := fmt.Sprintf(":%d", appConfig.Port)
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: router,
-	}
-
-	// Start server in a goroutine
+	// Create desktop shortcut on first run (non-blocking)
 	go func() {
-		log.Printf("Backup Manager starting on http://localhost%s", addr)
-		log.Printf("API docs: http://localhost%s/api/v1/health", addr)
-
-		if appConfig.OpenBrowser {
-			openURL(fmt.Sprintf("http://localhost%s", addr))
-		}
-
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+		if err := shortcut.CreateOnDesktop(); err != nil {
+			log.Printf("warning: failed to create desktop shortcut: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal for graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	// Build the server address
+	addr := fmt.Sprintf(":%d", appConfig.Port)
+	serverURL := fmt.Sprintf("http://localhost%s", addr)
 
-	log.Println("Shutting down server...")
+	// Create HTTP server manager for start/stop lifecycle control
+	srvMgr := servermgr.New(addr, router)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Create system tray manager.
+	// Use a pointer variable declared before tray.New so the callbacks can
+	// reference it (Go closures capture variables by reference).
+	var trayMgr *tray.Manager
+	trayMgr = tray.New(tray.Options{
+		OnOpenUI: func() {
+			log.Printf("[tray] opening UI: %s", serverURL)
+			openURL(serverURL)
+		},
+		OnStartServer: func() {
+			log.Println("[tray] starting server...")
+			if err := srvMgr.Start(); err != nil {
+				log.Printf("[tray] start server error: %v", err)
+				return
+			}
+			trayMgr.SetServerRunning(true)
+		},
+		OnStopServer: func() {
+			log.Println("[tray] stopping server...")
+			if err := srvMgr.Stop(); err != nil {
+				log.Printf("[tray] stop server error: %v", err)
+				return
+			}
+			trayMgr.SetServerRunning(false)
+		},
+		OnQuit: func() {
+			log.Println("[tray] quitting...")
+			// Stop server if running
+			_ = srvMgr.Stop()
+		},
+	})
 
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("server forced to shutdown: %v", err)
+	// Start the HTTP server
+	if err := srvMgr.Start(); err != nil {
+		log.Fatalf("failed to start server: %v", err)
+	}
+	trayMgr.SetServerRunning(true)
+
+	// Open browser on startup if configured
+	if appConfig.OpenBrowser {
+		go openURL(serverURL)
 	}
 
-	log.Println("Server stopped")
+	log.Printf("Backup Manager started on %s", serverURL)
+	log.Printf("System tray icon should appear in the menu bar / system tray")
+
+	// Run the system tray event loop (blocks until Quit)
+	trayMgr.Run()
+
+	// Tray has exited — perform final cleanup
+	log.Println("Backup Manager shutting down...")
+
+	// Stop the HTTP server
+	_ = srvMgr.Stop()
+
+	log.Println("Backup Manager stopped")
 }
 
 // loadConfig loads application configuration from disk.

@@ -25,3 +25,5 @@ Thumbs.db
 vendor/
 scripts/.backend.pid
 scripts/.frontend.pid
+
+.workbuddy/

@@ -84,10 +84,15 @@ The Backup tab displays backup history and backup control buttons.
 - Execute backup operations
 
 ### Backup Controls:
-- **Git Init**: Initialize the Git repository
-- **Trigger Backup**: Manually trigger a backup
-- **Push to Remote**: Push to the remote repository
+- **Trigger Backup**: Manually trigger a backup operation
+- **Push to Remote**: Push committed changes to the remote repository
 - **Force Push**: Force push (use with caution)
+
+### Rollback:
+- Select a commit from backup history to view changed files
+- Choose specific files or rollback all files to the historical version
+- Preview file contents at a specific commit before restoring
+- Rollback overwrites source files (requires user confirmation)
 
 ### Backup History:
 - View the commit hash
@@ -127,17 +132,18 @@ Configure Git authentication information, and the danger zone.
 - Click "Clear" to delete saved authentication information
 
 ### Danger Zone ⚠️
-- **Delete Repository**: Permanently delete all repository data (symlinks, backup data, Git history). This operation is irreversible.
+- **Delete Repository**: Remove the repository from database records. All filesystem data (symlinks, backup data, Git history) is preserved and can be recovered by re-creating a repo pointing to the same directory. Scheduled tasks are unregistered.
 - **Back to Dashboard**: Return to the repository list
 
 ## Getting Started Workflow
 
-1. **Install & Run**: Download and start Backup Manager
-2. **Create Repository**: Set up your first backup repository
-3. **Add Symlinks**: Specify the files/directories to back up
-4. **Configure Git**: Set up remote repository and authentication information
-5. **Run Backup**: Execute the first backup
-6. **Monitor Status**: View backup status and history
+1. **Install & Run**: Download and start Backup Manager — a system tray icon appears
+2. **Open UI**: Click the tray icon and select "Open UI" to open the web interface
+3. **Create Repository**: Set up your first backup repository
+4. **Add Symlinks**: Specify the files/directories to back up
+5. **Configure Git**: Set up remote repository and authentication information
+6. **Run Backup**: Execute the first backup
+7. **Monitor Status**: View backup status and history
 
 ## Best Practices
 

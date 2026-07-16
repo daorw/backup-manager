@@ -63,21 +63,26 @@ backup-manager/
 │   ├── api/                         # API 层
 │   │   ├── router.go                # 路由注册 + SPA 静态文件挂载
 │   │   ├── middleware.go            # CORS + 错误恢复中间件
-│   │   └── handler/                 # HTTP 处理器（7个）
-│   │       ├── repo.go              # Repo CRUD + Config Update
-│   │       ├── symlink.go           # Symlink CRUD + Batch Import
+│   │   └── handler/                 # HTTP 处理器（8个 + errors.go）
+│   │       ├── repo.go              # Repo CRUD + Config Update + Git Init
+│   │       ├── symlink.go           # Symlink CRUD + Batch Import + Nested + BrowseDirEntries
 │   │       ├── browse.go            # 本地文件浏览（安全限定 AllowedRoots）
-│   │       ├── preview.go           # 文件预览（文本/Markdown/二进制检测）
-│   │       ├── backup.go            # 备份触发 + 历史查询
+│   │       ├── preview.go           # 文件预览 + 保存（源文件回写 + data/ 同步）
+│   │       ├── backup.go            # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go              # Git 认证管理
-│   │       └── system.go            # 健康检查
+│   │       ├── rollback.go          # 源文件回滚 + 单文件恢复 + 提交文件预览
+│   │       ├── system.go            # 健康检查
+│   │       └── errors.go            # 错误码映射（respondError）
 │   │
-│   ├── service/                     # 业务逻辑层（5个）
-│   │   ├── repo_service.go          # 仓库生命周期（创建/删除/配置）
-│   │   ├── symlink_service.go       # 软链接 CRUD + 镜像同步 data/
+│   ├── service/                     # 业务逻辑层（8个）
+│   │   ├── repo_service.go          # 仓库生命周期（创建/删除/配置/Git Init）
+│   │   ├── symlink_service.go       # 软链接 CRUD + 镜像同步 data/ + 嵌套软链接
 │   │   ├── backup_service.go        # 备份执行引擎（增量检测→同步→git）
 │   │   ├── auth_service.go          # Git 认证管理（加密存储/注入）
-│   │   └── browser_service.go       # 安全文件浏览
+│   │   ├── browser_service.go       # 安全文件浏览（AllowedRoots 机制）
+│   │   ├── preview_service.go       # 文件预览（ResolveSource） + 保存（源文件+data/）
+│   │   ├── rollback_service.go      # 源文件回滚 + 单文件恢复 + 提交文件预览
+│   │   └── repo_mutex.go            # 仓库级互斥锁（并发控制）
 │   │
 │   ├── store/                       # 数据持久化层
 │   │   ├── db.go                    # SQLite 初始化 + 迁移
@@ -93,10 +98,17 @@ backup-manager/
 │   │   └── auth.go                  # GitAuth, GitAuthType
 │   │
 │   ├── git/                         # Git 引擎
-│   │   └── git.go                   # Init/Add/Commit/Push/Log/Status/Config
+│   │   └── git.go                   # Init/Add/Commit/Push/Log/Status/Config/LsTree/Show/WriteFileContentTo/GetChangedFilesInCommit
+│   │
+│   ├── resolver/                    # Git 路径解析器
+│   │   └── symlink_resolver.go      # data/ 路径 → 源文件路径映射
 │   │
 │   ├── scheduler/                   # 定时调度器
 │   │   └── scheduler.go             # 基于 cron 的注册/注销/生命周期管理
+│   │
+│   ├── servermgr/                   # HTTP 服务器生命周期管理
+│   ├── shortcut/                    # 桌面快捷方式创建
+│   ├── tray/                        # 系统托盘（菜单栏）管理
 │   │
 │   └── util/                        # 工具包
 │       ├── path.go                  # SafeResolve/SafeResolveFile（四层路径校验）
@@ -134,7 +146,9 @@ backup-manager/
             │   ├── MarkdownPreview.tsx
             │   └── BinaryInfo.tsx
             ├── backup/
-            │   └── BackupPanel.tsx
+            │   ├── BackupPanel.tsx
+            │   ├── RollbackConfirmModal.tsx
+            │   └── RollbackResultModal.tsx
             └── config/
                 └── ConfigPanel.tsx
 ```
@@ -165,28 +179,42 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 | GET | /repos/:id | 仓库详情 |
 | DELETE | /repos/:id | 删除仓库 |
 | PUT | /repos/:id/config | 更新配置（部分更新） |
+| POST | /repos/:id/git-init | 初始化 Git 仓库 |
 
 ### 软链接管理
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | POST | /repos/:id/symlinks | 添加软链接 |
-| GET | /repos/:id/symlinks | 软链接列表 |
+| GET | /repos/:id/symlinks | 软链接列表（含 `is_new` 变更标记） |
 | GET | /repos/:id/symlinks/:linkId | 软链接详情 |
 | DELETE | /repos/:id/symlinks/:linkId | 删除软链接 |
 | PUT | /repos/:id/symlinks/:linkId | 修改目标路径 |
 | POST | /repos/:id/symlinks/batch | 批量导入 |
+| GET | /repos/:id/symlinks/:linkId/entries?sub_path= | 浏览目录 symlink 内容 |
+| POST | /repos/:id/symlinks/:linkId/nested | 在目录 symlink 内添加嵌套软链接 |
 
 ### 文件操作
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET | /browse?path=... | 浏览本地文件系统 |
-| GET | /repos/:id/preview?path=... | 预览文件内容 |
+| GET | /browse/allowed-roots | 列出可浏览根目录 |
+| GET | /repos/:id/preview?path=... | 预览源文件内容 |
+| PUT | /repos/:id/save | 编辑保存源文件（同步到 data/） |
 
 ### 备份
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| POST | /repos/:id/backup | 触发备份 |
+| POST | /repos/:id/backup | 触发备份（可指定 commit_message） |
 | GET | /repos/:id/backup/history?limit=&offset= | 备份历史 |
+| POST | /repos/:id/push | 推送到远程仓库（可选 force 参数） |
+
+### 回滚
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /repos/:id/commits/:hash/changed-files | 列出提交中的变更文件 |
+| GET | /repos/:id/commits/:hash/files?path= | 预览提交中的文件内容 |
+| POST | /repos/:id/commits/:hash/restore | 从提交恢复单个文件到源 |
+| POST | /repos/:id/rollback | 批量回滚源文件到历史版本 |
 
 ### 认证
 | 方法 | 路径 | 功能 |
@@ -236,6 +264,28 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 - 基于 robfig/cron/v3，支持秒级 cron 表达式
 - 应用启动时从数据库加载启用了 auto_backup 的 repo
 - 配置更新时自动注册/注销调度任务
+
+### 7. 源文件回滚
+- 支持批量回滚（按 symlink_ids 过滤）和单文件恢复
+- 回滚复制时保留文件权限（git mode → os.FileMode）
+- 使用 SymlinkResolver 将 data/ 路径映射回源文件路径
+- 回滚需要 repo 级互斥锁，禁止与备份并发
+
+### 8. 文件编辑与保存
+- 预览和编辑操作目标为软链接指向的**源文件**（target_path）
+- 通过 PreviewService.ResolveSource 解析相对路径到源文件绝对路径
+- 保存时同时写入源文件和 data/ 目录（镜像一致性）
+- 保留原始文件权限（os.Stat → origMode → os.Chmod）
+
+### 9. 嵌套软链接
+- 支持在目录 symlink 内部创建子级软链接（nested symlink）
+- 软链接链解析支持循环检测和深度限制（max 50）
+- 目录浏览时自动标记嵌套软链接类型和变更状态（is_new）
+
+### 10. 系统托盘
+- macOS 菜单栏 / 系统托盘图标
+- 提供"打开 UI"、"启动/停止服务器"、"退出"操作
+- HTTP 服务器通过 servermgr 管理独立启停生命周期
 
 ## 文档规范
 
@@ -287,7 +337,7 @@ cd frontend && npx tsc --noEmit
 ## 环境与配置
 
 - 应用数据目录：`~/.config/backup-manager/`
-- 配置文件：`~/.config/backup-manager/config.json`
+- 配置文件：`~/.config/backup-manager/config.json`（JSON 字段：`port`, `open_browser`, `theme`）
 - 加密密钥：`~/.config/backup-manager/master.key`
 - 数据库：`~/.config/backup-manager/backup-manager.db`
 - 默认端口：9800

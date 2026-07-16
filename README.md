@@ -32,10 +32,12 @@ Specify which files to back up → Auto-create symlinks to aggregate → Increme
 - **File Preview** — Plain text/code syntax highlighting, Markdown rendering, binary file identification
 - **Backup Execution** — Manual trigger or scheduled auto-backup (second-precision cron), incremental sync, optional Git push
 - **Backup History** — View Git commit history with pagination
-- **Source File Rollback** — Select a historical commit and restore source files to that version
+- **Source File Rollback** — Select a historical commit and restore source files to that version (full or partial)
+- **File-Level Restore** — Preview and restore individual files from historical commits
 - **Git Integration** — Remote repo config, SSH/HTTPS auth management (AES-256-GCM encrypted storage)
 - **Local File Browsing** — Safely scoped to home directory and repo root, prevents path traversal
 - **Scheduled Scheduling** — Cron-based auto-backup, auto-load on startup, dynamic register/unregister on config change
+- **System Tray** — macOS menu bar / system tray icon, server start/stop control
 - **All-in-One Binary** — Single binary, one-click launch
 
 ## Quick Start
@@ -114,42 +116,53 @@ go build -o backup-manager .
 
 ### REST API
 
-All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}`.
+All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` or `{"error": "..."}`.
 
 | Category | Endpoint | Function |
 |------|------|------|
 | Repos | `POST/GET/DELETE /repos` | Repo CRUD |
+| Repos | `GET /repos/:id` | Repo detail (with config and status) |
 | Repos | `PUT /repos/:id/config` | Update config (partial update) |
-| Symlinks | `POST/GET /repos/:id/symlinks` | Create/list symlinks |
+| Repos | `POST /repos/:id/git-init` | Initialize Git repository |
+| Symlinks | `POST/GET /repos/:id/symlinks` | Create/list symlinks (list returns `is_new` flag) |
 | Symlinks | `GET/DELETE/PUT /repos/:id/symlinks/:linkId` | Detail/delete/update target |
 | Symlinks | `POST /repos/:id/symlinks/batch` | Batch import |
+| Symlinks | `GET /repos/:id/symlinks/:linkId/entries?sub_path=` | List directory symlink entries |
+| Symlinks | `POST /repos/:id/symlinks/:linkId/nested` | Add nested symlink within directory symlink |
 | Browse | `GET /browse?path=...` | Browse local filesystem |
-| Preview | `GET /repos/:id/preview?path=...` | Preview file content |
-| Backup | `POST /repos/:id/backup` | Trigger backup |
-| Backup | `GET /repos/:id/backup/history` | Backup history (paginated) |
+| Browse | `GET /browse/allowed-roots` | List allowed browsing roots |
+| Preview | `GET /repos/:id/preview?path=...` | Preview source file content |
+| Preview | `PUT /repos/:id/save` | Save edited file to source (syncs to data/) |
+| Backup | `POST /repos/:id/backup` | Trigger backup (optional `commit_message` body) |
+| Backup | `GET /repos/:id/backup/history?limit=&offset=` | Backup history (paginated) |
+| Backup | `POST /repos/:id/push` | Push to remote (optional `force` body) |
 | Rollback | `GET /repos/:id/commits/:hash/changed-files` | List changed files in commit |
-| Rollback | `POST /repos/:id/rollback` | Rollback source files to historical version |
+| Rollback | `GET /repos/:id/commits/:hash/files?path=` | Preview file content at commit |
+| Rollback | `POST /repos/:id/commits/:hash/restore` | Restore single file from commit |
+| Rollback | `POST /repos/:id/rollback` | Batch rollback source files to historical version |
 | Auth | `GET/PUT/DELETE /repos/:id/auth` | Git auth management |
-| System | `GET /health` | Health check |
+| System | `GET /health` | Health check (status + uptime + version) |
 
 ## Workflow
 
 ```
-1. Open app → Repo list page
-2. Click "Create Repo" → Enter name, select path
-3. Enter repo detail → Add symlinks (select source files to back up)
-4. View file content in the Preview tab
-5. Switch to Backup tab → Click "Trigger Backup"
-6. Configure remote repo and auth (optional)
-7. Set up scheduled backup (optional)
-8. Select a commit in backup history → Rollback source files (optional)
+1. Launch app → System tray icon appears in menu bar
+2. Click tray icon → "Open UI" to open browser
+3. Dashboard shows repo list
+4. Click "Create Repo" → Enter name, select path
+5. Enter repo detail → Add symlinks (select source files to back up)
+6. View file content in the Preview tab
+7. Switch to Backup tab → Click "Trigger Backup"
+8. Configure remote repo and auth (optional)
+9. Set up scheduled backup (optional)
+10. Select a commit in backup history → Rollback source files (optional)
 ```
 
 ## Configuration
 
 | Path | Description |
 |------|------|
-| `~/.config/backup-manager/config.json` | App config (port, theme, auto-open browser, etc.) |
+| `~/.config/backup-manager/config.json` | App config (port, theme, auto-open browser, etc.) — JSON keys: `port`, `open_browser`, `theme` |
 | `~/.config/backup-manager/master.key` | AES-256 encryption key (auto-generated on first start) |
 | `~/.config/backup-manager/backup-manager.db` | SQLite database |
 
@@ -185,21 +198,22 @@ backup-manager/
 │   │   ├── router.go           # Route registration + SPA mount
 │   │   ├── middleware.go       # CORS + error recovery
 │   │   └── handler/            # HTTP handlers
-│   │       ├── repo.go         # Repo CRUD
-│   │       ├── symlink.go      # Symlink CRUD + batch import
-│   │       ├── browse.go       # Local file browsing
-│   │       ├── preview.go      # File preview
-│   │       ├── backup.go       # Backup trigger + history
+│   │       ├── repo.go         # Repo CRUD + Git Init
+│   │       ├── symlink.go      # Symlink CRUD + batch import + nested
+│   │       ├── browse.go       # Local file browsing + allowed roots
+│   │       ├── preview.go      # File preview + save
+│   │       ├── backup.go       # Backup trigger + history + push
 │   │       ├── auth.go         # Git auth management
-│   │       ├── rollback.go     # Source file rollback
+│   │       ├── rollback.go     # Source file rollback + file restore
 │   │       ├── system.go       # Health check
 │   │       └── errors.go       # Error code mapping
 │   ├── service/                # Business logic layer
 │   │   ├── repo_service.go     # Repo lifecycle
-│   │   ├── symlink_service.go  # Symlink CRUD + mirror sync
+│   │   ├── symlink_service.go  # Symlink CRUD + mirror sync + nested
 │   │   ├── backup_service.go   # Backup execution engine
 │   │   ├── auth_service.go     # Git auth management
 │   │   ├── browser_service.go  # Safe file browsing
+│   │   ├── preview_service.go  # File preview + save logic
 │   │   ├── rollback_service.go # Source file rollback logic
 │   │   └── repo_mutex.go       # Per-repo mutex
 │   ├── store/                  # Data persistence layer
@@ -214,11 +228,14 @@ backup-manager/
 │   │   ├── symlink.go          # Symlink, SymlinkType
 │   │   └── auth.go             # GitAuth, GitAuthType
 │   ├── git/                    # Git engine
-│   │   └── git.go              # Init/Add/Commit/Push/Log/Status/Config/LsTree
+│   │   └── git.go              # Init/Add/Commit/Push/Log/Status/Config/LsTree/Show/WriteFileContentTo
 │   ├── resolver/               # Git path resolver
 │   │   └── symlink_resolver.go # data/ path ↔ source file path mapping
 │   ├── scheduler/              # Scheduled scheduler
 │   │   └── scheduler.go        # Cron-based register/unregister
+│   ├── servermgr/              # HTTP server lifecycle manager
+│   ├── shortcut/               # Desktop shortcut creation
+│   ├── tray/                   # System tray (menu bar) manager
 │   └── util/                   # Utilities
 │       ├── path.go             # SafeResolve four-layer path validation
 │       ├── crypto.go           # KeyManager (AES-256-GCM)
@@ -252,7 +269,7 @@ backup-manager/
             │   ├── MarkdownPreview.tsx
             │   └── BinaryInfo.tsx
             ├── backup/
-            │   └── BackupPanel.tsx
+            │   ├── BackupPanel.tsx
             │   ├── RollbackConfirmModal.tsx
             │   └── RollbackResultModal.tsx
             └── config/

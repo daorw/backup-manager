@@ -11,7 +11,7 @@
 |------|----------|----------|
 | Language | Go 1.22+ | Cross-platform compilation, single binary, rich standard library |
 | HTTP Framework | Gin | Lightweight, high performance, mature middleware ecosystem |
-| Database | SQLite (mattn/go-sqlite3) | No additional database service needed, single file storage, suitable for desktop-grade applications |
+| Database | SQLite (modernc.org/sqlite) | No additional database service needed, single file storage, suitable for desktop-grade applications |
 | Frontend | React 18 + TypeScript + Vite + Ant Design 5 | Mature ecosystem, rich component library |
 | Scheduling | `robfig/cron/v3` | Standard cron library in Go ecosystem |
 | Git Operations | `os/exec` calling system git | Reuses user's local git config |
@@ -75,6 +75,7 @@ GET    /api/v1/repos                          → RepoHandler.List
 GET    /api/v1/repos/:id                      → RepoHandler.Get
 DELETE /api/v1/repos/:id                      → RepoHandler.Delete
 PUT    /api/v1/repos/:id/config               → RepoHandler.UpdateConfig  // ★ P0-1: Config Editing
+POST   /api/v1/repos/:id/git-init             → RepoHandler.GitInit
 
 POST   /api/v1/repos/:id/symlinks             → SymlinkHandler.Create
 GET    /api/v1/repos/:id/symlinks             → SymlinkHandler.List
@@ -82,18 +83,29 @@ GET    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Get
 DELETE /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Delete
 PUT    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.UpdateTarget
 POST   /api/v1/repos/:id/symlinks/batch       → SymlinkHandler.BatchImport
+GET    /api/v1/repos/:id/symlinks/:linkId/entries?sub_path= → SymlinkHandler.BrowseDirEntries
+POST   /api/v1/repos/:id/symlinks/:linkId/nested → SymlinkHandler.AddNestedSymlink
 
-GET    /api/v1/browse         ?path=...&root=...  → BrowseHandler.Browse   // ★ P0-2: Security Fix
-GET    /api/v1/repos/:id/preview ?path=...        → PreviewHandler.Preview // ★ P0-2: Security Fix
+GET    /api/v1/browse         ?path=...         → BrowseHandler.Browse       // ★ P0-2: Security Fix
+GET    /api/v1/browse/allowed-roots              → BrowseHandler.AllowedRoots
 
-POST   /api/v1/repos/:id/backup               → BackupHandler.Trigger
+GET    /api/v1/repos/:id/preview ?path=...        → PreviewHandler.Preview    // ★ P0-2: Security Fix
+PUT    /api/v1/repos/:id/save                     → PreviewHandler.Save
+
+POST   /api/v1/repos/:id/backup                   → BackupHandler.Trigger
 GET    /api/v1/repos/:id/backup/history?limit=&offset= → BackupHandler.History
+POST   /api/v1/repos/:id/push                     → BackupHandler.Push
 
-GET    /api/v1/repos/:id/auth                 → AuthHandler.Get
-PUT    /api/v1/repos/:id/auth                 → AuthHandler.Set
-DELETE /api/v1/repos/:id/auth                 → AuthHandler.Clear
+GET    /api/v1/repos/:id/auth                     → AuthHandler.Get
+PUT    /api/v1/repos/:id/auth                     → AuthHandler.Set
+DELETE /api/v1/repos/:id/auth                     → AuthHandler.Clear
 
-GET    /api/v1/health                         → SystemHandler.Health
+GET    /api/v1/repos/:id/commits/:hash/changed-files  → RollbackHandler.ListFiles
+GET    /api/v1/repos/:id/commits/:hash/files?path=    → RollbackHandler.GetCommitFile
+POST   /api/v1/repos/:id/commits/:hash/restore        → RollbackHandler.RestoreFile
+POST   /api/v1/repos/:id/rollback                     → RollbackHandler.Rollback
+
+GET    /api/v1/health                                → SystemHandler.Health
 ```
 
 ### 3.2 Repo Config Editing (★ P0-1 Fix)
@@ -188,6 +200,7 @@ func (s *Scheduler) Start()
 func (s *Scheduler) Stop()  // graceful shutdown, wait for tasks to complete
 func (s *Scheduler) Register(repoID, cronExpr string) error
 func (s *Scheduler) Unregister(repoID string)
+func (s *Scheduler) IsRegistered(repoID string) bool
 ```
 
 - On app startup, load all repos with auto_backup enabled from database and register them to scheduler
@@ -278,7 +291,7 @@ Path: `~/.config/backup-manager/config.json`
 ```json
 {
   "port": 9800,
-  "openBrowser": true,
+  "open_browser": true,
   "theme": "light"
 }
 ```
@@ -295,7 +308,7 @@ backup-manager/
 ├── internal/
 │   ├── api/
 │   │   ├── router.go
-│   │   ├── middleware/
+│   │   ├── middleware.go
 │   │   └── handler/
 │   │       ├── repo.go
 │   │       ├── symlink.go
@@ -303,7 +316,9 @@ backup-manager/
 │   │       ├── preview.go
 │   │       ├── backup.go
 │   │       ├── auth.go
-│   │       └── system.go
+│   │       ├── rollback.go
+│   │       ├── system.go
+│   │       └── errors.go
 │   ├── model/
 │   │   ├── repo.go
 │   │   ├── symlink.go
@@ -312,17 +327,27 @@ backup-manager/
 │   │   ├── repo_service.go
 │   │   ├── symlink_service.go
 │   │   ├── backup_service.go
-│   │   └── auth_service.go
+│   │   ├── auth_service.go
+│   │   ├── browser_service.go
+│   │   ├── preview_service.go
+│   │   ├── rollback_service.go
+│   │   └── repo_mutex.go
 │   ├── store/
 │   │   ├── db.go
+│   │   ├── store.go
 │   │   ├── repo_store.go
 │   │   ├── repo_config_store.go
 │   │   ├── repo_auth_store.go
 │   │   └── symlink_store.go
 │   ├── git/
 │   │   └── git.go
+│   ├── resolver/
+│   │   └── symlink_resolver.go
 │   ├── scheduler/
 │   │   └── scheduler.go
+│   ├── servermgr/
+│   ├── shortcut/
+│   ├── tray/
 │   └── util/
 │       ├── path.go          # SafeResolve security function
 │       ├── crypto.go        # AES-GCM encryption
@@ -572,3 +597,34 @@ User edits content → clicks save → PUT /repos/:id/save {path, content}
 - Directory symlink internal file preview → content correct
 - Edit save → re-preview → content updated
 - Concurrent save and backup → no data corruption
+
+## 8. System Tray Design
+
+### 8.1 Overview
+
+The application runs with a system tray (menu bar on macOS) icon, providing always-available controls:
+
+- **Open UI**: Opens the web UI in the default browser
+- **Start/Stop Server**: Toggles the HTTP server on/off independently from the tray process
+- **Quit**: Exits the application completely
+
+### 8.2 Implementation
+
+- `internal/tray/` — System tray manager (macOS menu bar / system tray icon)
+- `internal/servermgr/` — HTTP server lifecycle manager (start/stop without exiting the process)
+- `internal/shortcut/` — Desktop shortcut creation on first run
+
+### 8.3 Lifecycle
+
+```
+main()
+  ├── Initialize all services (DB, git, scheduler, handlers)
+  ├── Create servermgr (HTTP server manager)
+  ├── Create tray manager (with callbacks for OpenUI/StartServer/StopServer/Quit)
+  ├── srvMgr.Start() → HTTP server begins listening
+  ├── trayMgr.SetServerRunning(true)
+  ├── openURL(serverURL) → opens browser (if open_browser: true)
+  ├── trayMgr.Run() → blocks until user clicks "Quit"
+  ├── srvMgr.Stop() → gracefully stops HTTP server
+  └── Final cleanup (DB close, key manager destroy)
+```

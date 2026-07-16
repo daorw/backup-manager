@@ -9,7 +9,7 @@
 |------|----------|----------|
 | 语言 | Go 1.22+ | 跨平台编译、单二进制、标准库丰富 |
 | HTTP 框架 | Gin | 轻量、高性能、中间件生态完善 |
-| 数据库 | SQLite (mattn/go-sqlite3) | 无需额外数据库服务、单文件存储、适合桌面级应用 |
+| 数据库 | SQLite (modernc.org/sqlite) | 无需额外数据库服务、单文件存储、适合桌面级应用 |
 | 前端 | React 18 + TypeScript + Vite + Ant Design 5 | 生态成熟，组件库丰富 |
 | 定时调度 | `robfig/cron/v3` | Go 生态标准 cron 库 |
 | Git 操作 | `os/exec` 调用系统 git | 复用用户本地 git 配置 |
@@ -73,6 +73,7 @@ GET    /api/v1/repos                          → RepoHandler.List
 GET    /api/v1/repos/:id                      → RepoHandler.Get
 DELETE /api/v1/repos/:id                      → RepoHandler.Delete
 PUT    /api/v1/repos/:id/config               → RepoHandler.UpdateConfig  // ★ P0-1: 配置编辑
+POST   /api/v1/repos/:id/git-init             → RepoHandler.GitInit
 
 POST   /api/v1/repos/:id/symlinks             → SymlinkHandler.Create
 GET    /api/v1/repos/:id/symlinks             → SymlinkHandler.List
@@ -80,18 +81,29 @@ GET    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Get
 DELETE /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Delete
 PUT    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.UpdateTarget
 POST   /api/v1/repos/:id/symlinks/batch       → SymlinkHandler.BatchImport
+GET    /api/v1/repos/:id/symlinks/:linkId/entries?sub_path= → SymlinkHandler.BrowseDirEntries
+POST   /api/v1/repos/:id/symlinks/:linkId/nested → SymlinkHandler.AddNestedSymlink
 
-GET    /api/v1/browse         ?path=...&root=...  → BrowseHandler.Browse   // ★ P0-2: 安全修复
-GET    /api/v1/repos/:id/preview ?path=...        → PreviewHandler.Preview // ★ P0-2: 安全修复
+GET    /api/v1/browse         ?path=...         → BrowseHandler.Browse       // ★ P0-2: 安全修复
+GET    /api/v1/browse/allowed-roots              → BrowseHandler.AllowedRoots
 
-POST   /api/v1/repos/:id/backup               → BackupHandler.Trigger
+GET    /api/v1/repos/:id/preview ?path=...        → PreviewHandler.Preview    // ★ P0-2: 安全修复
+PUT    /api/v1/repos/:id/save                     → PreviewHandler.Save
+
+POST   /api/v1/repos/:id/backup                   → BackupHandler.Trigger
 GET    /api/v1/repos/:id/backup/history?limit=&offset= → BackupHandler.History
+POST   /api/v1/repos/:id/push                     → BackupHandler.Push
 
-GET    /api/v1/repos/:id/auth                 → AuthHandler.Get
-PUT    /api/v1/repos/:id/auth                 → AuthHandler.Set
-DELETE /api/v1/repos/:id/auth                 → AuthHandler.Clear
+GET    /api/v1/repos/:id/auth                     → AuthHandler.Get
+PUT    /api/v1/repos/:id/auth                     → AuthHandler.Set
+DELETE /api/v1/repos/:id/auth                     → AuthHandler.Clear
 
-GET    /api/v1/health                         → SystemHandler.Health
+GET    /api/v1/repos/:id/commits/:hash/changed-files  → RollbackHandler.ListFiles
+GET    /api/v1/repos/:id/commits/:hash/files?path=    → RollbackHandler.GetCommitFile
+POST   /api/v1/repos/:id/commits/:hash/restore        → RollbackHandler.RestoreFile
+POST   /api/v1/repos/:id/rollback                     → RollbackHandler.Rollback
+
+GET    /api/v1/health                                → SystemHandler.Health
 ```
 
 ### 3.2 仓库配置编辑（★ P0-1 修复）
@@ -186,6 +198,7 @@ func (s *Scheduler) Start()
 func (s *Scheduler) Stop()  // 优雅关闭，等待任务完成
 func (s *Scheduler) Register(repoID, cronExpr string) error
 func (s *Scheduler) Unregister(repoID string)
+func (s *Scheduler) IsRegistered(repoID string) bool
 ```
 
 - 应用启动时从数据库加载所有开启了 auto_backup 的 repo 注册到调度器
@@ -276,7 +289,7 @@ CREATE TABLE symlinks (
 ```json
 {
   "port": 9800,
-  "openBrowser": true,
+  "open_browser": true,
   "theme": "light"
 }
 ```
@@ -293,7 +306,7 @@ backup-manager/
 ├── internal/
 │   ├── api/
 │   │   ├── router.go
-│   │   ├── middleware/
+│   │   ├── middleware.go
 │   │   └── handler/
 │   │       ├── repo.go
 │   │       ├── symlink.go
@@ -301,7 +314,9 @@ backup-manager/
 │   │       ├── preview.go
 │   │       ├── backup.go
 │   │       ├── auth.go
-│   │       └── system.go
+│   │       ├── rollback.go
+│   │       ├── system.go
+│   │       └── errors.go
 │   ├── model/
 │   │   ├── repo.go
 │   │   ├── symlink.go
@@ -310,17 +325,27 @@ backup-manager/
 │   │   ├── repo_service.go
 │   │   ├── symlink_service.go
 │   │   ├── backup_service.go
-│   │   └── auth_service.go
+│   │   ├── auth_service.go
+│   │   ├── browser_service.go
+│   │   ├── preview_service.go
+│   │   ├── rollback_service.go
+│   │   └── repo_mutex.go
 │   ├── store/
 │   │   ├── db.go
+│   │   ├── store.go
 │   │   ├── repo_store.go
 │   │   ├── repo_config_store.go
 │   │   ├── repo_auth_store.go
 │   │   └── symlink_store.go
 │   ├── git/
 │   │   └── git.go
+│   ├── resolver/
+│   │   └── symlink_resolver.go
 │   ├── scheduler/
 │   │   └── scheduler.go
+│   ├── servermgr/
+│   ├── shortcut/
+│   ├── tray/
 │   └── util/
 │       ├── path.go          # SafeResolve 安全函数
 │       ├── crypto.go        # AES-GCM 加密
@@ -570,3 +595,34 @@ export async function saveFile(repoId: string, req: SaveFileRequest): Promise<Sa
 - 目录 symlink 内部文件预览 → 内容正确
 - 编辑保存 → 重新预览 → 内容已更新
 - 并发保存与备份 → 无数据损坏
+
+## 8. 系统托盘设计
+
+### 8.1 概述
+
+应用以内置系统托盘（macOS 菜单栏）图标运行，提供常驻操作：
+
+- **打开 UI**：在默认浏览器中打开 Web 界面
+- **启动/停止服务器**：独立于托盘进程开启/关闭 HTTP 服务器
+- **退出**：完全退出应用
+
+### 8.2 实现
+
+- `internal/tray/` — 系统托盘管理器（macOS 菜单栏 / 系统托盘图标）
+- `internal/servermgr/` — HTTP 服务器生命周期管理器（无需退出进程即可启停）
+- `internal/shortcut/` — 首次运行时创建桌面快捷方式
+
+### 8.3 生命周期
+
+```
+main()
+  ├── 初始化所有服务（DB、git、scheduler、handlers）
+  ├── 创建 servermgr（HTTP 服务器管理器）
+  ├── 创建 tray manager（含 OpenUI/StartServer/StopServer/Quit 回调）
+  ├── srvMgr.Start() → HTTP 服务器开始监听
+  ├── trayMgr.SetServerRunning(true)
+  ├── openURL(serverURL) → 打开浏览器（若 open_browser: true）
+  ├── trayMgr.Run() → 阻塞直到用户点击"Quit"
+  ├── srvMgr.Stop() → 优雅关闭 HTTP 服务器
+  └── 最终清理（关闭 DB、销毁 key manager）
+```

@@ -30,10 +30,12 @@
 - **文件预览** — 纯文本/代码语法高亮、Markdown 渲染、二进制文件标识
 - **备份执行** — 手动触发或定时自动备份（秒级 cron），增量同步，Git push（可选）
 - **备份历史** — 查看 Git 提交历史，支持分页
-- **源文件回滚** — 选择历史提交版本，将源文件恢复到指定版本
+- **源文件回滚** — 选择历史提交版本，将源文件恢复到指定版本（支持全量或部分回滚）
+- **单文件恢复** — 预览和恢复历史提交中的单个文件
 - **Git 集成** — 远程仓库配置、SSH/HTTPS 认证管理（AES-256-GCM 加密存储）
 - **本地文件浏览** — 安全限定在用户主目录和仓库根目录，防止路径穿越
 - **定时调度** — 基于 cron 的自动备份，应用启动时自动加载，配置变更时动态注册/注销
+- **系统托盘** — macOS 菜单栏 / 系统托盘图标，支持启动/停止服务器控制
 - **前后端一体** — 单二进制文件，一键启动
 
 ## 快速开始
@@ -112,42 +114,53 @@ go build -o backup-manager .
 
 ### REST API
 
-所有端点前缀 `/api/v1`，响应统一格式 `{"data": ...}`。
+所有端点前缀 `/api/v1`，响应统一格式 `{"data": ...}` 或 `{"error": "..."}`。
 
 | 分类 | 端点 | 功能 |
 |------|------|------|
 | 仓库 | `POST/GET/DELETE /repos` | 仓库 CRUD |
+| 仓库 | `GET /repos/:id` | 仓库详情（含配置和状态） |
 | 仓库 | `PUT /repos/:id/config` | 更新配置（部分更新） |
-| 软链接 | `POST/GET /repos/:id/symlinks` | 软链接创建/列表 |
+| 仓库 | `POST /repos/:id/git-init` | 初始化 Git 仓库 |
+| 软链接 | `POST/GET /repos/:id/symlinks` | 软链接创建/列表（列表含 `is_new` 变更标记） |
 | 软链接 | `GET/DELETE/PUT /repos/:id/symlinks/:linkId` | 软链接详情/删除/修改目标 |
 | 软链接 | `POST /repos/:id/symlinks/batch` | 批量导入 |
+| 软链接 | `GET /repos/:id/symlinks/:linkId/entries?sub_path=` | 浏览目录 symlink 内容 |
+| 软链接 | `POST /repos/:id/symlinks/:linkId/nested` | 在目录 symlink 内添加嵌套软链接 |
 | 浏览 | `GET /browse?path=...` | 浏览本地文件系统 |
-| 预览 | `GET /repos/:id/preview?path=...` | 预览文件内容 |
-| 备份 | `POST /repos/:id/backup` | 触发备份 |
-| 备份 | `GET /repos/:id/backup/history` | 备份历史（分页） |
+| 浏览 | `GET /browse/allowed-roots` | 列出可浏览根目录 |
+| 预览 | `GET /repos/:id/preview?path=...` | 预览源文件内容 |
+| 预览 | `PUT /repos/:id/save` | 编辑保存源文件（同步到 data/） |
+| 备份 | `POST /repos/:id/backup` | 触发备份（可指定 commit_message） |
+| 备份 | `GET /repos/:id/backup/history?limit=&offset=` | 备份历史（分页） |
+| 备份 | `POST /repos/:id/push` | 推送到远程仓库（可选 force 参数） |
 | 回滚 | `GET /repos/:id/commits/:hash/changed-files` | 提交中变更的文件列表 |
-| 回滚 | `POST /repos/:id/rollback` | 回滚源文件到历史版本 |
+| 回滚 | `GET /repos/:id/commits/:hash/files?path=` | 预览提交中的文件内容 |
+| 回滚 | `POST /repos/:id/commits/:hash/restore` | 从提交恢复单个文件 |
+| 回滚 | `POST /repos/:id/rollback` | 批量回滚源文件到历史版本 |
 | 认证 | `GET/PUT/DELETE /repos/:id/auth` | Git 认证管理 |
-| 系统 | `GET /health` | 健康检查 |
+| 系统 | `GET /health` | 健康检查（状态+运行时间+版本） |
 
 ## 使用流程
 
 ```
-1. 打开应用 → 仓库列表页
-2. 点击"创建仓库" → 输入名称、选择路径
-3. 进入仓库详情 → 添加软链接（选择要备份的源文件）
-4. 在预览标签页查看文件内容
-5. 切换到备份标签页 → 点击"触发备份"
-6. 配置远程仓库和认证信息（可选）
-7. 设置定时备份（可选）
-8. 在备份历史中选择提交 → 回滚源文件到历史版本（可选）
+1. 启动应用 → 系统托盘图标出现在菜单栏
+2. 点击托盘图标 → "Open UI" 打开浏览器
+3. 仪表盘显示仓库列表
+4. 点击"创建仓库" → 输入名称、选择路径
+5. 进入仓库详情 → 添加软链接（选择要备份的源文件）
+6. 在预览标签页查看文件内容
+7. 切换到备份标签页 → 点击"触发备份"
+8. 配置远程仓库和认证信息（可选）
+9. 设置定时备份（可选）
+10. 在备份历史中选择提交 → 回滚源文件到历史版本（可选）
 ```
 
 ## 环境配置
 
 | 路径 | 说明 |
 |------|------|
-| `~/.config/backup-manager/config.json` | 应用配置（端口、主题、自动打开浏览器等） |
+| `~/.config/backup-manager/config.json` | 应用配置（端口、主题、自动打开浏览器等）— JSON 字段：`port`, `open_browser`, `theme` |
 | `~/.config/backup-manager/master.key` | AES-256 加密密钥（首次启动自动生成） |
 | `~/.config/backup-manager/backup-manager.db` | SQLite 数据库 |
 
@@ -183,21 +196,22 @@ backup-manager/
 │   │   ├── router.go           # 路由注册 + SPA 挂载
 │   │   ├── middleware.go       # CORS + 错误恢复
 │   │   └── handler/            # HTTP 处理器
-│   │       ├── repo.go         # 仓库 CRUD
-│   │       ├── symlink.go      # 软链接 CRUD + 批量导入
-│   │       ├── browse.go       # 本地文件浏览
-│   │       ├── preview.go      # 文件预览
-│   │       ├── backup.go       # 备份触发 + 历史查询
+│   │       ├── repo.go         # 仓库 CRUD + Git Init
+│   │       ├── symlink.go      # 软链接 CRUD + 批量导入 + 嵌套
+│   │       ├── browse.go       # 本地文件浏览 + 允许根目录
+│   │       ├── preview.go      # 文件预览 + 保存
+│   │       ├── backup.go       # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go         # Git 认证管理
-│   │       ├── rollback.go     # 源文件回滚
+│   │       ├── rollback.go     # 源文件回滚 + 单文件恢复
 │   │       ├── system.go       # 健康检查
 │   │       └── errors.go       # 错误码映射
 │   ├── service/                # 业务逻辑层
 │   │   ├── repo_service.go     # 仓库生命周期
-│   │   ├── symlink_service.go  # 软链接 CRUD + 镜像同步
+│   │   ├── symlink_service.go  # 软链接 CRUD + 镜像同步 + 嵌套
 │   │   ├── backup_service.go   # 备份执行引擎
 │   │   ├── auth_service.go     # Git 认证管理
 │   │   ├── browser_service.go  # 安全文件浏览
+│   │   ├── preview_service.go  # 文件预览 + 保存逻辑
 │   │   ├── rollback_service.go # 源文件回滚逻辑
 │   │   └── repo_mutex.go       # 仓库级互斥锁
 │   ├── store/                  # 数据持久化层
@@ -212,11 +226,14 @@ backup-manager/
 │   │   ├── symlink.go          # Symlink, SymlinkType
 │   │   └── auth.go             # GitAuth, GitAuthType
 │   ├── git/                    # Git 引擎
-│   │   └── git.go              # Init/Add/Commit/Push/Log/Status/Config/LsTree
+│   │   └── git.go              # Init/Add/Commit/Push/Log/Status/Config/LsTree/Show/WriteFileContentTo
 │   ├── resolver/               # Git 路径解析
 │   │   └── symlink_resolver.go # data/ 路径 ↔ 源文件路径映射
 │   ├── scheduler/              # 定时调度器
 │   │   └── scheduler.go        # 基于 cron 的注册/注销
+│   ├── servermgr/              # HTTP 服务器生命周期管理
+│   ├── shortcut/               # 桌面快捷方式创建
+│   ├── tray/                   # 系统托盘（菜单栏）管理
 │   └── util/                   # 工具包
 │       ├── path.go             # SafeResolve 四层路径校验
 │       ├── crypto.go           # KeyManager (AES-256-GCM)
@@ -250,7 +267,7 @@ backup-manager/
             │   ├── MarkdownPreview.tsx
             │   └── BinaryInfo.tsx
             ├── backup/
-            │   └── BackupPanel.tsx
+            │   ├── BackupPanel.tsx
             │   ├── RollbackConfirmModal.tsx
             │   └── RollbackResultModal.tsx
             └── config/

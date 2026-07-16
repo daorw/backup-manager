@@ -51,39 +51,40 @@
 | FR-8 | Modify Symlink Target | Change the source file/directory path that the symlink points to | P1 |
 | FR-9 | Batch Import Symlinks | Support batch selection of multiple source files/directories to add symlinks, with automatic rollback on partial failure | P1 |
 | FR-10 | Clean Up Deleted Source Files | Detect symlinks whose source files have been deleted, synchronously clean up corresponding files in `data/` and generate a Git commit | P2 |
+| FR-11 | Nested Symlinks | Add child symlinks within directory-type symlinks, with cycle detection and depth limiting | P2 |
 
 ### 3.3 File Preview and Editing
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-11 | Plain Text File Preview and Edit | View and edit plain text source file contents in the UI (e.g., .txt, .log, .json, .yaml, .py, etc.), with save-to-source-file support. The operation targets the source file pointed to by the symlink. | P0 |
-| FR-12 | Markdown Rendered Preview and Edit | Render and display Markdown source files (.md) using react-markdown + remark-gfm. Supports toggling between edit mode and preview mode, saving edits to the source file. The operation targets the source file pointed to by the symlink. Local references (images/docs) are rendered by browser default without path rewriting. | P0 |
-| FR-13 | Binary File Identification | Display file type information and size for non-text files, without attempting to preview content | P2 |
+| FR-12 | Plain Text File Preview and Edit | View and edit plain text source file contents in the UI (e.g., .txt, .log, .json, .yaml, .py, etc.), with save-to-source-file support. The operation targets the source file pointed to by the symlink. | P0 |
+| FR-13 | Markdown Rendered Preview and Edit | Render and display Markdown source files (.md) using react-markdown + remark-gfm. Supports toggling between edit mode and preview mode, saving edits to the source file. The operation targets the source file pointed to by the symlink. Local references (images/docs) are rendered by browser default without path rewriting. | P0 |
+| FR-14 | Binary File Identification | Display file type information and size for non-text files, without attempting to preview content | P2 |
 
 ### 3.4 Backup Execution
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-14 | Execute Backup | Manually trigger a backup operation: incremental detection (mtime+size) → sync changes to `data/` → `git add` → `git commit` → (optional) `git push`, with progress display | P0 |
-| FR-15 | Scheduled/Auto Backup | Automatically execute backups at scheduled times based on configured cron expression, auto-load enabled repositories on application startup | P1 |
-| FR-16 | View Backup History | View the repository's Git commit history with pagination support | P1 |
-| FR-17 | Source File Rollback | Select a historical commit version and restore source files to the version in the specified commit. Supports partial or full rollback. | P1 |
+| FR-15 | Execute Backup | Manually trigger a backup operation: incremental detection (mtime+size) → sync changes to `data/` → `git add` → `git commit` → (optional) `git push`, with progress display | P0 |
+| FR-16 | Scheduled/Auto Backup | Automatically execute backups at scheduled times based on configured cron expression, auto-load enabled repositories on application startup | P1 |
+| FR-17 | View Backup History | View the repository's Git commit history with pagination support | P1 |
+| FR-18 | Source File Rollback | Select a historical commit version and restore source files to the version in the specified commit. Supports full rollback, selective rollback by symlink, and single-file restore. Commit file content can be previewed before rollback. | P1 |
 
 ### 3.5 Configuration Management
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-18 | Git Remote Repository Config | Visually configure the Git remote repository URL and target branch | P0 |
-| FR-19 | Git Authentication Config | Configure authentication information required for Git operations (SSH private key or HTTPS username/password), stored encrypted in SQLite | P1 |
-| FR-20 | Application Global Settings | Application-level basic settings (port number, theme, whether to auto-open browser) | P1 |
+| FR-19 | Git Remote Repository Config | Visually configure the Git remote repository URL and target branch | P0 |
+| FR-20 | Git Authentication Config | Configure authentication information required for Git operations (SSH private key or HTTPS username/password), stored encrypted in SQLite | P1 |
+| FR-21 | Application Global Settings | Application-level basic settings (port number, theme, whether to auto-open browser) | P1 |
 
 ### 3.6 System Management
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-21 | Application Start/Stop | One-click start and stop of the entire application, auto-open browser after startup | P0 |
-| FR-22 | Local File Browser | Safely browse the local filesystem for selecting symlink source files and previewing files, limited to the user's home directory and repo root directory | P0 |
-| FR-23 | Health Check | Provide `/health` endpoint returning application running status, startup time, and version information | P2 |
+| FR-22 | Application Start/Stop | One-click start and stop of the entire application, auto-open browser after startup. System tray icon provides "Open UI", "Start/Stop Server", and "Quit" controls. | P0 |
+| FR-23 | Local File Browser | Safely browse the local filesystem for selecting symlink source files and previewing files, limited to the user's home directory and repo root directory | P0 |
+| FR-24 | Health Check | Provide `/health` endpoint returning application running status, startup time, and version information | P2 |
 
 ---
 
@@ -214,6 +215,6 @@ Editing the source file does not automatically trigger a backup. The user's modi
 
 ---
 
-**Document Version**: v1.2  
+**Document Version**: v1.3  
 **Status**: Confirmed  
-**Date Prepared**: 2026-06-12
+**Date Prepared**: 2026-07-16

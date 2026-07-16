@@ -33,15 +33,29 @@ func createPlatformShortcut(binaryPath string) error {
 
 	log.Printf("[shortcut] creating .lnk: %s -> %s", shortcutPath, absBinary)
 
+	// Build VBS launcher to hide console window.
+	// VBS `Run` with mode 0 = hidden window, False = don't wait.
+	vbsPath := shortcutPath + ".launcher.vbs"
+	vbsScript := fmt.Sprintf(
+		`CreateObject("WScript.Shell").Run """%s""", 0, False`+"\n",
+		absBinary,
+	)
+	if err := os.WriteFile(vbsPath, []byte(vbsScript), 0644); err != nil {
+		return fmt.Errorf("failed to write launcher script: %w", err)
+	}
+
+	// Shortcut runs wscript.exe with the VBS launcher, no console flash.
 	psScript := fmt.Sprintf(
 		`$WScriptShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WScriptShell.CreateShortcut(%q)
-$Shortcut.TargetPath = %q
+$Shortcut.TargetPath = "wscript.exe"
+$Shortcut.Arguments = "//B " + %q
 $Shortcut.Description = "Backup Manager - File backup management tool"
 $Shortcut.WorkingDirectory = %q
+$Shortcut.WindowStyle = 7
 $Shortcut.Save()`,
 		shortcutPath,
-		absBinary,
+		vbsPath,
 		filepath.Dir(absBinary),
 	)
 

@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
-// createPlatformShortcut creates a Finder alias on the Desktop pointing to the binary.
+// createPlatformShortcut creates a minimal .app bundle on the Desktop that
+// launches the binary silently in the background (no terminal window).
 func createPlatformShortcut(binaryPath string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -19,11 +18,11 @@ func createPlatformShortcut(binaryPath string) error {
 	}
 
 	desktopDir := filepath.Join(homeDir, "Desktop")
-	aliasPath := filepath.Join(desktopDir, Name)
+	appPath := filepath.Join(desktopDir, Name+".app")
 
 	// Check if shortcut already exists
-	if _, err := os.Stat(aliasPath); err == nil {
-		log.Printf("[shortcut] desktop shortcut already exists at %s", aliasPath)
+	if _, err := os.Stat(appPath); err == nil {
+		log.Printf("[shortcut] desktop shortcut already exists at %s", appPath)
 		return nil
 	}
 
@@ -32,33 +31,59 @@ func createPlatformShortcut(binaryPath string) error {
 		return fmt.Errorf("failed to resolve binary path: %w", err)
 	}
 
-	log.Printf("[shortcut] creating Finder alias: %s -> %s", aliasPath, absBinary)
+	log.Printf("[shortcut] creating .app bundle: %s -> %s", appPath, absBinary)
 
-	script := fmt.Sprintf(
-		`tell application "Finder" to make alias file to POSIX file %q at POSIX file %q`,
-		absBinary,
-		desktopDir,
-	)
-
-	cmd := exec.Command("osascript", "-e", script)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("osascript failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	// Create minimal .app bundle directory structure
+	macosDir := filepath.Join(appPath, "Contents", "MacOS")
+	if err := os.MkdirAll(macosDir, 0755); err != nil {
+		return fmt.Errorf("failed to create app bundle: %w", err)
 	}
 
-	// osascript creates "<binary name> alias" — rename to display name
-	binaryName := filepath.Base(absBinary)
-	generatedName := binaryName + " alias"
-	generatedPath := filepath.Join(desktopDir, generatedName)
+	// Launcher shell script — runs binary in background, no terminal
+	launcherPath := filepath.Join(macosDir, "backup-manager-launcher")
+	launcher := fmt.Sprintf(
+		`#!/bin/bash
+nohup %q > /dev/null 2>&1 &
+`, absBinary)
+	if err := os.WriteFile(launcherPath, []byte(launcher), 0755); err != nil {
+		return fmt.Errorf("failed to write launcher: %w", err)
+	}
 
-	if _, err := os.Stat(generatedPath); err == nil {
-		if generatedPath != aliasPath {
-			if renameErr := os.Rename(generatedPath, aliasPath); renameErr != nil {
-				log.Printf("[shortcut] warning: could not rename alias: %v", renameErr)
-			}
+	// Info.plist — LSUIElement hides from Dock (app is tray-only)
+	infoPlist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>backup-manager-launcher</string>
+	<key>CFBundleName</key>
+	<string>%s</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.backup-manager</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>LSBackgroundOnly</key>
+	<false/>
+</dict>
+</plist>`, Name)
+
+	infoPlistPath := filepath.Join(appPath, "Contents", "Info.plist")
+	if err := os.WriteFile(infoPlistPath, []byte(infoPlist), 0644); err != nil {
+		return fmt.Errorf("failed to write Info.plist: %w", err)
+	}
+
+	// Touch the .app bundle so Finder updates its icon cache
+	if dirEntries, err := os.ReadDir(appPath); err == nil {
+		for range dirEntries {
+			// Force the directory to be re-scanned
 		}
 	}
 
-	log.Printf("[shortcut] desktop shortcut: %s", aliasPath)
+	log.Printf("[shortcut] .app bundle created: %s", appPath)
 	return nil
 }

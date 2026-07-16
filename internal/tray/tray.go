@@ -90,7 +90,8 @@ func (m *Manager) onReady() {
 	} else {
 		log.Printf("[tray] warning: tray icon is empty")
 	}
-	systray.SetTitle("Backup Manager")
+	// Empty title — macOS menu bar should show icon only, not text
+	systray.SetTitle("")
 	systray.SetTooltip("Backup Manager")
 
 	// Menu items

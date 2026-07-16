@@ -1,3 +1,5 @@
+//go:build !linux
+
 package tray
 
 import (
@@ -10,18 +12,6 @@ import (
 
 //go:embed icon.png
 var iconData []byte
-
-// Options configures the tray manager callbacks.
-type Options struct {
-	// OnOpenUI is called when the user clicks "Open UI".
-	OnOpenUI func()
-	// OnStartServer is called when the user clicks "Start Server".
-	OnStartServer func()
-	// OnStopServer is called when the user clicks "Stop Server".
-	OnStopServer func()
-	// OnQuit is called when the user clicks "Quit". The tray will exit after this.
-	OnQuit func()
-}
 
 // Manager controls the system tray icon and menu.
 type Manager struct {

@@ -3,17 +3,15 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, Typography, Button, Space, Spin, Tag } from 'antd';
 import {
   ArrowLeftOutlined,
-  LinkOutlined,
-  EyeOutlined,
   CloudUploadOutlined,
   SettingOutlined,
   FolderOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useAppStore } from '../store/appStore';
-import SymlinkPanel from '../components/symlink/SymlinkPanel';
-import PreviewPanel from '../components/preview/PreviewPanel';
+import FilesPanel from '../components/files/FilesPanel';
 import BackupPanel from '../components/backup/BackupPanel';
 import ConfigPanel from '../components/config/ConfigPanel';
 
@@ -74,24 +72,14 @@ const RepoDetail: React.FC = () => {
 
   const tabItems = [
     {
-      key: 'symlinks',
+      key: 'browse',
       label: (
         <Space>
-          <LinkOutlined />
-          <span>Symlinks</span>
+          <FolderOpenOutlined />
+          <span>Browse</span>
         </Space>
       ),
-      children: <SymlinkPanel repoId={currentRepo.id} repoPath={currentRepo.path} />,
-    },
-    {
-      key: 'preview',
-      label: (
-        <Space>
-          <EyeOutlined />
-          <span>Preview</span>
-        </Space>
-      ),
-      children: <PreviewPanel repoId={currentRepo.id} />,
+      children: <FilesPanel repoId={currentRepo.id} repoPath={currentRepo.path} />,
     },
     {
       key: 'backup',
@@ -151,7 +139,7 @@ const RepoDetail: React.FC = () => {
       </Space>
 
       <Tabs
-        defaultActiveKey="symlinks"
+        defaultActiveKey="browse"
         items={tabItems}
         className="repo-detail-tabs"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}

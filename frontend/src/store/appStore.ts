@@ -2,9 +2,14 @@ import { create } from 'zustand';
 import type {
   BackupRepo,
   BackupResult,
-  Symlink,
+  Entry,
+  Device,
+  CurrentDeviceInfo,
+  AdoptRequest,
+  AddLinkRequest,
+  BulkLinkRequest,
+  ApplyResult,
   GitAuth,
-  SymlinkDirEntry,
   CommitEntry,
   CommitFileChange,
   CommitFileContent,
@@ -25,22 +30,21 @@ interface BackupProgressState {
 interface AppState {
   repos: BackupRepo[];
   currentRepo: BackupRepo | null;
-  symlinks: Symlink[];
+  entries: Entry[];
+  devices: Device[];
+  currentDevice: CurrentDeviceInfo | null;
   backupHistory: CommitEntry[];
   currentAuth: GitAuth | null;
   backupProgress: BackupProgressState | null;
   loading: boolean;
   error: string | null;
 
-  // Directory browsing cache
-  dirEntriesCache: Record<string, SymlinkDirEntry[]>;
-
-  // Rollback state
+  // 回滚状态
   commitFilesByHash: Record<string, CommitFileChange[]>;
   rollbackResult: RollbackResult | null;
   rollbackLoading: boolean;
 
-  // Commit file preview state
+  // 提交文件预览状态
   commitFileContent: CommitFileContent | null;
   commitFileContentLoading: boolean;
   restoreFileLoading: boolean;
@@ -51,11 +55,28 @@ interface AppState {
   deleteRepo: (id: string) => Promise<void>;
   updateRepoConfig: (id: string, config: Parameters<typeof api.updateRepoConfig>[1]) => Promise<void>;
 
-  fetchSymlinks: (repoId: string) => Promise<void>;
-  createSymlink: (repoId: string, targetPath: string, relativePath: string) => Promise<void>;
-  deleteSymlink: (repoId: string, linkId: string) => Promise<void>;
-  updateSymlink: (repoId: string, linkId: string, targetPath: string) => Promise<void>;
-  batchImportSymlinks: (repoId: string, targets: Array<{ target_path: string; relative_path: string }>) => Promise<void>;
+  // 条目与链接
+  fetchEntries: (repoId: string) => Promise<void>;
+  adoptEntry: (repoId: string, req: AdoptRequest) => Promise<void>;
+  addLink: (repoId: string, entryId: string, req: AddLinkRequest) => Promise<void>;
+  bulkLink: (repoId: string, req: BulkLinkRequest) => Promise<void>;
+  switchTrackedLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
+  repairLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
+  removeLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
+  removeEntry: (
+    repoId: string,
+    entryId: string,
+    mode: api.EntryRemoveMode,
+    linkId?: string
+  ) => Promise<void>;
+
+  // 设备
+  fetchCurrentDevice: () => Promise<void>;
+  fetchDevices: (repoId: string) => Promise<void>;
+  registerDevice: (repoId: string, name?: string) => Promise<void>;
+  renameDevice: (repoId: string, fingerprint: string, name: string) => Promise<void>;
+  deleteDevice: (repoId: string, fingerprint: string) => Promise<void>;
+  applyDevice: (repoId: string, fingerprint: string, dryRun?: boolean) => Promise<ApplyResult>;
 
   triggerBackup: (repoId: string, commitMessage?: string) => Promise<BackupResult | void>;
   pushRepo: (repoId: string, force?: boolean) => Promise<void>;
@@ -66,17 +87,17 @@ interface AppState {
   setAuth: (repoId: string, auth: Parameters<typeof api.setAuth>[1]) => Promise<void>;
   clearAuth: (repoId: string) => Promise<void>;
 
-  // Directory browsing
-  fetchDirEntries: (repoId: string, linkId: string, subPath?: string) => Promise<SymlinkDirEntry[]>;
-  clearDirEntryCache: (linkId?: string) => void;
-
-  // Rollback actions
+  // 回滚
   fetchCommitFiles: (repoId: string, commitHash: string) => Promise<void>;
-  rollbackSourceFiles: (repoId: string, req: RollbackRequest) => Promise<RollbackResult>;
+  rollbackFiles: (repoId: string, req: RollbackRequest) => Promise<RollbackResult>;
   clearRollbackResult: () => void;
 
-  // Commit file preview actions
-  fetchCommitFileContent: (repoId: string, commitHash: string, path: string) => Promise<CommitFileContent>;
+  // 提交文件预览
+  fetchCommitFileContent: (
+    repoId: string,
+    commitHash: string,
+    path: string
+  ) => Promise<CommitFileContent>;
   restoreCommitFile: (repoId: string, commitHash: string, path: string) => Promise<FileRestoreResult>;
   clearCommitFileContent: () => void;
 
@@ -86,22 +107,19 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   repos: [],
   currentRepo: null,
-  symlinks: [],
+  entries: [],
+  devices: [],
+  currentDevice: null,
   backupHistory: [],
   currentAuth: null,
   backupProgress: null,
   loading: false,
   error: null,
 
-  // Directory browsing initial state
-  dirEntriesCache: {},
-
-  // Rollback initial state
   commitFilesByHash: {},
   rollbackResult: null,
   rollbackLoading: false,
 
-  // Commit file preview initial state
   commitFileContent: null,
   commitFileContentLoading: false,
   restoreFileLoading: false,
@@ -111,22 +129,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchRepos: async () => {
     set({ loading: true, error: null });
     try {
-      const repos = await api.fetchRepos();
-      set({ repos, loading: false });
+      set({ repos: await api.fetchRepos(), loading: false });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch repos';
-      set({ error: message, loading: false });
+      set({ error: errMsg(err, 'Failed to fetch repos'), loading: false });
     }
   },
 
   fetchRepo: async (id: string) => {
     set({ loading: true, error: null });
     try {
-      const repo = await api.fetchRepo(id);
-      set({ currentRepo: repo, loading: false });
+      set({ currentRepo: await api.fetchRepo(id), loading: false });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch repo';
-      set({ error: message, loading: false });
+      set({ error: errMsg(err, 'Failed to fetch repo'), loading: false });
     }
   },
 
@@ -134,11 +148,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const repo = await api.createRepo({ name, path });
-      const { repos } = get();
-      set({ repos: [...repos, repo], loading: false });
+      set({ repos: [...get().repos, repo], loading: false });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to create repo';
-      set({ error: message, loading: false });
+      set({ error: errMsg(err, 'Failed to create repo'), loading: false });
       throw err;
     }
   },
@@ -147,11 +159,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       await api.deleteRepo(id);
-      const { repos } = get();
-      set({ repos: repos.filter((r) => r.id !== id), loading: false });
+      set({ repos: get().repos.filter((r) => r.id !== id), loading: false });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to delete repo';
-      set({ error: message, loading: false });
+      set({ error: errMsg(err, 'Failed to delete repo'), loading: false });
       throw err;
     }
   },
@@ -161,76 +171,170 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await api.updateRepoConfig(id, config);
       const repo = await api.fetchRepo(id);
-      set({ currentRepo: repo });
-      const { repos } = get();
-      set({
-        repos: repos.map((r) => (r.id === id ? repo : r)),
-      });
+      set({ currentRepo: repo, repos: get().repos.map((r) => (r.id === id ? repo : r)) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to update config';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to update config') });
       throw err;
     }
   },
 
-  fetchSymlinks: async (repoId: string) => {
+  // ── 条目与链接 ──────────────────────────────────────────────────────
+
+  fetchEntries: async (repoId: string) => {
     set({ error: null });
     try {
-      const symlinks = await api.fetchSymlinks(repoId);
-      set({ symlinks });
+      set({ entries: await api.fetchEntries(repoId) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch symlinks';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to fetch entries') });
     }
   },
 
-  createSymlink: async (repoId, targetPath, relativePath) => {
+  adoptEntry: async (repoId, req) => {
     set({ error: null });
     try {
-      await api.createSymlink(repoId, { target_path: targetPath, relative_path: relativePath });
-      await get().fetchSymlinks(repoId);
+      await api.adoptEntry(repoId, req);
+      await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to create symlink';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to create entry') });
       throw err;
     }
   },
 
-  deleteSymlink: async (repoId, linkId) => {
+  addLink: async (repoId, entryId, req) => {
     set({ error: null });
     try {
-      await api.deleteSymlink(repoId, linkId);
-      await get().fetchSymlinks(repoId);
+      await api.addLink(repoId, entryId, req);
+      await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to delete symlink';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to add link') });
       throw err;
     }
   },
 
-  updateSymlink: async (repoId, linkId, targetPath) => {
+  bulkLink: async (repoId, req) => {
     set({ error: null });
     try {
-      await api.updateSymlink(repoId, linkId, { target_path: targetPath });
-      await get().fetchSymlinks(repoId);
+      await api.bulkLink(repoId, req);
+      await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to update symlink';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to bulk link') });
       throw err;
     }
   },
 
-  batchImportSymlinks: async (repoId, targets) => {
+  switchTrackedLink: async (repoId, entryId, linkId) => {
     set({ error: null });
     try {
-      await api.batchImportSymlinks(repoId, { targets });
-      await get().fetchSymlinks(repoId);
+      await api.switchTrackedLink(repoId, entryId, linkId);
+      await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to batch import symlinks';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to switch the tracked link') });
       throw err;
     }
   },
+
+  repairLink: async (repoId, entryId, linkId) => {
+    set({ error: null });
+    try {
+      await api.repairLink(repoId, entryId, linkId);
+      await get().fetchEntries(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to repair the link') });
+      throw err;
+    }
+  },
+
+  removeLink: async (repoId, entryId, linkId) => {
+    set({ error: null });
+    try {
+      await api.removeLink(repoId, entryId, linkId);
+      await get().fetchEntries(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to remove the link') });
+      throw err;
+    }
+  },
+
+  removeEntry: async (repoId, entryId, mode, linkId) => {
+    set({ error: null });
+    try {
+      await api.removeEntry(repoId, entryId, mode, linkId);
+      await get().fetchEntries(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to remove the entry') });
+      throw err;
+    }
+  },
+
+  // ── 设备 ─────────────────────────────────────────────────────────────
+
+  fetchCurrentDevice: async () => {
+    try {
+      set({ currentDevice: await api.fetchCurrentDevice() });
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to fetch the current device') });
+    }
+  },
+
+  fetchDevices: async (repoId: string) => {
+    set({ error: null });
+    try {
+      set({ devices: await api.fetchDevices(repoId) });
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to fetch devices') });
+    }
+  },
+
+  registerDevice: async (repoId, name) => {
+    set({ error: null });
+    try {
+      await api.registerDevice(repoId, name);
+      await get().fetchDevices(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to register the device') });
+      throw err;
+    }
+  },
+
+  renameDevice: async (repoId, fingerprint, name) => {
+    set({ error: null });
+    try {
+      await api.renameDevice(repoId, fingerprint, name);
+      await get().fetchDevices(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to rename the device') });
+      throw err;
+    }
+  },
+
+  deleteDevice: async (repoId, fingerprint) => {
+    set({ error: null });
+    try {
+      await api.deleteDevice(repoId, fingerprint);
+      await get().fetchDevices(repoId);
+      await get().fetchEntries(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to delete the device') });
+      throw err;
+    }
+  },
+
+  applyDevice: async (repoId, fingerprint, dryRun = false) => {
+    set({ error: null });
+    try {
+      const result = await api.applyDevice(repoId, fingerprint, dryRun);
+      if (!dryRun) {
+        await get().fetchEntries(repoId);
+        await get().fetchDevices(repoId);
+      }
+      return result;
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to apply the device') });
+      throw err;
+    }
+  },
+
+  // ── 备份 ─────────────────────────────────────────────────────────────
 
   triggerBackup: async (repoId: string, commitMessage?: string) => {
     set({ error: null, backupProgress: null });
@@ -249,16 +353,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         backupProgress: {
           repo_id: repoId,
           status: result.commit_hash ? 'completed' : 'failed',
-          message: result.commit_message || (result.files_changed > 0 ? `Changed: ${result.files_changed}, Removed: ${result.files_removed}` : 'No changes'),
+          message:
+            result.commit_message ||
+            (result.files_changed > 0
+              ? `Changed: ${result.files_changed}, Removed: ${result.files_removed}`
+              : 'No changes'),
           progress: result.commit_hash ? 100 : 0,
           started_at: result.completed_at,
         },
       });
-      const repo = await api.fetchRepo(repoId);
-      set({ currentRepo: repo });
+      set({ currentRepo: await api.fetchRepo(repoId) });
       return result;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Backup failed';
+      const message = errMsg(err, 'Backup failed');
       set({
         backupProgress: {
           repo_id: repoId,
@@ -275,11 +382,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchBackupHistory: async (repoId, limit = 20, offset = 0) => {
     set({ error: null });
     try {
-      const history: CommitEntry[] = await api.fetchBackupHistory(repoId, limit, offset);
-      set({ backupHistory: history });
+      set({ backupHistory: await api.fetchBackupHistory(repoId, limit, offset) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch backup history';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to fetch backup history') });
     }
   },
 
@@ -287,12 +392,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ error: null });
     try {
       await api.pushRepo(repoId, force);
-      // Refresh repo to update status
-      const repo = await api.fetchRepo(repoId);
-      set({ currentRepo: repo });
+      set({ currentRepo: await api.fetchRepo(repoId) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Push failed';
-      set({ error: message });
+      set({ error: errMsg(err, 'Push failed') });
       throw err;
     }
   },
@@ -301,35 +403,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ error: null });
     try {
       await api.gitInitRepo(repoId);
-      // Refresh repo to get updated git_initialized flag
-      const repo = await api.fetchRepo(repoId);
-      set({ currentRepo: repo });
+      set({ currentRepo: await api.fetchRepo(repoId) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Git init failed';
-      set({ error: message });
+      set({ error: errMsg(err, 'Git init failed') });
       throw err;
     }
   },
 
+  // ── Git 认证 ─────────────────────────────────────────────────────────
+
   fetchAuth: async (repoId: string) => {
     set({ error: null });
     try {
-      const auth = await api.fetchAuth(repoId);
-      set({ currentAuth: auth });
+      set({ currentAuth: await api.fetchAuth(repoId) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch auth config';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to fetch auth config') });
     }
   },
 
   setAuth: async (repoId, auth) => {
     set({ error: null });
     try {
-      const result = await api.setAuth(repoId, auth);
-      set({ currentAuth: result });
+      set({ currentAuth: await api.setAuth(repoId, auth) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to set auth config';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to set auth config') });
       throw err;
     }
   },
@@ -340,79 +437,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.clearAuth(repoId);
       set({ currentAuth: null });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to clear auth config';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to clear auth config') });
       throw err;
     }
   },
 
-  // Directory browsing
-  fetchDirEntries: async (repoId: string, linkId: string, subPath?: string) => {
-    set({ error: null });
-    const cacheKey = `${linkId}:${subPath || ''}`;
-    const cached = get().dirEntriesCache[cacheKey];
-    if (cached) {
-      return cached;
-    }
-    try {
-      const entries = await api.fetchDirEntries(repoId, linkId, subPath);
-      set((state) => ({
-        dirEntriesCache: { ...state.dirEntriesCache, [cacheKey]: entries },
-      }));
-      return entries;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch directory entries';
-      set({ error: message });
-      throw err;
-    }
-  },
+  // ── 回滚 ─────────────────────────────────────────────────────────────
 
-  clearDirEntryCache: (linkId?: string) => {
-    if (linkId) {
-      set((state) => {
-        const newCache = { ...state.dirEntriesCache };
-        Object.keys(newCache).forEach((key) => {
-          if (key.startsWith(`${linkId}:`)) {
-            delete newCache[key];
-          }
-        });
-        return { dirEntriesCache: newCache };
-      });
-    } else {
-      set({ dirEntriesCache: {} });
-    }
-  },
-
-  // Rollback actions
   fetchCommitFiles: async (repoId: string, commitHash: string) => {
     set({ error: null });
     try {
       const files = await api.fetchCommitChangedFiles(repoId, commitHash);
-      set((state) => ({
-        commitFilesByHash: { ...state.commitFilesByHash, [commitHash]: files },
-      }));
+      set((state) => ({ commitFilesByHash: { ...state.commitFilesByHash, [commitHash]: files } }));
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch commit files';
-      set({ error: message });
+      set({ error: errMsg(err, 'Failed to fetch commit files') });
     }
   },
 
-  rollbackSourceFiles: async (repoId: string, req: RollbackRequest) => {
+  rollbackFiles: async (repoId: string, req: RollbackRequest) => {
     set({ rollbackLoading: true, error: null, rollbackResult: null });
     try {
-      const result = await api.rollbackSourceFiles(repoId, req);
+      const result = await api.rollbackFiles(repoId, req);
       set({ rollbackResult: result, rollbackLoading: false });
       return result;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Rollback failed';
-      set({ error: message, rollbackLoading: false });
+      set({ error: errMsg(err, 'Rollback failed'), rollbackLoading: false });
       throw err;
     }
   },
 
   clearRollbackResult: () => set({ rollbackResult: null }),
 
-  // Commit file preview actions
+  // ── 提交文件预览 ─────────────────────────────────────────────────────
+
   fetchCommitFileContent: async (repoId: string, commitHash: string, path: string) => {
     set({ commitFileContentLoading: true, error: null, commitFileContent: null });
     try {
@@ -420,8 +477,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ commitFileContent: content, commitFileContentLoading: false });
       return content;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch commit file content';
-      set({ error: message, commitFileContentLoading: false });
+      set({ error: errMsg(err, 'Failed to fetch commit file content'), commitFileContentLoading: false });
       throw err;
     }
   },
@@ -433,11 +489,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ restoreFileLoading: false });
       return result;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to restore file';
-      set({ error: message, restoreFileLoading: false });
+      set({ error: errMsg(err, 'Failed to restore file'), restoreFileLoading: false });
       throw err;
     }
   },
 
   clearCommitFileContent: () => set({ commitFileContent: null, commitFileContentLoading: false }),
 }));
+
+/** 统一的错误消息提取。 */
+function errMsg(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}

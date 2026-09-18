@@ -10,7 +10,7 @@ export interface BackupRepo {
   status: BackupRepoStatus;
   git_initialized: boolean;
   has_remote: boolean;
-  // Config fields — backend returns them flat in the repo response
+  // 配置字段 —— 后端在仓库响应里平铺返回
   remote_url?: string;
   branch?: string;
   auto_backup?: boolean;
@@ -33,53 +33,116 @@ export interface UpdateConfigRequest {
   git_user_email?: string;
 }
 
-export interface Symlink {
+// ── 条目 / 链接 / 设备 ─────────────────────────────────────────────────
+
+/** 链接类型。in 是 out 的特例：两者物理形态相同，只是角色不同。 */
+export type LinkType = 'in' | 'out';
+
+/** 条目类型。 */
+export type EntryKind = 'file' | 'dir';
+
+/** 链接在本机的实际状态（后端按需计算）。 */
+export type LinkState =
+  | 'ok'
+  | 'missing'
+  | 'wrong_target'
+  | 'replaced'
+  | 'dangling'
+  | 'occupied'
+  | 'disabled'
+  | 'not_current';
+
+export interface Link {
   id: string;
-  repo_id: string;
-  relative_path: string;
-  target_path: string;
-  type: 'file' | 'directory';
-  file_size: number;
-  modified_at: string | null;
+  entry_id: string;
+  type: LinkType;
+  device: string;
+  device_name?: string;
+  local_path: string;
+  enabled: boolean;
+  /** 派生字段：是否是该条目的跟踪链接（type === 'in'）。 */
+  tracked: boolean;
+  /** 派生字段：是否属于当前设备。 */
+  is_current: boolean;
+  state: LinkState;
+  state_note?: string;
   created_at: string;
-  is_new?: boolean;
 }
 
-export interface CreateSymlinkRequest {
-  target_path: string;
-  relative_path: string;
+export interface Entry {
+  id: string;
+  repo_path: string;
+  kind: EntryKind;
+  created_at: string;
+  /** 没有任何 in 链接（新设备初始化期间合法）。 */
+  unbound: boolean;
+  links: Link[];
 }
 
-export interface UpdateSymlinkRequest {
-  target_path: string;
-}
-
-export interface BatchSymlinkRequest {
-  targets: Array<{
-    target_path: string;
-    relative_path: string;
-  }>;
-}
-
-export interface BrowseEntry {
+export interface Device {
+  fingerprint: string;
   name: string;
+  hostname?: string;
+  os?: string;
+  is_current: boolean;
+  last_seen_at?: string | null;
+  link_count: number;
+}
+
+export interface CurrentDeviceInfo {
+  fingerprint: string;
+  hostname: string;
+  os: string;
+  name: string;
+}
+
+export interface AdoptRequest {
+  local_path: string;
+  repo_path?: string;
+  follow_symlinks?: boolean;
+}
+
+export interface AddLinkRequest {
+  local_path: string;
+  device?: string;
+}
+
+export interface BulkLinkRequest {
+  local_root: string;
+  entry_ids?: string[];
+}
+
+export type ApplyActionName = 'create' | 'repair' | 'skip' | 'conflict' | 'orphan';
+
+export interface ApplyAction {
+  entry_id: string;
+  link_id: string;
+  repo_path: string;
+  local_path: string;
+  action: ApplyActionName;
+  reason?: string;
+}
+
+export interface ApplyResult {
+  device: string;
+  created: ApplyAction[];
+  repaired: ApplyAction[];
+  skipped: ApplyAction[];
+  conflicts: ApplyAction[];
+  orphans: ApplyAction[];
+  dry_run: boolean;
+  completed_at: string;
+}
+
+// ── 仓库内容 ──────────────────────────────────────────────────────────
+
+export interface ContentEntry {
+  name: string;
+  /** 相对 data/ 的斜杠路径。 */
   path: string;
   type: 'file' | 'directory';
-  size: number;
-  modified_at: string;
-}
-
-export interface SymlinkDirEntry {
-  name: string;
-  path: string;
-  type: 'file' | 'directory' | 'symlink_file' | 'symlink_directory' | 'symlink_error';
-  size: number;
-  modified_at: string;
-  is_new: boolean;
-  is_nested_symlink: boolean;
-  nested_target?: string;
-  nested_depth?: number;
-  has_cycle?: boolean;
+  size?: number;
+  modified_at?: string;
 }
 
 export interface PreviewResult {
@@ -100,6 +163,23 @@ export interface SaveFileResult {
   modified_at: string;
 }
 
+export interface ChangesResult {
+  dirty: boolean;
+  changes: string[];
+}
+
+// ── 本机文件浏览 ──────────────────────────────────────────────────────
+
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size: number;
+  modified_at: string;
+}
+
+// ── 备份 / 回滚 ───────────────────────────────────────────────────────
+
 export interface BackupResult {
   repo_id: string;
   completed_at: string;
@@ -118,6 +198,48 @@ export interface CommitEntry {
   message: string;
 }
 
+export interface CommitFileChange {
+  change_type: string;
+  relative_path: string;
+}
+
+export interface RollbackRequest {
+  commit_hash: string;
+  /** 为空表示回滚该提交的全部变更。 */
+  paths?: string[];
+}
+
+export interface RollbackFailure {
+  relative_path: string;
+  error: string;
+}
+
+export interface CommitFileContent {
+  content?: string;
+  mime_type: string;
+  size: number;
+  text: boolean;
+  truncated?: boolean;
+}
+
+export interface FileRestoreResult {
+  relative_path: string;
+  success: boolean;
+  restored_at: string;
+}
+
+export interface RollbackResult {
+  repo_id: string;
+  commit_hash: string;
+  total: number;
+  success: number;
+  failed: number;
+  failures?: RollbackFailure[];
+  completed_at: string;
+}
+
+// ── Git 认证 ──────────────────────────────────────────────────────────
+
 export type GitAuthType = 'none' | 'ssh_key' | 'password';
 
 export interface GitAuth {
@@ -134,59 +256,4 @@ export interface SetAuthRequest {
   ssh_private_key_path?: string;
   username?: string;
   password?: string;
-}
-
-export interface SymlinkTreeNode {
-  key: string;
-  title: string;
-  isLeaf: boolean;
-  symlink?: Symlink;
-  children?: SymlinkTreeNode[];
-}
-
-// Rollback types
-export interface CommitFileChange {
-  change_type: string;
-  relative_path: string;
-  symlink_id: string | null;
-  symlink_type: string | null;
-}
-
-export interface RollbackRequest {
-  commit_hash: string;
-  symlink_ids?: string[];
-}
-
-export interface RollbackFailure {
-  relative_path: string;
-  error: string;
-}
-
-export interface CommitFileContent {
-  content?: string;
-  mime_type: string;
-  size: number;
-  text: boolean;
-  truncated?: boolean;
-}
-
-export interface FileRestoreRequest {
-  path: string;
-}
-
-export interface FileRestoreResult {
-  relative_path: string;
-  success: boolean;
-  restored_at: string;
-}
-
-export interface RollbackResult {
-  repo_id: string;
-  commit_hash: string;
-  total: number;
-  success: number;
-  skipped: number;
-  failed: number;
-  failures?: RollbackFailure[];
-  completed_at: string;
 }

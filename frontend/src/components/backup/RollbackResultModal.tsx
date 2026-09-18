@@ -20,7 +20,7 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
 }) => {
   if (!result) return null;
 
-  const allSuccess = result.failed === 0 && result.skipped === 0 && result.total > 0;
+  const allSuccess = result.failed === 0 && result.total > 0;
 
   const icon = allSuccess ? (
     <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 48 }} />
@@ -63,12 +63,6 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
             {result.success}
           </Typography.Title>
           <Typography.Text type="secondary">Restored</Typography.Text>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <Typography.Title level={3} style={{ color: '#faad14', margin: 0 }}>
-            {result.skipped}
-          </Typography.Title>
-          <Typography.Text type="secondary">Skipped</Typography.Text>
         </div>
         <div style={{ textAlign: 'center' }}>
           <Typography.Title level={3} style={{ color: '#ff4d4f', margin: 0 }}>

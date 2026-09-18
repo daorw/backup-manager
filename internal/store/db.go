@@ -62,18 +62,9 @@ func Migrate(db *sql.DB) error {
 		FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
 	);
 
-	CREATE TABLE IF NOT EXISTS symlinks (
-		id              TEXT PRIMARY KEY,
-		repo_id         TEXT NOT NULL,
-		relative_path   TEXT NOT NULL,
-		target_path     TEXT NOT NULL,
-		type            TEXT NOT NULL,
-		file_size       INTEGER,
-		modified_at     DATETIME,
-		created_at      DATETIME DEFAULT (datetime('now')),
-		FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
-		UNIQUE(repo_id, relative_path)
-	);
+	-- symlinks 表在「条目 + 链接」模型下已废弃：条目/链接/设备的定义
+	-- 存放在仓库内的 .backup-manager/manifest.json，随 Git 传输。
+	DROP TABLE IF EXISTS symlinks;
 	`
 
 	if _, err := db.Exec(schema); err != nil {

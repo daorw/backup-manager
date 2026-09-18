@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-文件/目录聚合备份可视化管理工具。基于 Git 的反向追踪模式（白名单机制），用户主动指定哪些文件/目录需要备份，通过软链接聚合管理源文件，提供可视化界面。
+文件/目录聚合备份可视化管理工具。基于 Git 的反向追踪模式（白名单机制），用户主动指定哪些文件/目录需要备份；内容移入仓库 `data/`，本机路径以 `in`/`out` 软链接作为视图，并提供可视化界面与多设备分发能力。
 
 **核心价值**：让用户以"指定要备份什么"而非"排除什么"的直观方式管理备份。
 
@@ -25,10 +25,15 @@
 ### 核心数据流
 
 ```
-用户添加软链接 → .links/ 创建 symlink → data/ 同步复制源文件
+创建条目(adopt) → 内容 mv 进 data/<repo_path> → 原位置替换为软链接 = 该条目的 in 链接
                     ↓
-执行备份 → 增量检测(mtime+size) → 同步到 data/ → git add → git commit → git push(可选)
+添加 out 链接 → 同一条目再分发到其它本机路径（纯软链接，不复制内容）
+                    ↓
+执行备份 → 落盘 manifest.json → git add -A → git commit → git push(可选)
 ```
+
+**`in` 是 `out` 的特例**：两者都是指向 `data/<repo_path>` 的软链接，只有角色不同（`in` 负责把内容移入仓库并创建条目，**每个条目至多一个**，初始化新设备时可为 0；`out` 只做分发，0..N 个）。可在任意 `out` 上「指定为 `in`」，条目随即改为跟踪它。
+内容只存在于 `data/`，本机路径只是视图，因此**不存在增量同步步骤**。`apply` 负责让本机链接与清单收敛。
 
 ## 技术栈
 
@@ -63,45 +68,49 @@ backup-manager/
 │   ├── api/                         # API 层
 │   │   ├── router.go                # 路由注册 + SPA 静态文件挂载
 │   │   ├── middleware.go            # CORS + 错误恢复中间件
-│   │   └── handler/                 # HTTP 处理器（8个 + errors.go）
+│   │   └── handler/                 # HTTP 处理器
 │   │       ├── repo.go              # Repo CRUD + Config Update + Git Init
-│   │       ├── symlink.go           # Symlink CRUD + Batch Import + Nested + BrowseDirEntries
+│   │       ├── entry.go             # 条目：list / adopt / switch（指定新 in）/ delete
+│   │       ├── link.go              # 链接：add / bulk / repair / remove
+│   │       ├── device.go            # 设备：current / register / rename / delete / apply
 │   │       ├── browse.go            # 本地文件浏览（安全限定 AllowedRoots）
-│   │       ├── preview.go           # 文件预览 + 保存（源文件回写 + data/ 同步）
+│   │       ├── content.go           # tree / preview / save / changes
 │   │       ├── backup.go            # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go              # Git 认证管理
-│   │       ├── rollback.go          # 源文件回滚 + 单文件恢复 + 提交文件预览
+│   │       ├── rollback.go          # 内容回滚 + 单文件恢复 + 提交文件预览
 │   │       ├── system.go            # 健康检查
 │   │       └── errors.go            # 错误码映射（respondError）
 │   │
-│   ├── service/                     # 业务逻辑层（8个）
+│   ├── entry/                       # 条目与链接子系统
+│   │   ├── manifest.go              # 清单加载/保存/原子写 + R-1..R-5 校验
+│   │   ├── service.go               # Service 装配、仓库互斥锁、清单提交、公共辅助
+│   │   ├── entry_service.go         # adopt、list、remove（unlink/move_back/purge）
+│   │   ├── link_service.go          # 添加 out 链接、批量链接、switch、repair、remove
+│   │   ├── device_service.go        # register、rename、delete、apply
+│   │   └── entry_state.go           # 逐链接状态诊断与视图构建
+│   │
+│   ├── service/                     # 业务逻辑层
 │   │   ├── repo_service.go          # 仓库生命周期（创建/删除/配置/Git Init）
-│   │   ├── symlink_service.go       # 软链接 CRUD + 镜像同步 data/ + 嵌套软链接
-│   │   ├── backup_service.go        # 备份执行引擎（增量检测→同步→git）
+│   │   ├── backup_service.go        # 备份执行（git add/commit/push）
 │   │   ├── auth_service.go          # Git 认证管理（加密存储/注入）
 │   │   ├── browser_service.go       # 安全文件浏览（AllowedRoots 机制）
-│   │   ├── preview_service.go       # 文件预览（ResolveSource） + 保存（源文件+data/）
-│   │   ├── rollback_service.go      # 源文件回滚 + 单文件恢复 + 提交文件预览
-│   │   └── repo_mutex.go            # 仓库级互斥锁（并发控制）
+│   │   ├── content_service.go       # 内容树 / 预览 / 保存（直接读写 data/）
+│   │   └── rollback_service.go      # 内容回滚 + 单文件恢复 + 提交文件预览
 │   │
 │   ├── store/                       # 数据持久化层
 │   │   ├── db.go                    # SQLite 初始化 + 迁移
 │   │   ├── store.go                 # Store 聚合
 │   │   ├── repo_store.go            # repos 表操作
 │   │   ├── repo_config_store.go     # repo_configs 表操作
-│   │   ├── repo_auth_store.go       # repo_auths 表操作
-│   │   └── symlink_store.go         # symlinks 表操作
+│   │   └── repo_auth_store.go       # repo_auths 表操作
 │   │
 │   ├── model/                       # 数据模型
 │   │   ├── repo.go                  # Repo, RepoConfig, RepoStatus
-│   │   ├── symlink.go               # Symlink, SymlinkType
+│   │   ├── link.go                  # Entry, Link, Device, Manifest, LinkState
 │   │   └── auth.go                  # GitAuth, GitAuthType
 │   │
 │   ├── git/                         # Git 引擎
 │   │   └── git.go                   # Init/Add/Commit/Push/Log/Status/Config/LsTree/Show/WriteFileContentTo/GetChangedFilesInCommit
-│   │
-│   ├── resolver/                    # Git 路径解析器
-│   │   └── symlink_resolver.go      # data/ 路径 → 源文件路径映射
 │   │
 │   ├── scheduler/                   # 定时调度器
 │   │   └── scheduler.go             # 基于 cron 的注册/注销/生命周期管理
@@ -111,8 +120,10 @@ backup-manager/
 │   ├── tray/                        # 系统托盘（菜单栏）管理
 │   │
 │   └── util/                        # 工具包
-│       ├── path.go                  # SafeResolve/SafeResolveFile（四层路径校验）
+│       ├── path.go                  # SafeResolve/SafeJoin（四层路径校验）
 │       ├── crypto.go                # KeyManager（AES-256-GCM）
+│       ├── device.go                # MachineFingerprint（跨平台机器指纹）
+│       ├── repo_mutex.go            # 仓库级互斥锁（备份/回滚/链接操作共享）
 │       └── file.go                  # CopyFile/CopyDir/DetectMIME
 │
 └── frontend/                        # React SPA
@@ -137,11 +148,12 @@ backup-manager/
             ├── repo/
             │   ├── RepoCard.tsx
             │   └── CreateRepoModal.tsx
-            ├── symlink/
-            │   ├── SymlinkPanel.tsx
-            │   └── SymlinkAddModal.tsx
+            ├── entry/
+            │   ├── EntriesPanel.tsx  # 条目与链接：列表、指定跟踪、修复、移除、apply
+            │   └── AdoptModal.tsx    # 创建条目（内容移入仓库，原位置建 in 链接）
+            ├── files/
+            │   └── FilesPanel.tsx    # 浏览 data/ 树 + 预览编辑
             ├── preview/
-            │   ├── PreviewPanel.tsx
             │   ├── TextPreview.tsx
             │   ├── MarkdownPreview.tsx
             │   └── BinaryInfo.tsx
@@ -149,23 +161,48 @@ backup-manager/
             │   ├── BackupPanel.tsx
             │   ├── RollbackConfirmModal.tsx
             │   └── RollbackResultModal.tsx
+            ├── common/
+            │   └── DirectoryPickerModal.tsx
             └── config/
                 └── ConfigPanel.tsx
 ```
 
-## 数据库 Schema
+## 数据存储
 
-4 张核心表，外键级联删除：
+**三份彼此独立的存储** —— 注意不要把 SQLite 表与仓库清单混为一谈：
+
+| 数据 | 文件 | 格式 | 为什么放这里 |
+|------|------|------|------|
+| `repos`、`repo_configs`、`repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite（单个二进制文件） | 本机私有：加密凭据、本机路径、定时任务。绝不提交进仓库 |
+| 条目、链接、设备 | `<repo-root>/.backup-manager/manifest.json` | JSON，由 Git 跟踪 | 必须随 `git clone` / `git push` 跨机器传输；SQLite 是按机器独立的 |
+| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置 |
+
+### SQLite 数据库（本机）
+
+文件：`~/.config/backup-manager/backup-manager.db`。共 **3 张表**，外键级联删除，WAL 模式与外键约束启用：
 
 ```sql
 repos         — 仓库: id, name, path, created_at, updated_at, last_backup_at, status
 repo_configs  — 配置: repo_id(FK), remote_url, branch, auto_backup, auto_backup_interval, git_user_name, git_user_email
 repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_private_key_path, username, password_encrypted(BLOB)
-symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path, type, file_size, modified_at, created_at
 ```
 
-- WAL 模式启用
-- 外键约束启用
+**注意**：`symlinks` 表已删除，且**没有**任何新表替代它 —— 条目/链接/设备**不**存放在 SQLite 中。
+
+### 仓库清单（位于仓库内，Git 跟踪）
+
+文件：`<repo-root>/.backup-manager/manifest.json`（JSON，不在 .db 文件里）。
+
+```json
+{
+  "version": 1, "updated_at": "...",
+  "devices": [ {"fingerprint","name","hostname","os","last_seen_at"} ],
+  "entries": [ {"id","repo_path","kind","created_at",
+                "links": [ {"id","type":"in|out","device","local_path","enabled","created_at"} ]} ]
+}
+```
+
+**条目、链接与设备为什么放仓库而不放 SQLite**：数据库是按机器独立的，清单随 `git clone` / `git push` 传输，新机器才能获知所有设备的链接；同时也免费获得版本化与冲突解决。
 
 ## API 端点
 
@@ -181,25 +218,46 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 | PUT | /repos/:id/config | 更新配置（部分更新） |
 | POST | /repos/:id/git-init | 初始化 Git 仓库 |
 
-### 软链接管理
+### 条目与链接
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| POST | /repos/:id/symlinks | 添加软链接 |
-| GET | /repos/:id/symlinks | 软链接列表（含 `is_new` 变更标记） |
-| GET | /repos/:id/symlinks/:linkId | 软链接详情 |
-| DELETE | /repos/:id/symlinks/:linkId | 删除软链接 |
-| PUT | /repos/:id/symlinks/:linkId | 修改目标路径 |
-| POST | /repos/:id/symlinks/batch | 批量导入 |
-| GET | /repos/:id/symlinks/:linkId/entries?sub_path= | 浏览目录 symlink 内容 |
-| POST | /repos/:id/symlinks/:linkId/nested | 在目录 symlink 内添加嵌套软链接 |
+| GET | /repos/:id/entries?device=&state= | 条目列表（含链接与状态） |
+| GET | /repos/:id/entries/:entryId | 条目详情 |
+| POST | /repos/:id/entries/adopt | 创建条目及其 `in` 链接（内容 mv 进 data/） |
+| PATCH | /repos/:id/entries/:entryId | 重命名 `repo_path`（重新校验不重叠） |
+| POST | /repos/:id/entries/:entryId/switch | 把某个 `out` 链接提升为条目的 `in` 链接 |
+| DELETE | /repos/:id/entries/:entryId?mode= | release / unlink / move_back / purge |
+| GET/POST | /repos/:id/entries/:entryId/links | 列出 / 添加 `out` 链接 |
+| POST | /repos/:id/links/bulk | 在某个本机根目录下批量创建 `out` 链接 |
+| PATCH | /repos/:id/entries/:entryId/links/:linkId | 修改 local_path / enabled |
+| POST | .../links/:linkId/repair | 重建软链接 |
+| POST | .../links/:linkId/readopt | `replaced` → 把新内容移入 data/ 并重建链接 |
+| POST | .../links/:linkId/remove | 移除单个链接 |
+
+### 设备
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /devices/current | 当前机器的指纹 / 主机名 |
+| GET/POST/PATCH/DELETE | /repos/:id/devices[/:fp] | 设备注册 / 重命名 / 删除 |
+| GET | /repos/:id/devices/:fp/links | 该设备的链接及状态 |
+| POST | /repos/:id/devices/:fp/apply | 让本机收敛（支持 dry_run） |
+| POST | /repos/:id/devices/:fp/detach | 卸载本机 |
+
+### 一致性
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /repos/:id/consistency | 巡检结论（R-1..R-5、未托管链接） |
+| POST | /repos/:id/consistency/repair | 修复所有可收敛项 |
 
 ### 文件操作
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET | /browse?path=... | 浏览本地文件系统 |
 | GET | /browse/allowed-roots | 列出可浏览根目录 |
-| GET | /repos/:id/preview?path=... | 预览源文件内容 |
-| PUT | /repos/:id/save | 编辑保存源文件（同步到 data/） |
+| GET | /repos/:id/tree?path=... | 列出 data/ 下的条目及挂载徽标 |
+| GET | /repos/:id/preview?path=... | 预览文件内容 |
+| PUT | /repos/:id/save | 保存到 data/ |
+| GET | /repos/:id/changes | data/ 下的未提交变更（git status） |
 
 ### 备份
 | 方法 | 路径 | 功能 |
@@ -230,8 +288,19 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 
 ## 关键设计决策
 
-### 1. 镜像一致性
-添加/删除/修改软链接时，同步操作 `data/` 目录，确保 `.links/` 和 `data/` 目录结构始终镜像一致。备份执行时只做增量检测（mtime+size 比较）和 git 操作。
+### 1. 内容单一归属与条目级一致性
+- 内容只存在于 `data/<repo_path>`；本机路径是指向它的软链接视图，不存在镜像目录、副本或同步步骤
+- **`in` 是 `out` 的特例**：两者物理形态完全相同（都是指向 `data/<repo_path>` 的软链接），区别仅在角色
+- 强制不变量 R-1..R-5：
+  - R-1 每个条目**至多一个** `in` 链接（正常恰为 1；**初始化新设备时允许为 0**，此时为「未绑定」状态）；`out` 链接 0..N 个
+  - R-2 链接只绑定完整条目，绝不绑定子路径
+  - R-3 条目之间永不重叠（`repo_path` 无祖先/后代关系）
+  - R-4 链接的 `local_path` 不得位于某个目录条目的 `local_path` 之内
+  - R-5 同一条目的所有链接指向同一目标、`kind` 一致
+- **指定跟踪链接**：可在任意 `out` 链接上执行「指定为 `in`」。此后条目跟踪该链接的变更，原 `in` 转为普通 `out`。纯元数据变更，不动文件系统；也用于把未绑定条目绑定起来
+- 移除 `in` 链接是允许的，条目变为未绑定（不删除内容）；`apply` 绝不自动决定哪个链接应成为 `in`
+- **禁止**：`in` 跟踪一个目录、却对该目录内的单个文件建 `out` 链接；条目嵌套（取代了旧的嵌套软链接功能）
+- 破坏性操作前先 git 提交，`git revert` 即回收站
 
 ### 2. 路径安全（SafeResolve）
 四层路径校验防止路径穿越：
@@ -243,6 +312,8 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 - `EvalSymlinks` 失败时仅 `fs.ErrNotExist` 可降级，其他错误直接拒绝
 - 预览文件限制 ≤ 10MB，最大 5 并发
 - 浏览文件限定在 AllowedRoots（$HOME + repo 根目录）
+- 链接的 `local_path` 同样限定在 AllowedRoots 内；拒绝位于 `repo.Path` 内部的自引用；拒绝把 `/`、`$HOME`、仓库根目录本身作为目标
+- 建链接前用 `util.ResolveNestedSymlink` 解析候选链，检测到环即拒绝
 
 ### 3. Git 认证加密
 - SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储在 SQLite
@@ -252,46 +323,59 @@ symlinks      — 软链接: id, repo_id(FK), relative_path(UNIQUE), target_path
 
 ### 4. 并发控制
 - 每个仓库独立互斥锁（map[string]*sync.Mutex）
+- 备份、回滚、以及所有会改文件系统的链接操作（adopt / add / repair / readopt / remove / switch / apply）都持同一把锁
 - 预览接口限流（channel semaphore，最大 5）
 - 定时备份跳过 backing_up 状态的仓库
 
 ### 5. 错误处理
 - 备份失败时 repo 状态设为 error（而非 active）
 - Git push 失败不阻断本地 commit，记录日志
-- 软链接创建失败时回滚 data/ 复制
+- adopt 失败按阶段回滚：mv 失败无副作用；建链接失败把内容移回原位置；写清单失败再撤销链接与移动
+- 跨文件系统（EXDEV）降级为 CopyFile + 校验大小 + Remove，校验通过前不删除源文件
+- 清单无法解析（如 Git 冲突）时阻止所有写入，返回 409 与原始错误
 
 ### 6. 自动备份调度
 - 基于 robfig/cron/v3，支持秒级 cron 表达式
 - 应用启动时从数据库加载启用了 auto_backup 的 repo
 - 配置更新时自动注册/注销调度任务
 
-### 7. 源文件回滚
-- 支持批量回滚（按 symlink_ids 过滤）和单文件恢复
+### 7. 内容回滚
+- 支持批量回滚（按 entry 过滤）和单文件恢复
+- 直接写回 `data/<repo_path>`；由于所有链接都指向 `data/`，本机路径自动反映回滚结果，无需映射回源文件路径
 - 回滚复制时保留文件权限（git mode → os.FileMode）
-- 使用 SymlinkResolver 将 data/ 路径映射回源文件路径
 - 回滚需要 repo 级互斥锁，禁止与备份并发
 
 ### 8. 文件编辑与保存
-- 预览和编辑操作目标为软链接指向的**源文件**（target_path）
-- 通过 PreviewService.ResolveSource 解析相对路径到源文件绝对路径
-- 保存时同时写入源文件和 data/ 目录（镜像一致性）
+- 预览和编辑的目标就是 `data/<repo_path>` —— 只写一次，不存在双写
+- `path` 参数始终是仓库相对路径，一律经 `util.SafeJoin` 校验
 - 保留原始文件权限（os.Stat → origMode → os.Chmod）
+- 「是否有新变更」用 `GET /repos/:id/changes`（`git status --porcelain data/`）表达，取代旧的 `is_new` 比对
 
-### 9. 嵌套软链接
-- 支持在目录 symlink 内部创建子级软链接（nested symlink）
-- 软链接链解析支持循环检测和深度限制（max 50）
-- 目录浏览时自动标记嵌套软链接类型和变更状态（is_new）
+### 9. 链接状态诊断与收敛
+- 逐链接状态：`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled` / `not_current`
+- `apply` 幂等收敛：先出 dry-run 计划（create / repair / skip / conflict / orphan）再执行，从不覆盖已占用路径
+- `replaced`（应用原子写把软链接换成真实文件）→「重新纳入」把新内容移入 `data/` 后重建链接
+- 一致性巡检覆盖 R-1..R-5，并探测 `data/` 内的软链接与未托管链接
 
-### 10. 系统托盘
+### 10. 多设备分发
+- 设备以稳定机器指纹标识（Linux `/etc/machine-id`、macOS `IOPlatformUUID`、Windows `MachineGuid`，兜底 `sha256(hostname+user)`）
+- 设备/条目/链接存放于仓库内 `manifest.json`，随 Git 传输
+- 换机流程：注册设备 → `apply` 重建链接 → `bulk` 批量分发
+- 移交条目：把新机器上的 `out` 链接 `switch` 提升为 `in`（纯元数据变更，不动文件系统）
+- 删除设备时，若它持有某条目唯一的 `in` 链接，自动提升剩下最早的启用 `out` 链接
+- `manifest.json` 原子写：`.tmp` → `fsync` → `os.Rename`；无法解析时阻止写入而非静默重写
+
+### 11. 系统托盘
 - macOS 菜单栏 / 系统托盘图标
 - 提供"打开 UI"、"启动/停止服务器"、"退出"操作
 - HTTP 服务器通过 servermgr 管理独立启停生命周期
 
 ## 文档规范
 
-- **功能变更必须同步更新文档**：所有功能新增、修改、删除，必须同步更新对应的需求文档（`REQUIREMENT.md`）、技术方案（`DESIGN.md`）和快速入门（`docs/quick-start.md`）
+- **功能变更必须同步更新文档**：所有功能新增、修改、删除，必须同步更新对应的需求文档（`REQUIREMENT.md`）、技术方案（`DESIGN.md`）、快速入门（`docs/quick-start.md`）、`README.md` 和本文件（`AGENTS.md`）
 - **文档更新必须双语同步**：所有文档更新，必须同时更新英文版（原始路径）和中文版（`docs/zh/` 下对应文件），保持中英文内容一致
 - 默认文档为英文，中文文档通过顶部链接引用
+- 中英文文档的章节编号与表格结构必须保持一致
 
 ## 代码规范
 
@@ -339,7 +423,8 @@ cd frontend && npx tsc --noEmit
 - 应用数据目录：`~/.config/backup-manager/`
 - 配置文件：`~/.config/backup-manager/config.json`（JSON 字段：`port`, `open_browser`, `theme`）
 - 加密密钥：`~/.config/backup-manager/master.key`
-- 数据库：`~/.config/backup-manager/backup-manager.db`
+- SQLite 数据库：`~/.config/backup-manager/backup-manager.db`（存 repos / repo_configs / repo_auths）
+- 仓库清单：`<repo-root>/.backup-manager/manifest.json`（存条目 / 链接 / 设备，随 Git 传输）
 - 默认端口：9800
 - 启动后自动打开浏览器
 
@@ -347,7 +432,15 @@ cd frontend && npx tsc --noEmit
 
 ```
 <repo-root>/
-├── .links/              # 软链接目录（结构与 data/ 复刻）
-├── data/                # 实际备份数据（结构与 .links/ 复刻）
+├── .backup-manager/
+│   └── manifest.json    # 设备 + 条目 + 链接（Git 跟踪，唯一事实来源）
+├── data/                # 真实内容 —— 唯一的内容存放处
 └── .git/                # Git 版本库
+```
+
+本机侧（每个链接都是指向仓库的软链接）：
+
+```
+~/Documents/notes.txt   ->  <repo>/data/documents/notes.txt   （in 链接，创建该条目）
+~/Desktop/notes.txt     ->  <repo>/data/documents/notes.txt   （out 链接，分发）
 ```

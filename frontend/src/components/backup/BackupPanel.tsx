@@ -81,7 +81,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const gitInitRepo = useAppStore((s) => s.gitInitRepo);
   const fetchBackupHistory = useAppStore((s) => s.fetchBackupHistory);
   const fetchCommitFiles = useAppStore((s) => s.fetchCommitFiles);
-  const rollbackSourceFiles = useAppStore((s) => s.rollbackSourceFiles);
+  const rollbackFiles = useAppStore((s) => s.rollbackFiles);
   const clearRollbackResult = useAppStore((s) => s.clearRollbackResult);
 
   const commitFileContent = useAppStore((s) => s.commitFileContent);
@@ -109,9 +109,9 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     commitHash: string;
     commitMessage: string;
     commitDate: string;
-    symlinkCount: number;
+    fileCount: number;
     isFull: boolean;
-    symlinkIDs?: string[];
+    paths?: string[];
   } | null>(null);
 
   // File-level preview and restore state
@@ -232,9 +232,10 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     }
   };
 
-  const handleSymlinkRollback = (
+  /** 单个文件回滚：新模型下回滚以文件（data/ 相对路径）为单位。 */
+  const handleSingleFileRollback = (
     commitHash: string,
-    symlinkID: string,
+    path: string,
     commitMessage: string,
     commitDate: string,
   ) => {
@@ -242,9 +243,9 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       commitHash,
       commitMessage,
       commitDate,
-      symlinkCount: 1,
+      fileCount: 1,
       isFull: false,
-      symlinkIDs: [symlinkID],
+      paths: [path],
     });
     setConfirmModalOpen(true);
   };
@@ -259,7 +260,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       commitHash,
       commitMessage,
       commitDate,
-      symlinkCount: count,
+      fileCount: count,
       isFull: true,
     });
     setConfirmModalOpen(true);
@@ -269,9 +270,9 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     if (!rollbackTarget) return;
 
     try {
-      await rollbackSourceFiles(repoId, {
+      await rollbackFiles(repoId, {
         commit_hash: rollbackTarget.commitHash,
-        symlink_ids: rollbackTarget.symlinkIDs,
+        paths: rollbackTarget.paths,
       });
       message.success('Rollback completed');
       fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
@@ -334,8 +335,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         try {
           await restoreCommitFile(repoId, commitHash, filePath);
           message.success(`File "${filePath}" restored successfully`);
-          // Refresh symlinks and history
-          useAppStore.getState().fetchSymlinks(repoId);
+          // 内容写回 data/，本机链接自动反映；只需刷新条目状态
+          useAppStore.getState().fetchEntries(repoId);
           fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
         } catch (err) {
           if (err instanceof Error) {
@@ -420,18 +421,9 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
     return null;
   };
 
-  const getUniqueSymlinks = (files: CommitFileChange[]) => {
-    const grouped = new Map<string, { id: string; type: string; files: CommitFileChange[] }>();
-    for (const file of files) {
-      const key = file.symlink_id || file.relative_path;
-      if (!grouped.has(key)) {
-        const symType = file.symlink_type || 'file';
-        grouped.set(key, { id: key, type: symType, files: [] });
-      }
-      grouped.get(key)!.files.push(file);
-    }
-    return Array.from(grouped.values());
-  };
+  /** 按变更文件分组：新模型下回滚以文件为单位，每行对应 data/ 下的一个路径。 */
+  const groupChangedFiles = (files: CommitFileChange[]) =>
+    files.map((file) => ({ id: file.relative_path, type: 'file', files: [file] }));
 
   const columns: ColumnsType<CommitEntry> = [
     {
@@ -489,7 +481,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       return <Empty description="No changed files in this commit" />;
     }
 
-    const symlinkGroups = getUniqueSymlinks(recordFiles);
+    const fileGroups = groupChangedFiles(recordFiles);
 
     return (
       <div style={{ padding: '8px 0' }}>
@@ -497,7 +489,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           Files changed ({recordFiles.length})
         </Typography.Text>
 
-        {symlinkGroups.map((group) => (
+        {fileGroups.map((group) => (
           <div
             key={group.id}
             style={{
@@ -539,7 +531,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                   size="small"
                   icon={<RollbackOutlined />}
                   onClick={() =>
-                    handleSymlinkRollback(
+                    handleSingleFileRollback(
                       record.hash,
                       group.id,
                       record.message,
@@ -626,7 +618,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           </div>
         ))}
 
-        {symlinkGroups.length > 1 && (
+        {fileGroups.length > 1 && (
           <div style={{ marginTop: 12, textAlign: 'right' }}>
             <Button
               type="primary"
@@ -638,11 +630,11 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                   record.hash,
                   record.message,
                   record.date,
-                  symlinkGroups.length,
+                  fileGroups.length,
                 )
               }
             >
-              Rollback All ({symlinkGroups.length})
+              Rollback All ({fileGroups.length})
             </Button>
           </div>
         )}
@@ -822,7 +814,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         commitHash={rollbackTarget?.commitHash || ''}
         commitMessage={rollbackTarget?.commitMessage || ''}
         commitDate={rollbackTarget?.commitDate || ''}
-        symlinkCount={rollbackTarget?.symlinkCount || 0}
+        fileCount={rollbackTarget?.fileCount || 0}
         isFullRollback={rollbackTarget?.isFull || false}
         onCancel={() => setConfirmModalOpen(false)}
         onConfirm={handleConfirmRollback}

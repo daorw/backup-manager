@@ -27,49 +27,100 @@ The main interface shows the status and basic information of all backup reposito
 
 ### Repository Detail View
 
-After opening a repository, you can see four main tabs: **Symlinks**, **Preview**, **Backup**, **Config**.
+After opening a repository, you can see four main tabs: **Browse**, **Entries**, **Backup**, **Config**.
 
-## Symlinks Tab
+## Browse Tab
 
-The Symlinks tab displays all files and directories backed up via symlinks.
+The Browse tab shows the repository's real content under `data/`, and lets you preview and edit it.
 
-![Symlinks Tab](assets/symlinks.png)
-
-### Features:
-- Tree view of symlink hierarchy
-- Click "+ Add Symlink" to add a new symlink
-- Click "Refresh" to refresh the list
-- View the original path of the source file
-
-### Adding a Symlink:
-
-Click the "+ Add Symlink" button in the Symlinks tab to open the Add Symlink dialog:
-
-![Add Symlink Dialog](assets/add-symlink.jpeg)
-
-1. **Source Path**: Enter or browse to select the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`)
-2. **Link Name**: Specify the relative path within `.links/` for storing the backup files (e.g. `opencode/opencode.json`). This defines the directory structure inside the repository.
-3. **File Browser**: Preview the currently backed-up files under the specified Link Name root directory.
-4. Click **Add** to confirm, or **Cancel** to discard.
-
-## Preview Tab
-
-The Preview tab allows you to directly view and edit backed up files.
-
-![Preview Tab](assets/preview.png)
+![Browse Tab](assets/preview.png)
 
 ### Features:
-- Browse the file structure
+- Browse the `data/` tree
+- Each node carries a badge: is an entry / not backed up / has link drift
 - Preview file content
-- Click "Edit" to edit the file
-- Click "Save" to save changes
+- Click "Edit" to edit, "Save" to write in place
 - View file metadata
 
 ### File Operations:
 1. Select a file in the left tree view
 2. Preview the file content on the right
 3. Click "Edit" to enter edit mode
-4. Click "Save" to save changes
+4. Click "Save" — because every link is a symlink to this same file, all of the entry's local paths update instantly
+
+## Entries Tab
+
+Every backed-up file or directory is an **entry**. An entry has **at most one `in` link** — the local path whose content was moved into the repository, which created the entry — and any number of **`out`** links that distribute the same entry to further local paths. `in` is simply a special case of `out`; both are symlinks to `data/<repo_path>`.
+
+Zero `in` links is allowed when initialising a new device: the entry is then *unbound* and the UI prompts you to designate one of its links as the `in` link.
+
+```
+   ● in   ~/.config/opencode/opencode.json   MacBook Pro   [tracked]
+   ● out  ~/Desktop/opencode.json            MacBook Pro   [track]  [remove]
+   ○ out  ~/work/opencode/opencode.json      MacBook-Pro-2  other device
+```
+
+### Features:
+- Entries grouped by `repo_path`, expandable to show every `in`/`out` link
+- Per-link state: `ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`
+- Link status per device, with which link is currently tracked
+- Consistency audit with one-click repair
+
+### Creating an Entry (adopt):
+
+Click "+ New Entry" in the Entries tab:
+
+![Add Entry Dialog](assets/add-symlink.jpeg)
+
+1. **Source Path**: Enter or browse to the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`)
+2. **Repo Path**: the logical path inside the repository (e.g. `opencode/opencode.json`). It defaults to the file name and must not overlap another entry's path.
+3. Read the warning: **the content will be moved into the repository and this location replaced by a symlink.**
+4. Click **Create**. The original location now holds the entry's `in` link.
+
+### Distributing an Entry (add an out link):
+
+Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several `out` links, on this machine or on others.
+
+### Designating the Tracked Link (`in`):
+
+Pick any `out` link and click **Set as tracked** to designate it as the new `in` link. The entry then tracks changes through that link, and the previous `in` link becomes an ordinary `out` link. This is a pure metadata change — no symlink is created, moved or removed — which makes it the natural way to hand an entry over to a new machine, and the way to bind an entry that has no `in` link yet.
+
+### Removing:
+
+| Action | Effect |
+|------|------|
+| Remove a link | Deletes just that local symlink. `data/` keeps the content |
+| `release` the entry | Removes the entry and its links but keeps the content in the repository as untracked data |
+| `move_back` | Moves the content back to a chosen local path, then removes the entry |
+| `purge` | Deletes the content as well. Requires typing the `repo_path`; the previous commit can restore it |
+
+## Multi-Device
+
+Devices, entries and links are stored inside the repository in `.backup-manager/manifest.json`, tracked by Git. That is what makes multi-device work: the database is per machine, but the manifest travels with `git clone` / `git push`.
+
+![Devices](assets/repository-dashboard.png)
+
+### Bringing a Repository onto a New Machine:
+1. Clone the repository (or point a new repo entry at the existing directory)
+2. Open it — the current machine's device is registered automatically, and every device's links are listed
+3. Click **Apply** — a dry-run plan appears (create / repair / skip / conflict / orphan)
+4. Confirm. Missing links are created, drifted ones repaired, occupied paths are only reported
+5. To put the files somewhere else, use **Bulk Link**: pick entries plus a local root directory
+
+### Handing an Entry Over:
+1. On the new machine, create an `out` link where you want the files
+2. Designate it with **Set as tracked** — it becomes the entry's `in` link and the entry now tracks changes through it
+3. Delete or detach the old device
+
+### Consistency Rules
+
+The system refuses anything that would break entry-level consistency:
+
+- An `in` link tracking a directory forbids an `out` link to a single file inside it
+- Entries never overlap — `docs` and `docs/vendor` cannot both be entries
+- A link's local path may not sit inside a directory entry's local path
+
+Choose a non-overlapping repo path instead (e.g. `projects/vendor` rather than `docs/vendor`).
 
 ## Backup Tab
 
@@ -90,9 +141,10 @@ The Backup tab displays backup history and backup control buttons.
 
 ### Rollback:
 - Select a commit from backup history to view changed files
-- Choose specific files or rollback all files to the historical version
+- Choose specific files or roll back all files to the historical version
 - Preview file contents at a specific commit before restoring
-- Rollback overwrites source files (requires user confirmation)
+- Rollback overwrites `data/` (requires user confirmation). Because every link is a symlink into `data/`, all local paths reflect the rollback immediately — no separate sync step
+- The tab also shows the number of uncommitted changes under `data/` as the "there is an update" indicator
 
 ### Backup History:
 - View the commit hash
@@ -132,7 +184,7 @@ Configure Git authentication information, and the danger zone.
 - Click "Clear" to delete saved authentication information
 
 ### Danger Zone ⚠️
-- **Delete Repository**: Remove the repository from database records. All filesystem data (symlinks, backup data, Git history) is preserved and can be recovered by re-creating a repo pointing to the same directory. Scheduled tasks are unregistered.
+- **Delete Repository**: Remove the repository from database records. All filesystem data (the manifest, backup data, Git history) is preserved and can be recovered by re-creating a repo pointing to the same directory. Scheduled tasks are unregistered.
 - **Back to Dashboard**: Return to the repository list
 
 ## Getting Started Workflow
@@ -140,14 +192,19 @@ Configure Git authentication information, and the danger zone.
 1. **Install & Run**: Download and start Backup Manager — a system tray icon appears
 2. **Open UI**: Click the tray icon and select "Open UI" to open the web interface
 3. **Create Repository**: Set up your first backup repository
-4. **Add Symlinks**: Specify the files/directories to back up
-5. **Configure Git**: Set up remote repository and authentication information
-6. **Run Backup**: Execute the first backup
-7. **Monitor Status**: View backup status and history
+4. **Create Entries**: Specify the files/directories to back up — their content moves into the repository and the original locations become `in` links
+5. **Distribute (optional)**: Add `out` links to make the same content available at further local paths
+6. **Configure Git**: Set up remote repository and authentication information
+7. **Run Backup**: Execute the first backup
+8. **Monitor Status**: View backup status and history
+9. **On another machine (optional)**: Clone the repo, open it, and click **Apply** to recreate that machine's links
 
 ## Best Practices
 
 - Start with a few important files
+- Prefer tracking a **directory** rather than an individual file when an application manages that file itself: apps that write config atomically (temp file + rename) replace the symlink with a real file. The UI flags this as `replaced` and offers one-click **Re-adopt**
+- Keep repository paths non-overlapping so entries stay unambiguous
+- Use `release` instead of `purge` when you only want to stop tracking
 - Use meaningful commit messages
 - Configure automatic backup for critical data
 - Regularly verify backup integrity
@@ -157,7 +214,14 @@ Configure Git authentication information, and the danger zone.
 
 ### Common Issues:
 - **Backup Failed**: Check Git configuration and authentication information
-- **Symlinks Not Displaying**: Verify file permissions and paths
+- **A Link Shows `missing`**: The local symlink was deleted. Click **Apply** to recreate it — the content in `data/` is safe
+- **A Link Shows `replaced`**: Something replaced the symlink with a real file. Use **Re-adopt** to move the new content into the repository and restore the link
+- **A Link Shows `dangling`**: The content is missing from the repository. Restore it from Git history via the Backup tab, or remove the link
+- **"Entry overlaps another entry"**: Two entries cannot nest. Pick a non-overlapping repo path (e.g. `projects/vendor` instead of `docs/vendor`)
+- **"Local path is inside a directory entry"**: An `out` link may not point inside a tracked directory. Move the target outside it, or track it as its own entry
+- **An entry shows "no `in` link"**: This is legal right after initialising a new device. Click **Set as tracked** on one of its `out` links to designate it, or add a new link
+- **You removed the `in` link**: The entry becomes *unbound* — no content is lost, and every other link keeps working. Designate another link, or use an entry-level action (`release` / `move_back` / `purge`)
+- **An entry has two `in` links**: Not allowed — only one entry owns the "tracked" role. Remove or re-designate one of them
 - **Remote Push Failed**: Ensure the remote repository exists and credentials are correct
 
 ### Getting Help:

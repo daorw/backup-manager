@@ -64,9 +64,9 @@ func isDirEmpty(path string) (bool, error) {
 	return false, err
 }
 
-// hasAllRepoDirs checks if the directory contains .links, data, and .git subdirectories.
+// hasAllRepoDirs 判断目录是否已是一个备份仓库（含 data 与 .git）。
 func hasAllRepoDirs(path string) bool {
-	for _, dir := range []string{".links", "data", ".git"} {
+	for _, dir := range []string{"data", ".git"} {
 		info, err := os.Stat(filepath.Join(path, dir))
 		if err != nil || !info.IsDir() {
 			return false
@@ -105,7 +105,7 @@ func (s *RepoService) Create(req *CreateRepoRequest) (*model.Repo, error) {
 		}
 
 		if hasAllRepoDirs(absPath) {
-			// Has .links, data, .git — existing backup repo, reuse it
+			// 已是备份仓库（含 data 与 .git），直接复用
 		} else {
 			// Check if directory is empty
 			empty, err := isDirEmpty(absPath)
@@ -128,26 +128,15 @@ func (s *RepoService) Create(req *CreateRepoRequest) (*model.Repo, error) {
 		return nil, fmt.Errorf("path already used by repository \"%s\": %s", existingRepo.Name, absPath)
 	}
 
-	// Ensure .links and data directories exist
-	for _, dir := range []string{".links", "data"} {
-		if err := os.MkdirAll(filepath.Join(absPath, dir), 0755); err != nil {
-			return nil, fmt.Errorf("failed to create %s directory: %w", dir, err)
-		}
+	// 确保 data 目录存在（内容唯一存放处）
+	if err := os.MkdirAll(filepath.Join(absPath, "data"), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
 	// Initialize git repo if not already initialized
 	if _, err := os.Stat(filepath.Join(absPath, ".git")); os.IsNotExist(err) {
 		if err := s.gitEngine.Init(absPath); err != nil {
 			return nil, fmt.Errorf("failed to init git: %w", err)
-		}
-	}
-
-	// Ensure .gitignore exists
-	gitignorePath := filepath.Join(absPath, ".gitignore")
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		content := "# Backup Manager managed files\n.links/\n"
-		if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("failed to create .gitignore: %w", err)
 		}
 	}
 
@@ -219,14 +208,6 @@ func (s *RepoService) GitInit(id string) error {
 	}
 	if err := s.gitEngine.Init(repo.Path); err != nil {
 		return fmt.Errorf("failed to initialize git repository: %w", err)
-	}
-	// Ensure .gitignore exists after init
-	gitignorePath := filepath.Join(repo.Path, ".gitignore")
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		content := "# Backup Manager managed files\n.links/\n"
-		if err := os.WriteFile(gitignorePath, []byte(content), 0644); err != nil {
-			return fmt.Errorf("failed to create .gitignore: %w", err)
-		}
 	}
 	return nil
 }

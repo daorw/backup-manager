@@ -12,6 +12,7 @@ import (
 
 	"backup-manager/internal/api"
 	"backup-manager/internal/api/handler"
+	"backup-manager/internal/entry"
 	"backup-manager/internal/git"
 	"backup-manager/internal/scheduler"
 	"backup-manager/internal/servermgr"
@@ -94,11 +95,11 @@ func main() {
 		return err
 	})
 
-	repoMu := service.NewRepoMutexManager()
+	repoMu := util.NewRepoMutexManager()
 	authSvc := service.NewAuthService(dataStore, keyManager)
-	symSvc := service.NewSymlinkService(dataStore)
-	previewSvc := service.NewPreviewService(dataStore)
-	backupSvc = service.NewBackupService(dataStore, gitEngine, symSvc, authSvc, repoMu)
+	entrySvc := entry.NewService(dataStore, gitEngine, repoMu)
+	contentSvc := service.NewContentService(dataStore, gitEngine, repoMu)
+	backupSvc = service.NewBackupService(dataStore, gitEngine, authSvc, repoMu)
 	rollbackSvc := service.NewRollbackService(dataStore, gitEngine, repoMu)
 	repoSvc := service.NewRepoService(dataStore, gitEngine, sched)
 	browserSvc := service.NewBrowserService(dataStore, homeDir)
@@ -112,9 +113,11 @@ func main() {
 
 	// Initialize handlers
 	repoHandler := handler.NewRepoHandler(repoSvc)
-	symlinkHandler := handler.NewSymlinkHandler(symSvc)
+	entryHandler := handler.NewEntryHandler(entrySvc)
+	linkHandler := handler.NewLinkHandler(entrySvc)
+	deviceHandler := handler.NewDeviceHandler(entrySvc)
 	browseHandler := handler.NewBrowseHandler(browserSvc)
-	previewHandler := handler.NewPreviewHandler(previewSvc)
+	contentHandler := handler.NewContentHandler(contentSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc)
 	authHandler := handler.NewAuthHandler(authSvc)
 	systemHandler := handler.NewSystemHandler()
@@ -123,9 +126,11 @@ func main() {
 	// Setup router
 	router := api.SetupRouter(
 		repoHandler,
-		symlinkHandler,
+		entryHandler,
+		linkHandler,
+		deviceHandler,
 		browseHandler,
-		previewHandler,
+		contentHandler,
 		backupHandler,
 		authHandler,
 		systemHandler,

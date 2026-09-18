@@ -47,12 +47,13 @@ Dev mode: Vite Dev Server (5173) proxies /api/* to Go backend (9800)
 └────────────────────────────────────────────────────────────┘
          │                          │
          ▼                          ▼
-   ┌──────────┐           ┌──────────────────┐
-    │  Source  │           │  Repository Root │
-    │  Files   │◀─symlink──│  ├─ .links/       │
-    │  (Any    │           │  ├─ data/         │
-    │   Path)  │────copy──▶│  └─ .git/         │
-                          └──────────────────┘
+   ┌──────────────┐        ┌──────────────────────────┐
+   │ Local Paths  │        │  Repository Root         │
+   │  (views)     │◀───────│  ├─ .backup-manager/     │
+   │  symlink ────┼───────▶│  │   └─ manifest.json    │
+   └──────────────┘        │  ├─ data/   (real files) │
+                           │  └─ .git/                │
+                           └──────────────────────────┘
 ```
 
 ### Architecture Core Principles
@@ -60,9 +61,10 @@ Dev mode: Vite Dev Server (5173) proxies /api/* to Go backend (9800)
 | Principle | Description |
 |------|----------|
 | **Full-stack Integrated** | All code compiled into a single binary, frontend embedded via embed.FS |
-| **Responsive API** | RESTful JSON API, stateless design (state persisted by SQLite) |
+| **Responsive API** | RESTful JSON API; repo-inherent state lives in SQLite, entry/link/device definitions live inside the repository (§9) |
 | **Path Safety First** | All user-input paths must pass through SafeResolve security validation function |
-| **Mirror Consistency** | `.links/` and `data/` always mirror each other (synchronized when adding/deleting symlinks) |
+| **Single Content Owner** | Content lives only in `data/`; a local path is a symlink view onto it — no mirror directory, no sync step (§9) |
+| **Entry-Level Consistency** | Links bind whole entries, never sub-paths; an `in` link is a special case of an `out` link (§9.3.3) |
 | **Auth Isolation** | Git auth info stored encrypted, only injected as environment variables during git operations |
 
 ## 3. Detailed Design
@@ -77,20 +79,40 @@ DELETE /api/v1/repos/:id                      → RepoHandler.Delete
 PUT    /api/v1/repos/:id/config               → RepoHandler.UpdateConfig  // ★ P0-1: Config Editing
 POST   /api/v1/repos/:id/git-init             → RepoHandler.GitInit
 
-POST   /api/v1/repos/:id/symlinks             → SymlinkHandler.Create
-GET    /api/v1/repos/:id/symlinks             → SymlinkHandler.List
-GET    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Get
-DELETE /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Delete
-PUT    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.UpdateTarget
-POST   /api/v1/repos/:id/symlinks/batch       → SymlinkHandler.BatchImport
-GET    /api/v1/repos/:id/symlinks/:linkId/entries?sub_path= → SymlinkHandler.BrowseDirEntries
-POST   /api/v1/repos/:id/symlinks/:linkId/nested → SymlinkHandler.AddNestedSymlink
+POST   /api/v1/repos/:id/entries/adopt          → EntryHandler.Adopt          // creates the entry + its `in` link (mv local → data/)
+GET    /api/v1/repos/:id/entries?device=&state= → EntryHandler.List
+GET    /api/v1/repos/:id/entries/:entryId       → EntryHandler.Get
+PATCH  /api/v1/repos/:id/entries/:entryId       → EntryHandler.Update
+POST   /api/v1/repos/:id/entries/:entryId/switch → EntryHandler.Switch        // promote an `out` link to `in`
+DELETE /api/v1/repos/:id/entries/:entryId       → EntryHandler.Delete
+
+GET    /api/v1/repos/:id/entries/:entryId/links           → LinkHandler.List
+POST   /api/v1/repos/:id/entries/:entryId/links           → LinkHandler.Create // adds an `out` link
+POST   /api/v1/repos/:id/links/bulk                       → LinkHandler.Bulk
+PATCH  /api/v1/repos/:id/entries/:entryId/links/:linkId   → LinkHandler.Update
+POST   /api/v1/repos/:id/entries/:entryId/links/:linkId/repair  → LinkHandler.Repair
+POST   /api/v1/repos/:id/entries/:entryId/links/:linkId/readopt → LinkHandler.Readopt
+POST   /api/v1/repos/:id/entries/:entryId/links/:linkId/remove  → LinkHandler.Remove
+
+GET    /api/v1/devices/current                  → DeviceHandler.Current
+GET    /api/v1/repos/:id/devices                → DeviceHandler.List
+POST   /api/v1/repos/:id/devices                → DeviceHandler.Register
+PATCH  /api/v1/repos/:id/devices/:fp            → DeviceHandler.Rename
+DELETE /api/v1/repos/:id/devices/:fp            → DeviceHandler.Delete
+GET    /api/v1/repos/:id/devices/:fp/links       → DeviceHandler.Links
+POST   /api/v1/repos/:id/devices/:fp/apply       → DeviceHandler.Apply
+POST   /api/v1/repos/:id/devices/:fp/detach      → DeviceHandler.Detach
+
+GET    /api/v1/repos/:id/consistency             → ConsistencyHandler.Audit
+POST   /api/v1/repos/:id/consistency/repair      → ConsistencyHandler.Repair
 
 GET    /api/v1/browse         ?path=...         → BrowseHandler.Browse       // ★ P0-2: Security Fix
 GET    /api/v1/browse/allowed-roots              → BrowseHandler.AllowedRoots
 
-GET    /api/v1/repos/:id/preview ?path=...        → PreviewHandler.Preview    // ★ P0-2: Security Fix
-PUT    /api/v1/repos/:id/save                     → PreviewHandler.Save
+GET    /api/v1/repos/:id/tree    ?path=...        → ContentHandler.Tree
+GET    /api/v1/repos/:id/preview ?path=...        → ContentHandler.Preview
+PUT    /api/v1/repos/:id/save                     → ContentHandler.Save
+GET    /api/v1/repos/:id/changes                  → ContentHandler.Changes
 
 POST   /api/v1/repos/:id/backup                   → BackupHandler.Trigger
 GET    /api/v1/repos/:id/backup/history?limit=&offset= → BackupHandler.History
@@ -159,31 +181,26 @@ func SafeResolve(allowedRoot, userPath string) (string, error) {
 | Encoding detection | Non-UTF-8 encoded files return a prompt |
 | Concurrency limit | Preview max 5 concurrent |
 
-### 3.4 Symlink Mirror Consistency (★ P0-5 Fix)
+### 3.4 Entry & Link Model (supersedes the P0-5 mirror-consistency design)
 
-When adding a symlink, **synchronously copy source file to data/**, ensuring `.links/` and `data/` are always consistent:
+The original P0-5 fix kept `.links/`, `data/`, and the source file consistent by copying. That duplication is removed by the entry/link model (§9): an **entry** owns the content, and every **link** (whether `in` or `out`) is the same thing — a symlink to `data/<repo_path>`.
 
 ```
-CREATE Symlink:
-  1. Validate sourcePath → SafeResolve
-  2. Compute relative path
-  3. os.Symlink(sourcePath → .links/<relPath>)
-  4. copyFile/copyDir(sourcePath → data/<relPath>)  ← sync copy
-  5. INSERT symlinks table
+ADOPT (creates the entry + its `in` link):
+  1. Validate local_path → SafeResolve
+  2. Compute repo_path
+  3. MOVE local_path → data/<repo_path>          (os.Rename, cross-fs degrade)
+  4. os.Symlink(data/<repo_path> → local_path)
+  5. Append {entry, link(type=in)} to .backup-manager/manifest.json, commit
 
-DELETE Symlink:
-  1. Delete .links/<relPath>
-  2. Delete data/<relPath>
-  3. Clean up empty directories
-  4. DELETE FROM symlinks
-
-UPDATE Symlink Target:
-  1. Delete old .links/ + data/ files
-  2. Create new symlink → copy new source file
-  3. Update database
+ADD OUT LINK (distribute; `in` is a special case of this):
+  1. Validate that the entry exists and data/<repo_path> exists
+  2. os.Symlink(data/<repo_path> → local_path)   (no content copied)
+  3. Append link(type=out) to the entry, commit
 ```
 
-Backup operation reduces to: `incremental detect source file changes → sync to data/ → git add -A → git commit → git push`
+There is no mirror directory and no copy step, so the backup operation reduces to: `git add -A → git commit → git push`.
+See §9 for the full design, including the consistency invariants that prevent an `out` link from binding a sub-path of a directory entry.
 
 ### 3.5 Scheduled Backup Scheduler (★ P0-3 Fix)
 
@@ -236,7 +253,17 @@ type GitAuth struct {
 
 ## 4. Data Storage
 
-### SQLite Table Schema
+There are **three separate stores**, each with its own file and its own reason to exist. They must not be confused with one another:
+
+| Data | File | Format | Why there |
+|------|------|------|------|
+| `repos`, `repo_configs`, `repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite (single binary file) | Machine-private: encrypted credentials, local repo paths, schedules. Must never be committed |
+| entries, links, devices | `<repo-root>/.backup-manager/manifest.json` | JSON, tracked by Git | Must travel across machines with `git clone` / `git push`. The SQLite file is per machine and cannot |
+| app settings | `~/.config/backup-manager/config.json` | JSON | Application-level settings, unrelated to any repo |
+
+### 4.1 SQLite Database (local, per machine)
+
+**File**: `~/.config/backup-manager/backup-manager.db` — a single SQLite binary file.
 
 ```sql
 CREATE TABLE repos (
@@ -270,24 +297,38 @@ CREATE TABLE repo_auths (
     updated_at          DATETIME DEFAULT (datetime('now')),
     FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
 );
-
-CREATE TABLE symlinks (
-    id              TEXT PRIMARY KEY,
-    repo_id         TEXT NOT NULL,
-    relative_path   TEXT NOT NULL,
-    target_path     TEXT NOT NULL,
-    type            TEXT NOT NULL,
-    file_size       INTEGER,
-    modified_at     DATETIME,
-    created_at      DATETIME DEFAULT (datetime('now')),
-    FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
-    UNIQUE(repo_id, relative_path)
-);
 ```
 
-### App Configuration
+That is the complete schema — three tables. There is **no** table for entries, links or devices: the old `symlinks` table was dropped (§9.17) and nothing replaced it. Those definitions deliberately live outside SQLite, in §4.2.
 
-Path: `~/.config/backup-manager/config.json`
+### 4.2 Repository Manifest (inside the repo, tracked by Git)
+
+**File**: `<repo-root>/.backup-manager/manifest.json` — a JSON file **inside the repository**, not in the SQLite database.
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-09-18T10:00:00Z",
+  "devices": [ { "fingerprint": "9f2c…", "name": "MacBook Pro", "hostname": "mbp.local",
+                 "os": "darwin", "last_seen_at": "2026-09-18T10:00:00Z" } ],
+  "entries": [ { "id": "e1a2…", "repo_path": "opencode/opencode.json", "kind": "file",
+                 "created_at": "2026-09-01T08:12:00Z",
+                 "links": [ { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+                              "local_path": "/Users/x/.config/opencode/opencode.json",
+                              "enabled": true, "created_at": "2026-09-01T08:12:00Z" } ] } ]
+}
+```
+
+Why entries/links/devices are **not** in SQLite — see §9.3.6:
+
+- The SQLite database lives in `~/.config/backup-manager/` and is therefore **per machine**. A definition stored there cannot reach a second machine.
+- The repository is the thing that gets cloned and pushed. Storing the definitions inside it makes the backup self-describing and lets a new machine discover every device's links with a plain `git clone`.
+- It also gets versioning, diffing, merging and transport for free — no separate sync mechanism to design.
+
+### 4.3 App Configuration
+
+**File**: `~/.config/backup-manager/config.json`
+
 ```json
 {
   "port": 9800,
@@ -311,9 +352,11 @@ backup-manager/
 │   │   ├── middleware.go
 │   │   └── handler/
 │   │       ├── repo.go
-│   │       ├── symlink.go
+│   │       ├── entry.go         # list / adopt / switch / delete an entry
+│   │       ├── link.go          # add / bulk / repair / remove a link
+│   │       ├── device.go        # current / register / rename / delete / apply
 │   │       ├── browse.go
-│   │       ├── preview.go
+│   │       ├── content.go       # tree / preview / save / changes
 │   │       ├── backup.go
 │   │       ├── auth.go
 │   │       ├── rollback.go
@@ -321,28 +364,30 @@ backup-manager/
 │   │       └── errors.go
 │   ├── model/
 │   │   ├── repo.go
-│   │   ├── symlink.go
+│   │   ├── link.go              # Entry, Link, Device, Manifest, LinkState
 │   │   └── auth.go
+│   ├── entry/                   # entry & link subsystem (§9)
+│   │   ├── manifest.go          # load / save / atomic write / R-1..R-5 validation
+│   │   ├── service.go           # Service wiring, repo mutex, manifest commit, helpers
+│   │   ├── entry_service.go     # adopt, list, remove (unlink / move_back / purge)
+│   │   ├── link_service.go      # add out link, bulk link, switch, repair, remove
+│   │   ├── device_service.go    # register, rename, delete, apply
+│   │   └── entry_state.go       # per-link state diagnosis + view building
 │   ├── service/
 │   │   ├── repo_service.go
-│   │   ├── symlink_service.go
 │   │   ├── backup_service.go
 │   │   ├── auth_service.go
 │   │   ├── browser_service.go
-│   │   ├── preview_service.go
-│   │   ├── rollback_service.go
-│   │   └── repo_mutex.go
+│   │   ├── content_service.go
+│   │   └── rollback_service.go
 │   ├── store/
 │   │   ├── db.go
 │   │   ├── store.go
 │   │   ├── repo_store.go
 │   │   ├── repo_config_store.go
-│   │   ├── repo_auth_store.go
-│   │   └── symlink_store.go
+│   │   └── repo_auth_store.go
 │   ├── git/
 │   │   └── git.go
-│   ├── resolver/
-│   │   └── symlink_resolver.go
 │   ├── scheduler/
 │   │   └── scheduler.go
 │   ├── servermgr/
@@ -351,6 +396,8 @@ backup-manager/
 │   └── util/
 │       ├── path.go          # SafeResolve security function
 │       ├── crypto.go        # AES-GCM encryption
+│       ├── device.go        # MachineFingerprint()
+│       ├── repo_mutex.go    # per-repo mutex shared by backup / rollback / links
 │       └── file.go          # File operation utilities
 ├── frontend/
 │   ├── package.json
@@ -384,219 +431,45 @@ backup-manager/
 | **P1-5** SafeResolve EvalSymlinks fallback security blind spot | Distinguish error types: fs.ErrNotExist can be downgraded, other errors rejected |
 | **P1-6** Missing error handling and user notification plan | Added complete error handling section: error classification, SSE notification, crash recovery, rollback mechanism |
 
-## 7. Preview & Edit Feature Design
+## 7. Preview & Edit
 
-### 7.1 Overview
+The mount model (§9) removes the source-vs-copy duality: content lives in `<repo>/data/`, and a local path is only a symlink into it. Preview and edit therefore operate on a single file — `data/<repo_path>` — with no dual write and no sync step.
 
-On the Preview page, users can directly preview and edit the **source file** (not the `data/` copy) pointed to by the symlink. When saving edits, it writes to both the source file and syncs to `data/` to maintain mirror consistency.
+| Operation | Target | Note |
+|------|------|------|
+| Preview | `<repo>/data/<repo_path>` | `repo_path` is the node path in the Browse tree |
+| Save | `<repo>/data/<repo_path>` | Written in place; the local mount reflects it immediately, because it is a symlink to the same inode |
+| Backup | `data/` | `git add -A` picks the edit up — no incremental sync involved |
 
-**Core change**: Preview reads from source file path (`symlink.TargetPath`) instead of `data/`.
-
-### 7.2 Backend Design
-
-#### 7.2.1 Store Layer — New Query Method
-
-Add a method to query symlink by `relative_path` in `internal/store/symlink_store.go`:
-
-```go
-func (s *Store) GetSymlinkByRelativePath(repoID, relativePath string) (*model.Symlink, error)
-```
-
-Utilizes the existing `UNIQUE(repo_id, relative_path)` constraint, no new index needed.
-
-#### 7.2.2 Service Layer — New PreviewService
-
-Create `internal/service/preview_service.go`, containing the following core methods:
-
-**ResolveSource** — resolves `relative_path` to the source file absolute path:
+### 7.1 API Contract
 
 ```
-Input: repoID, relPath = "docs/notes/readme.md"
-
-Match strategy (by priority):
-  1. Exact match: sym.RelativePath == relPath → return sym.TargetPath
-  2. Longest prefix: iterate directory-type symlinks,
-      check strings.HasPrefix(relPath, sym.RelativePath+"/")
-      → return filepath.Join(sym.TargetPath, suffix)
-  3. No match: return error
+GET  /api/v1/repos/:id/tree?path=          → list entries under data/<path>, each with mount badges
+GET  /api/v1/repos/:id/preview?path=       → {content, mime_type, size, text, truncated}
+PUT  /api/v1/repos/:id/save                → {path, content} → {file_size, modified_at}
+GET  /api/v1/repos/:id/changes             → {dirty, changes:[{status, path}]}  (git status --porcelain data/)
 ```
 
-**SaveFile** — saves edited file content to source file and syncs to `data/`:
+`path` is always relative to `data/` (never an absolute local path), which removes the old `ResolveSource` prefix-matching logic entirely.
 
-```
-Flow:
-  1. ResolveSource to get source file path
-  2. Verify it's not directory-type symlink
-  3. os.Stat to get original file permission mode
-  4. os.WriteFile(sourcePath, content, mode) → write to source file
-  5. os.Chmod(sourcePath, mode) → ensure permission not affected by umask
-  6. os.MkdirAll(filepath.Dir(dataPath), 0755)
-     os.WriteFile(dataPath, content, mode) → sync to data/
-     os.Chmod(dataPath, mode) → preserve permission in data/ too
-  7. store.UpdateSymlink → update file_size, modified_at
-```
+### 7.2 Constraints
 
-**API Contract**:
-
-```go
-// PUT /api/v1/repos/:id/save
-// Content-Type: application/json
-type SaveRequest struct {
-    Path    string `json:"path" binding:"required"`    // symlink relative path
-    Content string `json:"content" binding:"required"` // file content (UTF-8 text)
-}
-// Response: {"data": {"file_size": 1234, "modified_at": "2026-06-12T10:30:00Z"}}
-```
-
-Constraints:
 | Condition | Handling |
 |------|------|
-| Content > 10MB | 413 Request Entity Too Large |
-| Directory symlink | 400 Bad Request |
-| No matching symlink | 404 Not Found |
-| Source file has been deleted | 404 Not Found |
+| `path` escapes `data/` | `util.SafeJoin` rejects → 400 |
+| Content > 10 MB | 413 |
+| `path` is a directory | 400 |
+| `path` does not exist | 404 |
+| Concurrency | repo-level mutex for save; preview limited to 5 concurrent |
+| Permission preservation | read the original mode, write, then `Chmod` back |
 
-#### 7.2.3 Handler Layer — Refactor PreviewHandler
-
-Refactor `internal/api/handler/preview.go`:
-
-```go
-type PreviewHandler struct {
-    previewSvc *service.PreviewService
-    semaphore  chan struct{}     // Max 5 concurrent, shared between Preview and Save
-}
-```
-
-- **Preview method**: Rewritten to read from source file via `PreviewService.Preview(repoID, relPath)`
-- **Save method**: New, calls `PreviewService.SaveFile(repoID, path, content)`
-
-#### 7.2.4 Route Registration
-
-```go
-v1.GET("/repos/:id/preview", previewHandler.Preview)  // unchanged
-v1.PUT("/repos/:id/save", previewHandler.Save)         // added
-```
-
-#### 7.2.5 main.go Dependency Injection
-
-```go
-previewSvc := service.NewPreviewService(dataStore)      // added
-previewHandler := handler.NewPreviewHandler(previewSvc)  // refactored
-```
-
-### 7.3 Frontend Design
-
-#### 7.3.1 Type Definitions
-
-```typescript
-export interface SaveFileRequest {
-  path: string;
-  content: string;
-}
-
-export interface SaveFileResult {
-  file_size: number;
-  modified_at: string;
-}
-```
-
-#### 7.3.2 API Client
-
-```typescript
-export async function saveFile(repoId: string, req: SaveFileRequest): Promise<SaveFileResult> {
-  const { data } = await api.put<SaveFileResult>(`/repos/${repoId}/save`, req);
-  return data;
-}
-```
-
-#### 7.3.3 TextPreview Refactor
-
-- Added `editable`, `onContentChange`, `onSave`, `saving` props
-- View mode: existing `<pre>` read-only display + "Edit" button
-- Edit mode: `<textarea>` + "Save"/"Cancel" buttons
-- Truncated files disable edit button
-
-#### 7.3.4 MarkdownPreview Refactor
-
-- Added `editable`, `onContentChange`, `onSave`, `saving` props
-- Use Ant Design Tabs for Preview/Edit mode switching
-- Preview mode: render Markdown using react-markdown + remark-gfm; local references (images/docs) are rendered by browser default without path rewriting
-- Edit mode: Markdown source textarea
-- Switching tabs does not lose edit content
-
-#### 7.3.5 PreviewPanel Refactor
-
-- Added `editingContent` state for content being edited
-- Added `saving` state for saving in progress
-- `handleSave` calls `saveFile` API → refreshes preview → shows success
-
-### 7.4 Data Flow
-
-**Preview flow**:
-```
-User clicks file node → GET /preview?path=<relPath>
-  → PreviewService.ResolveSource → resolve to source file path
-  → Read content from source file → return {content, mime_type, size, text, truncated}
-  → Frontend renders TextPreview / MarkdownPreview / BinaryInfo
-```
-
-**Save flow**:
-```
-User edits content → clicks save → PUT /repos/:id/save {path, content}
-  → Validate: content ≤ 10MB, path not empty
-  → ResolveSource → resolve source file path
-  → os.WriteFile(sourcePath, content, origMode) → write to source file
-  → os.WriteFile(dataPath, content, origMode) → sync to data/
-  → UpdateSymlink → update metadata
-  → Return {file_size, modified_at}
-  → Frontend refreshes preview → shows "File saved successfully"
-```
-
-### 7.5 Boundary & Exception Handling
-
-| Scenario | Handling | Status Code |
-|------|----------|--------|
-| path is empty | Return error | 400 |
-| content is empty | Return error | 400 |
-| content > 10MB | Return size limit prompt | 413 |
-| No matching symlink | Return "no matching symlink" | 404 |
-| Target is directory symlink | Return "cannot save directory" | 400 |
-| Source file externally deleted | os.Stat fails | 404 |
-| Write source succeeds but data/ sync fails | Log error, source already updated no rollback | 200 (log warning) |
-| No write permission | os.WriteFile fails | 500 |
-
-### 7.6 Security Considerations
+### 7.3 Security
 
 | Risk | Protection |
-|------|----------|
-| Path traversal | Path comes from database (WHERE repo_id = ?), not directly user-constructed |
-| Writing binary files | Frontend truncated disables editing; backend content size validation |
-| Large content OOM | Content length ≤ 10MB |
-| Permission loss | Read original mode before write, Chmod to restore after write |
-
-### 7.7 Change Impact
-
-| Impact Point | Change | Impact Level |
-|--------|------|----------|
-| Preview read path | data/ → source file | ✅ Behavior change, meets requirements |
-| Preview response format | Unchanged | ✅ Compatible |
-| ListDirEntries | Still reads data/ | ✅ No modification needed |
-| Backup flow | Unchanged. After save mtime changes, next backup auto-detects | ✅ Compatible |
-| Rollback service | Unchanged. SymlinkResolver already handles correctly | ✅ Compatible |
-| SafeResolveFile(dataDir) | Preview no longer uses it | ⚠️ Remove one call |
-
-### 7.8 Testing Strategy
-
-**Unit tests**:
-- `PreviewService.ResolveSource`: exact match, prefix match, no match
-- `PreviewService.SaveFile`: metadata update after save, permission preservation, source file does not exist
-- Save Handler: content exceeds limit, directory symlink, invalid request format
-
-**Integration tests**:
-- File symlink preview → source file content correct
-- Directory symlink internal file preview → content correct
-- Edit save → re-preview → content updated
-- Concurrent save and backup → no data corruption
+|------|------|
+| Path traversal | `util.SafeJoin(dataDir, path)` on every request |
+| Binary content | Frontend disables editing when `truncated` or `text == false`; backend enforces the size limit |
+| OOM | Content length ≤ 10 MB |
 
 ## 8. System Tray Design
 
@@ -628,3 +501,788 @@ main()
   ├── srvMgr.Stop() → gracefully stops HTTP server
   └── Final cleanup (DB close, key manager destroy)
 ```
+
+## 9. Entry & Link Model — Clean-Slate Redesign
+
+> Implements Issue #4 (bidirectional symlink management + multi-device support).
+> **Supersedes §3.4 and the whole `/symlinks` API.** No backward compatibility with the old `symlinks` table, the `.links/` directory, or the copy-based backup flow — see §9.17.
+
+### 9.1 Why the Old Model Was Complex
+
+The previous design kept **three representations of the same file**: the source file, the `data/` copy, and the `.links/` symlink. Keeping them consistent required an invasive amount of machinery:
+
+| Machinery | Existed because |
+|------|------|
+| Incremental detection (mtime + size) | source and `data/` can drift |
+| `syncOneFile` / `syncDirectoryFiles` / `walkSourceDir` | re-copying the source into `data/` |
+| Mirror consistency in `.links/` | a third representation to keep in sync |
+| `SyncDeletedSource` | guessing whether a missing path meant "deleted source" or "deleted link" (a data-loss bug) |
+| `is_new` comparison | source ≠ `data/` |
+| Preview dual write (source **and** `data/`) | two writable copies |
+| `ResolveSource` longest-prefix matching | mapping a repo path back to a local path |
+| Nested-symlink special case | symlinks inside a source tree |
+
+The root cause is the duplication. This redesign removes it:
+
+> **Content lives in the repository. Local paths are only views onto it.**
+
+### 9.2 Design Principles
+
+| # | Principle | Consequence |
+|------|------|------|
+| **P-1** | Content has exactly one owner: `data/<repo_path>` | No drift, no sync, no comparison |
+| **P-2** | A local path is a **symlink** into `data/` | Writing through it writes the repository copy |
+| **P-3** | **`in` is a special case of `out`** | One link mechanism; the `in` role is the distinguished instance |
+| **P-4** | Links bind **whole entries**, never sub-paths | An entry and its links stay perfectly consistent |
+| **P-5** | Definitions live in the repository, tracked by Git | `<repo>/.backup-manager/manifest.json` is the single source of truth |
+| **P-6** | Git is the safety net | Every destructive operation is preceded by a commit |
+| **P-7** | Idempotent convergence, not incremental bookkeeping | `apply` diffs desired vs. actual state and converges |
+
+### 9.3 Core Model
+
+Two entities: **Entry** (the backed-up file/directory) and **Link** (an `in` or `out` view of it).
+
+#### 9.3.1 Entry
+
+```
+Entry:  repo_path = opencode/opencode.json   kind = file
+        content   = <repo>/data/opencode/opencode.json      ← the one and only copy
+```
+
+An **entry** is the unit of backup: one `repo_path` under `data/` plus every link that points at it. Entries are created by an `in` link (§9.4.1) and never overlap (§9.3.4 R-3).
+
+| Field | Description |
+|------|------|
+| `id` | stable short id, used by the API |
+| `repo_path` | path relative to `data/` — the global identity of the content |
+| `kind` | `file` \| `dir` — cached content kind |
+| `created_at` | |
+| `links` | the ordered list of links bound to this entry |
+
+#### 9.3.2 Link
+
+```
+   link.local_path                          entry.repo_path
+   /Users/x/.config/opencode/o.json   ⟷   opencode/opencode.json
+                  │
+                  └── symlink ──▶  <repo>/data/opencode/opencode.json
+```
+
+A **link** binds one local path to one entry. Its filesystem form is *always* the same: `local_path` is a symlink to `<repo>/data/<entry.repo_path>`.
+
+| Field | Description |
+|------|------|
+| `id` | stable short id |
+| `type` | **`in`** — the entry's primary/tracked link, **at most one** per entry<br>**`out`** — an additional distribution link, 0..N per entry |
+| `device` | fingerprint of the owning device |
+| `local_path` | absolute local path of the symlink |
+| `enabled` | disabled links are kept but skipped by `apply` |
+| `created_at` | |
+
+#### 9.3.3 `in` Is a Special Case of `out`
+
+This is the central simplification. Physically, an `in` link and an `out` link are **indistinguishable** — both are a symlink to `data/<repo_path>`. They differ only in role:
+
+| Aspect | `in` | `out` |
+|------|------|------|
+| Count per entry | **0 or 1** — normally exactly 1, 0 only while a new device is being initialised | 0..N |
+| Created by | `adopt` — it moves the source content into `data/`, or `switch` — promotion of an `out` link | `add link` — it only views already-existing content |
+| Semantics | the entry's **home / tracked** link | an additional distribution point |
+| Default tracked link | yes | no |
+| May be removed directly | yes, but it leaves the entry **unbound** (§9.9) | yes |
+| Default target of `move_back` | yes | only if explicitly chosen |
+
+Practical consequences:
+
+- **One implementation.** `createLink(entry, localPath, type)` serves both. The `in` flow is the `out` flow plus the preceding `mv` of the content.
+- **Any `out` link can be promoted to `in`** — a pure metadata change that does not touch the filesystem at all (§9.5).
+- **A machine with no `in` link still works.** An out-link on device B is functionally a full working copy of the entry.
+
+#### 9.3.4 Consistency Invariants
+
+Issue #4 requires that `in` and `out` links stay **completely consistent** with the backed-up file/directory: an `in` link tracking a directory must not be accompanied by an `out` link to a single file inside it. That rule is generalized here into five invariants:
+
+| # | Invariant | Enforced by |
+|------|------|------|
+| **R-1** | Each entry has **at most one** `in` link. Exactly one in normal operation; **zero** is legal while initialising a new device, where the entry is *unbound* until a link is designated | API, manifest validation, audit |
+| **R-2** | Every link of an entry binds **that entry's full `repo_path`** — never a path inside it | Structural: links can only be attached to an entry; the API does not accept sub-paths |
+| **R-3** | Entries **never overlap**: no `repo_path` is an ancestor or descendant of another's | `adopt` / rename validation → 409 |
+| **R-4** | A link's `local_path` must not lie **inside** a directory entry's `local_path` | Link creation validation → 409 |
+| **R-5** | All links of an entry are physically identical: same target `data/<repo_path>`, same `kind` | By construction (one target) + consistency audit (§9.8) |
+
+R-3 is the generalization of the Issue's rule: if an `in` link tracks `~/Documents` as a directory entry, then nothing inside it may be separately tracked or separately linked. Choose a non-overlapping `repo_path` instead (e.g. track `~/Projects/vendor` as `projects/vendor`, not as `docs/vendor`).
+
+R-4 is the literal rule: with `docs` adopted as a directory entry at `~/Documents`, an `out` link at `~/Desktop/notes/file.md` is refused.
+
+#### 9.3.5 Device
+
+A **device** is one machine that references the repository. It is metadata; links reference it by fingerprint.
+
+| Field | Description |
+|------|------|
+| `fingerprint` | stable machine id, `sha256("<GOOS>|<raw>")` hex — the device's primary key |
+| `name` | user-visible name, defaults to the hostname, renameable |
+| `hostname`, `os` | display metadata only |
+| `last_seen_at` | updated on every `apply` |
+
+Fingerprint sources, in order:
+
+| OS | Source | Fallback |
+|------|------|------|
+| Linux | `/etc/machine-id`, then `/var/lib/dbus/machine-id` | — |
+| macOS | `ioreg -rd1 -c IOPlatformExpertDevice` → `IOPlatformUUID` | — |
+| Windows | `reg query HKLM\SOFTWARE\Microsoft\Cryptography /v MachineGuid` | — |
+| any | — | `sha256(hostname + "|" + username)` |
+
+Only the hash is stored. It is cached at `~/.config/backup-manager/device.json`.
+
+#### 9.3.6 Repository Layout and Manifest
+
+```
+<repo-root>/
+├── .backup-manager/
+│   └── manifest.json      # devices + entries + links (git-tracked, source of truth)
+├── data/                  # real content, git-tracked — the only content store
+└── .git/
+```
+
+The manifest is grouped **by entry**, which is what makes R-2 and R-3 structurally evident — every link of an entry lives next to that entry, so a sub-path link cannot even be expressed.
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-09-18T10:00:00Z",
+  "devices": [
+    { "fingerprint": "9f2c1a4b7d8e0f31", "name": "MacBook Pro",
+      "hostname": "mbp.local", "os": "darwin",
+      "last_seen_at": "2026-09-18T10:00:00Z" }
+  ],
+  "entries": [
+    {
+      "id": "e1a2b3c4d5e6f708",
+      "repo_path": "opencode/opencode.json",
+      "kind": "file",
+      "created_at": "2026-09-01T08:12:00Z",
+      "links": [
+        { "id": "l1a2b3c4d5e6f708", "type": "in",
+          "device": "9f2c1a4b7d8e0f31",
+          "local_path": "/Users/x/.config/opencode/opencode.json",
+          "enabled": true, "created_at": "2026-09-01T08:12:00Z" },
+        { "id": "l2b3c4d5e6f70819", "type": "out",
+          "device": "9f2c1a4b7d8e0f31",
+          "local_path": "/Users/x/Desktop/opencode.json",
+          "enabled": true, "created_at": "2026-09-10T12:00:00Z" }
+      ]
+    },
+    {
+      "id": "e2b3c4d5e6f70819",
+      "repo_path": "docs/notes",
+      "kind": "dir",
+      "created_at": "2026-09-02T09:00:00Z",
+      "links": [
+        { "id": "l3c4d5e6f7081920", "type": "in",
+          "device": "9f2c1a4b7d8e0f31",
+          "local_path": "/Users/x/Documents/notes",
+          "enabled": true, "created_at": "2026-09-02T09:00:00Z" }
+      ]
+    }
+  ]
+}
+```
+
+| Rule | Detail |
+|------|------|
+| Source of truth | The manifest is authoritative. SQLite holds only `repos`, `repo_configs`, `repo_auths` — things inherently local to one machine |
+| Write | Every change rewrites the file and commits it immediately (`link: add out /Users/x/Desktop/opencode.json`). Writes are atomic: `manifest.json.tmp` → `fsync` → `os.Rename` |
+| Read | Loaded on repo open, cached in memory keyed by `repoID` + file mtime |
+| Transport | Living inside the repo, it travels with `git clone` / `git push`. A new machine learns every device's links at once |
+| Hand editing | Supported. Missing `id`s are assigned on load; unknown fields are preserved; an unparsable file blocks all writes instead of being silently rewritten |
+| Conflict | Git is the conflict resolver. A merge conflict surfaces as a normal Git conflict on this file; the app refuses to write until it is resolved |
+
+### 9.4 Creation Flows
+
+#### 9.4.1 Adopt — creates an entry and its `in` link
+
+```
+1. Validate local_path: exists, is NOT a symlink, parent writable, NOT inside repo.Path
+2. repo_path = user input, default filepath.Base(local_path)
+3. R-3 check: repo_path must not be an ancestor or descendant of any existing entry → 409
+4. data/<repo_path> must not already exist → 409
+5. If local_path is a directory, scan it for symlinks.
+     Any symlink found → refuse (it would drag content in from outside the repo and
+     break "content lives only in data/"), listing the offending paths.
+     Option `follow_symlinks: true` dereferences them instead.
+6. MOVE local_path → <repo>/data/<repo_path>
+     - try os.Rename; on EXDEV degrade to CopyFile + verify size + Remove
+7. Create the `in` link: local_path → <repo>/data/<repo_path>
+8. Append {entry, link(type=in)} to the manifest, commit
+```
+
+Failure rollback:
+
+| Failure point | Compensation |
+|------|------|
+| 6 fails | nothing moved — return the error |
+| 7 fails | move `data/<repo_path>` back to `local_path` |
+| 8 fails | remove the symlink, move `data/<repo_path>` back to `local_path` |
+
+#### 9.4.2 Add Link — creates an `out` link
+
+```
+1. Resolve the entry; it must exist. An `in` link is NOT required — this flow is
+   exactly how a freshly initialised device binds an entry that has none
+2. Validate local_path: does not exist, or is an empty directory
+3. R-4 check: local_path must not be inside any directory entry's local_path → 409
+4. local_path must not be inside repo.Path
+5. Ensure the parent directory of local_path exists
+6. Create the symlink: local_path → <repo>/data/<entry.repo_path>
+7. Append link(type=out) to the entry, commit
+```
+
+The same `repo_path` may carry many `out` links, on the same device or on different ones — that is the Issue's "distribute one backup to many locations".
+
+#### 9.4.3 Bulk Link — bringing a repository onto a machine
+
+```
+POST /api/v1/repos/:id/links/bulk  { local_root, entry_ids? }
+```
+
+Select one or more entries (or all) plus a local root directory; the service creates one `out` link per entry at `<local_root>/<repo_path>`. The R-4 check applies to `local_root`. This is the one-click "I just cloned this backup repo onto a new machine, give me my files back" operation.
+
+#### 9.4.4 Forbidden Shapes
+
+| Shape | Why forbidden | Error |
+|------|------|------|
+| An `out` link to a single file inside a directory entry | Breaks the Issue's complete-consistency rule (R-2, R-4) | 409 |
+| A nested entry whose `repo_path` is inside another entry's | Two owners for one subtree (R-3); this replaces the old `AddNestedSymlink` feature | 409 |
+| A link whose `local_path` is inside a directory entry's `local_path` | Ambiguous ownership (R-4) | 409 |
+| An entry with **two** `in` links | R-1 ("at most one") | rejected on load / audit error |
+
+> Zero `in` links is **not** a forbidden shape. Per R-1 it is the legal state of an entry whose content exists in `data/` (cloned or otherwise imported) while a new device is being initialised — an *unbound* entry (§9.7). The UI flags it and offers to designate one of its links as the `in` link.
+
+> Note the deliberate removal: the old `AddNestedSymlink` let a directory symlink contain links to unrelated locations. Under R-3 that is expressed by adopting the sub-content as its **own non-overlapping entry** instead (e.g. `projects/vendor` rather than `docs/vendor`).
+
+### 9.5 Switching the Tracked Link
+
+#### 9.5.1 What tracking means
+
+An entry tracks changes through its **tracked link**, which is its `in` link. The tracked link is the entry's designated working copy: the path the UI opens for "编辑", the path shown as the entry's primary location, the default source for `move_back`, and the anchor for "this entry has an update" attribution.
+
+The requirement is that **any `out` link can be designated as the new `in` link**. After that designation the entry tracks changes through the new link, and the previous `in` link becomes a plain `out` link.
+
+```
+Before:  in  ~/Documents/notes   ──  tracked
+         out ~/Desktop/notes
+         out ~/work/notes
+
+POST /entries/:id/switch { link_id: <~/work/notes> }
+
+After:   out ~/Documents/notes
+         out ~/Desktop/notes
+         in  ~/work/notes        ──  tracked   (replaces the whole previous in link)
+```
+
+Because `in` is a special case of `out`, **switching the tracked link is a pure metadata operation**: every link already points at the same inode, so nothing on the filesystem changes.
+
+An entry with no `in` link (unbound, R-1) has no tracked link; designating one both binds the entry and (re)establishes tracking.
+
+#### 9.5.2 Switch flow
+
+```
+POST /api/v1/repos/:id/entries/:entryId/switch  { link_id }
+
+1. Validate: the target link belongs to the entry and is enabled
+2. Previous `in` → type = "out"        (skipped when the entry is unbound)
+3. Target link    → type = "in"        (the entry now tracks this link)
+4. Rewrite the manifest, commit
+```
+
+No symlink is created, moved, or removed. This is why the Issue can offer "later switch the tracked `in` link over to another `out` link" at negligible cost.
+
+#### 9.5.3 Handover scenario
+
+```
+Device A is retired:
+  1. On device B, pick the out link at ~/dev/opencode/opencode.json
+     POST /entries/:id/switch { link_id: <B's link> }
+     → B's link becomes the entry's `in`; A's link becomes an `out` link
+  2. Delete device A (or detach it)
+     → A's link is removed from the manifest and its symlink is removed from A
+  The entry, its content in data/, and every other link are untouched.
+```
+
+### 9.6 Device Lifecycle
+
+#### 9.6.1 Register
+
+```
+1. Compute the current machine fingerprint
+2. Open the repo → parse the manifest
+3. If a device with this fingerprint exists → update last_seen_at
+   else → append a new device (name = hostname), commit
+4. Set it as the current device (in-memory session state; not persisted in the manifest)
+```
+
+Registration is implicit: it happens on repo open, on `apply`, and on any link creation. The UI never asks the user to "create a device" as a first step.
+
+#### 9.6.2 Apply — converging the machine
+
+```
+POST /api/v1/repos/:id/devices/:fingerprint/apply   { dry_run: true }
+
+1. Collect every link whose device is this fingerprint
+2. Diagnose each one against the filesystem (§9.7)
+3. Build a plan:
+     create  — missing      → create the symlink
+     repair  — wrong_target → recreate the symlink
+     skip    — ok / disabled / replaced
+     conflict— occupied     → report, never overwrite
+     orphan  — dangling     → report only (the entry content is missing from the repo)
+4. Return the plan (dry run) → the UI shows it in a confirmation dialog
+5. On confirmation, execute under the repo-level mutex and report per-item results
+```
+
+`apply` is idempotent and never touches content: it only creates, fixes, or reports symlinks.
+
+#### 9.6.3 Detach / Handover
+
+```
+POST /api/v1/repos/:id/devices/:fingerprint/detach  { mode: "unlink" | "keep" }
+```
+
+| Mode | Behavior |
+|------|------|
+| `unlink` | Remove every local symlink of the device. `data/` is untouched, so all content is preserved |
+| `keep` | Leave the filesystem alone and just stop managing (used when handing a machine over) |
+
+Detach does **not** delete the device entry — definitions stay in the manifest so re-attaching is one click.
+
+Deleting a device (`DELETE /devices/:fingerprint`) removes its link definitions. For every affected entry, if the deleted device held the `in` link, the oldest enabled remaining `out` link is **automatically promoted to `in`**, so tracking continues without manual intervention. If no other link remains, the entry is simply left **unbound** (zero `in` links) — a legal state per R-1, reported by the audit and surfaced in the UI with a one-click "designate an `in` link" action. A device's filesystem is never touched by its deletion. The current device cannot be deleted.
+
+### 9.7 Link State & Repair
+
+State is computed on demand from the filesystem; it is never persisted.
+
+| State | Condition | Offered action |
+|------|------|------|
+| `ok` | `local_path` is a symlink whose resolved target is `data/<entry.repo_path>` | — |
+| `missing` | `Lstat(local_path)` returns `ErrNotExist` | Create |
+| `wrong_target` | Symlink exists but points elsewhere | Repair |
+| `replaced` | `local_path` exists and is a **real** file/directory | Re-adopt (move the content into `data/` and recreate the link) or Remove the link |
+| `dangling` | Symlink exists but `data/<repo_path>` is missing from the repository | Roll back from Git history, or Remove |
+| `occupied` | Path is taken by an unrelated object and cannot be safely replaced | Manual resolution |
+| `disabled` | `enabled == false` | — |
+| `not_current` | Belongs to another device | Read-only display |
+
+> `replaced` deserves emphasis: applications that write configuration atomically (temp file + `rename`) replace the symlink with a real file. The UI surfaces this as `replaced` with a one-click **Re-adopt** that moves the new content into `data/` and restores the link. Guidance: prefer tracking **directories** rather than individual files when an application manages the file itself.
+
+> `dangling` is safe by construction: because content lives in Git, `git checkout <commit> -- data/<repo_path>` restores it. The UI links directly to the rollback view.
+
+**Entry-level state — `unbound`**: separately from the per-link states above, an entry may have **zero `in` links** (§9.3.4 R-1). This is a property of the entry, not of a link: the entry has no tracked link, so the UI shows a banner and offers either "designate an `out` link as the new `in`" (§9.5) or "create a link" (§9.4.2). It is the expected state right after initialising a new device, where the content already exists in `data/` but no local path has been bound to it yet. `apply` never resolves it automatically — only the user can decide which link should become the `in` link.
+
+### 9.8 Consistency Audit
+
+```
+GET /api/v1/repos/:id/consistency            # entry-level + link-level findings
+POST /api/v1/repos/:id/consistency/repair     # converge everything that can be converged
+```
+
+| Check | Finding code | Severity |
+|------|------|------|
+| Entry has **more than one** `in` link | `multiple_in` | error |
+| Entry has **no** `in` link (unbound) | `no_in_link` | warning — legal per R-1 (e.g. a new device that has not designated one yet); `apply` never resolves it automatically |
+| Two entries overlap (hand-edited manifest) | `overlapping_entries` | error |
+| A link's `local_path` sits inside a directory entry's `local_path` | `nested_link` | error |
+| A link does not resolve to its entry's `data/<repo_path>` | `link_drift` (+ the state from §9.7) | warning |
+| `data/<repo_path>` is missing from the repo for a live entry | `content_missing` | error |
+| A symlink exists **inside** `data/` | `symlink_in_data` | error — breaks "content lives only in `data/`" |
+| An unmanaged symlink pointing into `data/` is found while scanning the parent directories of registered links | `unmanaged_link` | warning (opt-in scan) |
+
+`unmanaged_link` is the direct detector for the Issue's forbidden shape: a link to a sub-path that was created outside the application. It cannot scan the whole filesystem, so it is scoped to the parent directories of registered links and reported as a warning rather than an error.
+
+### 9.9 Removing
+
+**Link level** — always safe:
+
+```
+POST /api/v1/repos/:id/entries/:entryId/links/:linkId/remove
+```
+
+Removes the local symlink and the link record. `data/` is untouched, so every other link of the entry keeps working.
+
+Removing an `in` link is allowed, but it leaves the entry **unbound** — no tracked link. The UI flags this and offers to designate another `out` link as the new `in` (§9.5); prefer `/switch` when handing tracking over, so there is no unbound window. The entry-level operations below are for the cases where the link should not exist at all.
+
+**Entry level:**
+
+```
+DELETE /api/v1/repos/:id/entries/:entryId?mode=...
+```
+
+| Mode | Behavior | Guard |
+|------|------|------|
+| `release` | Remove the entry record and all link records; **keep** `data/<repo_path>` as untracked content; remove the local symlinks of this device only | none — safe |
+| `unlink` | Remove only this device's local symlinks; the entry stays. If this device held the `in` link the entry becomes unbound — designate another link first if tracking must continue | R-1 (≤ 1) |
+| `move_back` | Move `data/<repo_path>` to the `local_path` of a chosen link, then remove the whole entry | Warn that the other links will dangle; requires confirmation |
+| `purge` | Delete `data/<repo_path>` **and** the whole entry | Requires typing the `repo_path` to confirm; warns that other devices' links will dangle and will be reported by their next `apply` |
+
+Every removal is preceded by a commit, so `git revert` is always available — **Git is the recycle bin**. There is no separate trash mechanism to design.
+
+### 9.10 Service & Store Layout
+
+```
+internal/
+├── entry/                        # new package — the whole subsystem
+│   ├── manifest.go               # load / save / atomic write / R-1..R-5 validation
+│   ├── service.go                # Service wiring, repo mutex, manifest commit, helpers
+│   ├── entry_service.go          # adopt, list, remove (unlink / move_back / purge)
+│   ├── link_service.go           # add out link, bulk link, switch, repair, remove
+│   ├── device_service.go         # register, rename, delete, apply
+│   ├── entry_state.go            # per-link state diagnosis + views (§9.7)
+│   └── entry_service_test.go
+├── model/
+│   ├── repo.go                   # unchanged
+│   ├── auth.go                   # unchanged
+│   └── link.go                   # new — Entry, Link, Device, Manifest, LinkState
+└── util/
+    ├── device.go                 # new — MachineFingerprint()
+    └── repo_mutex.go             # moved from service — shared by backup/rollback/links
+```
+
+SQLite tables after the redesign — all of them live in `~/.config/backup-manager/backup-manager.db`; the entry/link/device definitions live in the repo manifest instead (§4.2):
+
+```sql
+repos         — id, name, path, created_at, updated_at, last_backup_at, status   (unchanged)
+repo_configs  — repo_id(FK), remote_url, branch, auto_backup, ...                (unchanged)
+repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                      (unchanged)
+-- symlinks table: DROPPED
+```
+
+### 9.11 API
+
+**Entries**
+
+| Method | Path | Purpose |
+|------|------|------|
+| GET | `/api/v1/repos/:id/entries?device=&state=` | Entry list with links and states (`?group=device` for a per-device view) |
+| GET | `/api/v1/repos/:id/entries/:entryId` | Entry detail |
+| POST | `/api/v1/repos/:id/entries/adopt` | Create an entry + its `in` link: `{local_path, repo_path?, follow_symlinks?}` |
+| PATCH | `/api/v1/repos/:id/entries/:entryId` | `{repo_path?}` — rename; R-3 re-validated |
+| POST | `/api/v1/repos/:id/entries/:entryId/switch` | Designate an `out` link as the new `in` link: `{link_id}`. The entry then tracks changes through it; the previous `in` becomes a plain `out`. Metadata-only, and it also binds an unbound entry |
+| DELETE | `/api/v1/repos/:id/entries/:entryId?mode=` | `release` / `unlink` / `move_back` / `purge` |
+
+**Links**
+
+| Method | Path | Purpose |
+|------|------|------|
+| GET | `/api/v1/repos/:id/entries/:entryId/links` | Links of an entry with states |
+| POST | `/api/v1/repos/:id/entries/:entryId/links` | Add an `out` link: `{local_path, device?}` |
+| POST | `/api/v1/repos/:id/links/bulk` | Bulk `out` links: `{local_root, entry_ids?}` |
+| PATCH | `/api/v1/repos/:id/entries/:entryId/links/:linkId` | `{local_path?, enabled?}` |
+| POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/repair` | Recreate the symlink |
+| POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/readopt` | `replaced` → move the new content into `data/`, recreate the link |
+| POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/remove` | Remove one link |
+
+**Devices**
+
+| Method | Path | Purpose |
+|------|------|------|
+| GET | `/api/v1/devices/current` | Fingerprint / hostname / suggested name of the running machine |
+| GET | `/api/v1/repos/:id/devices` | Device list (`fingerprint`, name, `last_seen_at`, link count, `is_current`) |
+| POST | `/api/v1/repos/:id/devices` | Register / claim a device (`name`, optional `fingerprint`) |
+| PATCH | `/api/v1/repos/:id/devices/:fingerprint` | Rename a device |
+| DELETE | `/api/v1/repos/:id/devices/:fingerprint` | Delete a device (auto-promotes a new `in` link where needed) |
+| GET | `/api/v1/repos/:id/devices/:fingerprint/links` | This device's links with states |
+| POST | `/api/v1/repos/:id/devices/:fingerprint/apply` | Converge the machine (`dry_run` supported) |
+| POST | `/api/v1/repos/:id/devices/:fingerprint/detach` | Detach the machine |
+
+**Consistency**
+
+| Method | Path | Purpose |
+|------|------|------|
+| GET | `/api/v1/repos/:id/consistency` | Audit findings (§9.8) |
+| POST | `/api/v1/repos/:id/consistency/repair` | Converge everything convergable |
+
+**Content** (unchanged shape, simplified semantics — see §7)
+
+| Method | Path | Purpose |
+|------|------|------|
+| GET | `/api/v1/repos/:id/tree?path=` | Entries under `data/`, each with an entry badge and link count |
+| GET | `/api/v1/repos/:id/preview?path=` | File preview |
+| PUT | `/api/v1/repos/:id/save` | Save to `data/` |
+| GET | `/api/v1/repos/:id/changes` | `git status --porcelain data/` |
+
+Payloads:
+
+```go
+type Entry struct {
+    ID        string `json:"id"`
+    RepoID    string `json:"repo_id"`
+    RepoPath  string `json:"repo_path"`
+    Kind      string `json:"kind"` // file | dir
+    CreatedAt string `json:"created_at"`
+    Links     []Link `json:"links"`
+}
+
+type Link struct {
+    ID         string `json:"id"`
+    EntryID    string `json:"entry_id"`
+    Type       string `json:"type"`   // in | out
+    Device     string `json:"device"` // device fingerprint
+    DeviceName string `json:"device_name,omitempty"`
+    LocalPath  string `json:"local_path"`
+    Enabled    bool   `json:"enabled"`
+    Tracked    bool   `json:"tracked"`  // derived: type == "in"
+    IsCurrent  bool   `json:"is_current"` // derived: device == current fingerprint
+    CreatedAt  string `json:"created_at"`
+    State      string `json:"state"`
+    StateNote  string `json:"state_note,omitempty"`
+}
+
+type ApplyRequest struct {
+    DryRun  bool     `json:"dry_run"`
+    LinkIDs []string `json:"link_ids,omitempty"` // empty = all links of the device
+}
+
+type ApplyResult struct {
+    Device      string        `json:"device"`
+    Created     []LinkAction  `json:"created"`
+    Repaired    []LinkAction  `json:"repaired"`
+    Skipped     []LinkAction  `json:"skipped"`
+    Conflicts   []LinkAction  `json:"conflicts"`
+    Orphans     []LinkAction  `json:"orphans"`
+    Failed      []LinkAction  `json:"failed"`
+    DryRun      bool          `json:"dry_run"`
+    CompletedAt string        `json:"completed_at"`
+}
+```
+
+### 9.12 Frontend
+
+Repository detail tabs: **Browse** · **Entries** · **Backup** · **Config**.
+
+```
+components/entry/
+├── EntriesPanel.tsx          # tab root: device selector + entry tree + consistency banner
+├── DeviceSelector.tsx        # device dropdown, register / apply / detach
+├── EntryList.tsx             # entries grouped by repo_path, expandable to reveal links
+├── LinkRow.tsx               # one link: type badge (in/out), device, local path, state, actions
+├── LinkStateTag.tsx          # ok / missing / wrong_target / replaced / dangling / occupied
+├── AdoptModal.tsx            # create entry: local picker + repo_path editor + R-3 conflict hints
+│                             #   + "content will be moved into the repository" warning
+├── AddLinkModal.tsx          # add an out link: local path picker, R-4 hints
+├── BulkLinkModal.tsx         # pick many entries + a local root
+├── SwitchTrackedModal.tsx    # promote an out link to `in` (explains: metadata only, no filesystem change)
+├── ApplyPlanModal.tsx        # dry-run plan → confirm
+├── ConsistencyPanel.tsx      # audit findings with one-click repair
+└── RemoveEntryModal.tsx      # release / unlink / move_back / purge radio + guards
+```
+
+The list view is entry-centric, because that is what the invariants are about:
+
+```
+[Device: MacBook Pro (current) ▾]  [+ New Entry]  [Apply]  [Audit]
+────────────────────────────────────────────────────────────────────
+▾ opencode/opencode.json                             file   ✓ consistent
+    ● in   ~/.config/opencode/opencode.json   MacBook Pro    [tracked]  [remove]
+    ● out  ~/Desktop/opencode.json            MacBook Pro    [set as tracked]  [remove]
+    ○ out  ~/work/opencode/opencode.json      MacBook-Pro-2  other device
+▸ docs/notes                                          dir   ⚠ 1 link to repair
+▸ projects/vendor                                     dir   ⚠ no in link — [designate]
+```
+
+Every `out` link row carries a **Set as tracked** action (§9.5). An entry with no `in` link shows the `unbound` banner described in §9.7 rather than a per-link state.
+
+`components/files/FilesPanel.tsx` (Browse) renders the `data/` tree and badges each node: has entry / not an entry / has link drift. The `symlink/` components are deleted.
+
+Type additions in `frontend/src/types/index.ts`:
+
+```typescript
+export type LinkType = 'in' | 'out';
+export type EntryKind = 'file' | 'dir';
+export type LinkState =
+  | 'ok' | 'missing' | 'wrong_target' | 'replaced'
+  | 'dangling' | 'occupied' | 'disabled' | 'not_current';
+
+export interface Device {
+  fingerprint: string;
+  name: string;
+  hostname?: string;
+  os?: string;
+  is_current: boolean;
+  last_seen_at?: string | null;
+  link_count: number;
+}
+
+export interface Link {
+  id: string;
+  entry_id: string;
+  type: LinkType;
+  device: string;
+  device_name?: string;
+  local_path: string;
+  enabled: boolean;
+  tracked: boolean;
+  is_current: boolean;
+  created_at: string;
+  state: LinkState;
+  state_note?: string;
+}
+
+export interface Entry {
+  id: string;
+  repo_id: string;
+  repo_path: string;
+  kind: EntryKind;
+  created_at: string;
+  links: Link[];
+  unbound: boolean; // derived: no link has type === 'in' (§9.7)
+}
+```
+
+`api/client.ts` drops every symlink function and gains the entry, link, device and consistency functions.
+
+### 9.13 What This Deletes
+
+| Deleted | Replaced by |
+|------|------|
+| `internal/service/symlink_service.go` (~720 lines) | `internal/entry/entry_service.go` + `link_service.go` |
+| `internal/service/backup_service.go` sync half (`syncChangedFiles`, `syncOneFile`, `syncDirectoryFiles`, `walkSourceDir`, `cleanEmptyDataDirs`) | nothing — content is already in `data/` |
+| `SymlinkService.SyncDeletedSource` | nothing — the same class of data-loss bug cannot occur, because existence is decided by `data/`, not by a local path |
+| `internal/resolver/symlink_resolver.go` | nothing — rollback writes `data/` directly; every link reflects it automatically |
+| `internal/store/symlink_store.go`, `model/symlink.go` | `internal/entry/manifest.go`, `model/link.go` |
+| `.links/` and all mirror-consistency code | nothing — one representation |
+| `SymlinkHandler` (8 endpoints), including `nested` | `EntryHandler` + `DeviceHandler` |
+| `is_new` computation | `GET /repos/:id/changes` (`git status`) |
+| `PreviewService.ResolveSource` prefix matching | `path` is always repo-relative |
+| Preview dual write (source **and** `data/`) | a single write to `data/` |
+| `.gitignore` generation in `repo_service.go` | nothing — nothing needs ignoring |
+
+`BackupService.Trigger` reduces to:
+
+```
+1. repo-level mutex
+2. status = backing_up
+3. write the manifest (flush any pending definition change) and commit it if dirty
+4. git add -A
+5. git commit -m <message>
+6. optional git push  (failure does not block the local commit)
+7. last_backup_at = now; status = active (error on failure)
+```
+
+### 9.14 Security
+
+| Risk | Protection |
+|------|------|
+| `adopt` destroys the original file | Explicit confirmation: "the file will be moved into the repository and this location replaced by a symlink"; full rollback on every failure path; in the cross-filesystem path the source is removed only after the size is verified |
+| A link overwrites unrelated data | Adding a link refuses an existing non-empty path; `apply` never overwrites — `occupied` items are reported, not forced |
+| `purge` deletes content | Requires typing the `repo_path`; the previous commit restores it; every other link is reported before the operation |
+| Path traversal | `util.SafeResolve` / `util.SafeJoin` on every user path; local paths limited to AllowedRoots (`$HOME` + repo roots) |
+| Self reference | `local_path` inside `repo.Path` is rejected |
+| Dangerous targets | `/`, `$HOME`, and the repository root itself are rejected as `local_path` |
+| Symlink loops | A candidate chain is resolved with `util.ResolveNestedSymlink` before any link is created; cycles are rejected |
+| Adopting a tree that contains symlinks | Refused unless `follow_symlinks` is set (§9.4.1), so `data/` never contains a symlink pointing outside |
+| Hand-edited manifest | Validated on load against R-1..R-5; every path re-checked by `SafeResolve`; a malformed file blocks writes |
+| Concurrent changes | All filesystem-mutating operations hold the repo-level mutex from `RepoMutexManager` |
+| Manifest write tearing | `manifest.json.tmp` → `fsync` → `os.Rename` |
+
+### 9.15 Boundary & Exceptions
+
+| Scenario | Handling |
+|------|------|
+| `adopt` source is already a symlink | 400 — reject (avoids chained links) |
+| `adopt` source is inside `repo.Path` | 400 — reject |
+| `adopt` source is the repo itself or an ancestor | 400 — reject |
+| `adopt` source tree contains symlinks | 409 — refuse, listing them; `follow_symlinks: true` to dereference |
+| `repo_path` overlaps an existing entry | 409 (R-3) |
+| `data/<repo_path>` already exists | 409 |
+| `os.Rename` crosses filesystems | Degrade to `CopyFile` + size verify + `Remove` |
+| `mv` succeeded but link creation failed | Roll back: move the content back |
+| Link target holds a real file | 409 — ask the user to move it first |
+| Link target is a non-empty directory | 409 |
+| Link `local_path` inside a directory entry's `local_path` | 409 (R-4) |
+| Removing the `in` link directly | Allowed; the entry becomes `unbound` and the UI offers to designate another `out` link (§9.5) |
+| Deleting a device that holds an entry's only `in` link | Auto-promote the oldest enabled remaining `out` link; if none remains, the entry becomes `unbound` |
+| `data/<repo_path>` missing from the repo | `dangling`; `apply` reports it, never creates the link |
+| Manifest has an entry with **two** `in` links | Rejected on load with a precise error (R-1 is "at most one") |
+| Manifest has an entry with **zero** `in` links | Accepted — a legal `unbound` state, reported by the audit as a warning |
+| Adding an `out` link to an unbound entry | Allowed — this is how a new device binds an entry that has no `in` link yet |
+| Fingerprint unavailable | Degrade to `sha256(hostname+username)` with a warning; the user may name the device manually |
+| Manifest unparsable (Git conflict) | 409 with the raw error; all writes blocked until resolved |
+| Two machines edit the manifest | Git conflict, resolved by Git; the app never auto-merges |
+| Same `local_path` used by two links on one device | 409 |
+
+### 9.16 Testing
+
+**Unit** (`internal/entry/`):
+
+- Manifest: load / save / atomic write / missing file / malformed file / unknown fields preserved / id auto-assignment
+- Manifest validation: 2 `in` links rejected; **0 `in` links accepted as `unbound`**; overlapping entries and nested links rejected with the right error
+- `MachineFingerprint`: each platform branch + fallback determinism
+- Adopt: happy path, R-3 conflict, `data/` conflict, cross-filesystem fallback, rollback at each failure point, source tree containing a symlink
+- Add link: happy path, occupied target, non-empty directory, self-reference, R-4 violation, several `out` links for one entry
+- **`in` is a special case of `out`**: the two flows produce identical filesystem state, differing only in the `type` field
+- Switch: designating an `out` link as the new `in` demotes the previous `in` to `out`, and **no filesystem call is made** (assert with an instrumented FS or by checking mtimes)
+- Unbound → bound: an entry whose only links are all `out` accepts a `switch` that designates one of them as `in`
+- Removing the `in` link leaves the entry `unbound` and does not delete any content
+- Manifest round-trip of an unbound entry (0 `in` links) survives save/load unchanged
+- State diagnosis: all 8 states
+- Re-adopt after a simulated atomic write (replace the symlink with a real file)
+- Remove: link-level removal, entry-level `release` / `unlink` / `move_back` / `purge`, plus the guards
+- Device deletion auto-promoting a new `in` link
+- Consistency audit: one fixture per finding code
+
+**Integration**:
+
+- Adopt → edit through the `in` link → the change is immediately visible in `data/` → `git commit` captures it
+- Adopt → delete the `in` link's symlink → `data/` survives → state is `missing` → `apply` recreates it
+- One entry with three `out` links on one device → editing any of them produces exactly one change in `data/`
+- Switch tracked link to an out link → verify the manifest changed and the filesystem did not
+- Two-device simulation: build the manifest on A → clone → register device B → `bulk` → B's links match B's layout while `data/` is unchanged
+- Device A deleted while holding the only `in` link → B's out link is promoted and R-1 (≤ 1) holds; when A held the entry's only link at all, the entry becomes `unbound` instead
+- R-3/R-4 rejection paths at the HTTP layer (409 with a readable message)
+- `purge` then `git revert` → content restored
+- Concurrent `apply` and backup → no corruption
+
+### 9.17 Upgrade Behaviour (No Migration)
+
+Because backward compatibility is explicitly out of scope:
+
+| Item | Behaviour |
+|------|------|
+| `symlinks` table | Dropped on first start of the new version |
+| `.links/` directory | Deleted from existing repos on first open (a single `os.RemoveAll`) |
+| `data/` content | **Preserved untouched** — nothing holding user data is deleted |
+| `manifest.json` | Created empty (`{"version":1,"devices":[],"entries":[]}`) |
+| Re-establishing entries and links | `adopt` for each tracked file/directory, then `bulk` for distribution |
+| Recovering the old source paths | Not possible automatically — the old `target_path` values are discarded with the table |
+| Repos registered in SQLite | Kept; `repos` / `repo_configs` / `repo_auths` are unchanged |
+| Repo `.gitignore` | Left alone if present; no longer generated for new repos |
+
+### 9.18 Milestones
+
+| Milestone | Scope |
+|------|------|
+| M1 | `model/link.go`, `entry/manifest.go`, atomic write, R-1..R-5 validation, id assignment |
+| M2 | `util/device.go` (fingerprint) + device register/list/rename/delete (incl. `in`-link auto-promotion) |
+| M3 | Entry creation: adopt (mv, R-3 check, symlink scan, cross-filesystem degrade, rollback) |
+| M4 | Link creation: `out` links, R-4 check, bulk link, path safety |
+| M5 | `switch` (tracked-link promotion) + state diagnosis + `apply` (dry run + execution) + repair + re-adopt |
+| M6 | Removal: link-level, entry-level `release` / `unlink` / `move_back` / `purge`, guards, `detach` |
+| M7 | Consistency audit + repair |
+| M8 | Strip the old subsystem: delete `.links/`, `symlinks` table, sync machinery, resolver, symlink API; simplify `BackupService.Trigger` |
+| M9 | Content API simplification (§7) + `changes` endpoint |
+| M10 | Frontend: Entries tab, modals, badges, Browse integration |
+| M11 | Docs sync (all docs and READMEs, EN + ZH) |
+
+### 9.19 Deferred Items (not yet implemented)
+
+The main line above is implemented and verified. The following are deliberately postponed — they are additive and none of them changes the model:
+
+| Item | Why deferred |
+|------|------|
+| **Consistency audit** (`GET /repos/:id/consistency` + repair, §9.8) | The invariants are already enforced at write time by `validateManifest` (R-1/R-3/R-4), so the audit only adds detection for hand-edited or externally-created inconsistencies. No `consistency.go` was added yet |
+| **`readopt`** (recovering a `replaced` link) | `apply` already reports `replaced` as a conflict instead of overwriting it, which is the safe half. The automatic recovery is a separate action |
+| **`detach`** (device detach, §9.6.3) | Deleting a device already works; detach is the softer variant |
+| **Entry rename** (`PATCH /entries/:id`) | Requires re-pointing every existing symlink of the entry, so it is more than a metadata change |
+| Bulk-link UI, per-link enable/disable, consistency panel | Front-end conveniences; the APIs for the first two already exist |
+

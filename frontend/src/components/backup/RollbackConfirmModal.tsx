@@ -7,7 +7,7 @@ interface RollbackConfirmModalProps {
   commitHash: string;
   commitMessage: string;
   commitDate: string;
-  symlinkCount: number;
+  fileCount: number;
   isFullRollback: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -19,7 +19,7 @@ const RollbackConfirmModal: React.FC<RollbackConfirmModalProps> = ({
   commitHash,
   commitMessage,
   commitDate,
-  symlinkCount,
+  fileCount,
   isFullRollback,
   onCancel,
   onConfirm,
@@ -60,11 +60,11 @@ const RollbackConfirmModal: React.FC<RollbackConfirmModalProps> = ({
         <div style={{ marginTop: 4 }}>
           {isFullRollback ? (
             <Typography.Text>
-              All <strong>{symlinkCount}</strong> changed file(s) / symlink(s) will be rolled back
+              All <strong>{fileCount}</strong> changed file(s) will be rolled back
             </Typography.Text>
           ) : (
             <Typography.Text>
-              <strong>{symlinkCount}</strong> symlink(s) will be rolled back
+              <strong>{fileCount}</strong> file(s) will be rolled back
             </Typography.Text>
           )}
         </div>

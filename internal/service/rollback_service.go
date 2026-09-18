@@ -10,45 +10,40 @@ import (
 
 	"backup-manager/internal/git"
 	"backup-manager/internal/model"
-	"backup-manager/internal/resolver"
 	"backup-manager/internal/store"
 	"backup-manager/internal/util"
 )
 
-// CommitFileChange represents a file changed in a commit, presented
-// to the frontend for display and selection.
+// CommitFileChange 提交中变更的一个文件（路径相对 data/）。
 type CommitFileChange struct {
 	ChangeType   string `json:"change_type"`   // "A" | "M" | "D"
-	RelativePath string `json:"relative_path"` // Path relative to data/ (e.g., "notes/file.md")
-	SymlinkID    string `json:"symlink_id,omitempty"`
-	SymlinkType  string `json:"symlink_type,omitempty"` // "file" | "directory"
+	RelativePath string `json:"relative_path"` // 例如 "notes/file.md"
 }
 
-// RollbackRequest is the request payload for a rollback operation.
+// RollbackRequest 回滚入参。Paths 为空表示回滚该提交的全部变更。
 type RollbackRequest struct {
 	CommitHash string   `json:"commit_hash" binding:"required"`
-	SymlinkIDs []string `json:"symlink_ids"` // Empty means rollback all changed files
+	Paths      []string `json:"paths,omitempty"`
 }
 
-// RollbackResult contains the summary of a rollback operation.
+// RollbackResult 回滚结果汇总。
 type RollbackResult struct {
 	RepoID      string            `json:"repo_id"`
 	CommitHash  string            `json:"commit_hash"`
 	Total       int               `json:"total"`
 	Success     int               `json:"success"`
-	Skipped     int               `json:"skipped"`
 	Failed      int               `json:"failed"`
 	Failures    []RollbackFailure `json:"failures,omitempty"`
 	CompletedAt string            `json:"completed_at"`
 }
 
-// RollbackFailure records a single file's rollback failure.
+// RollbackFailure 单个文件回滚失败记录。
 type RollbackFailure struct {
 	RelativePath string `json:"relative_path"`
 	Error        string `json:"error"`
 }
 
-// CommitFileResult is the result of fetching a file from a commit.
+// CommitFileResult 提交中某个文件的内容。
 type CommitFileResult struct {
 	Content   string `json:"content,omitempty"`
 	MimeType  string `json:"mime_type"`
@@ -57,12 +52,7 @@ type CommitFileResult struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-// RestoreFileRequest is the request payload for restoring a single file.
-type RestoreFileRequest struct {
-	Path string `json:"path" binding:"required"`
-}
-
-// RestoreFileResult contains the result of restoring a single file.
+// RestoreFileResult 单文件恢复结果。
 type RestoreFileResult struct {
 	RelativePath string `json:"relative_path"`
 	Success      bool   `json:"success"`
@@ -71,89 +61,45 @@ type RestoreFileResult struct {
 
 const maxCommitFileSize = 10 * 1024 * 1024 // 10MB
 
-// RollbackService handles rollback operations: restoring source files
-// to the state they had in a historical Git commit.
+// RollbackService 负责把 data/ 恢复到历史提交的状态。
+//
+// 新模型下它非常简单：内容只存在于 data/，所有本机链接都指向 data/，
+// 因此回滚只需就地写回文件，本机全部路径自动反映结果。
 type RollbackService struct {
 	store     *store.Store
 	gitEngine *git.GitEngine
-	repoMu    *RepoMutexManager
+	repoMu    *util.RepoMutexManager
 }
 
-// NewRollbackService creates a new RollbackService.
-func NewRollbackService(s *store.Store, g *git.GitEngine, repoMu *RepoMutexManager) *RollbackService {
-	return &RollbackService{
-		store:     s,
-		gitEngine: g,
-		repoMu:    repoMu,
-	}
+// NewRollbackService 创建回滚服务。
+func NewRollbackService(s *store.Store, g *git.GitEngine, repoMu *util.RepoMutexManager) *RollbackService {
+	return &RollbackService{store: s, gitEngine: g, repoMu: repoMu}
 }
 
-// ListCommitFiles returns the list of files changed under data/ in the given commit,
-// matched against current symlinks. Used by the frontend to display what can be rolled back.
+// ListCommitFiles 返回提交中变更的文件列表，用于前端展示与选择。
 func (s *RollbackService) ListCommitFiles(repoID, commitHash string) ([]CommitFileChange, error) {
 	repo, err := s.store.GetRepo(repoID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Get changed files in commit (now includes change type)
-	changedFiles, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, commitHash)
+	changed, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, commitHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list changed files: %w", err)
 	}
 
-	// Load current symlinks
-	allSymlinks, err := s.store.ListSymlinks(repoID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build a lookup map: relative_path → symlink
-	symlinkMap := make(map[string]*model.Symlink)
-	for _, sym := range allSymlinks {
-		symlinkMap[sym.RelativePath] = sym
-	}
-
-	// Build the file change list
-	res := make([]CommitFileChange, 0, len(changedFiles))
-	for _, entry := range changedFiles {
-		relPath, ok := strings.CutPrefix(entry.Path, resolver.DataDirPrefix)
+	res := make([]CommitFileChange, 0, len(changed))
+	for _, c := range changed {
+		rel, ok := strings.CutPrefix(c.Path, git.DataDirName+"/")
 		if !ok {
 			continue
 		}
-
-		change := CommitFileChange{
-			ChangeType:   entry.ChangeType,
-			RelativePath: relPath,
-		}
-
-		// Match against symlinks
-		if sym, found := symlinkMap[relPath]; found {
-			change.SymlinkID = sym.ID
-			change.SymlinkType = string(sym.Type)
-		} else {
-			// Try prefix match for directories
-			for _, sym := range allSymlinks {
-				if sym.Type == model.SymlinkTypeDirectory &&
-					strings.HasPrefix(relPath, sym.RelativePath+"/") {
-					change.SymlinkID = sym.ID
-					change.SymlinkType = string(sym.Type)
-					break
-				}
-			}
-		}
-
-		res = append(res, change)
+		res = append(res, CommitFileChange{ChangeType: c.ChangeType, RelativePath: rel})
 	}
-
 	return res, nil
 }
 
-// Rollback restores source files to the state they had in the given commit.
-// If SymlinkIDs is non-empty, only those symlinks are rolled back.
-// Otherwise, all symlinks with changes in the commit are rolled back.
+// Rollback 把 data/ 下的文件恢复到指定提交的版本。
 func (s *RollbackService) Rollback(repoID string, req *RollbackRequest) (*RollbackResult, error) {
-	// Acquire per-repo mutex — mutual exclusion with backup operations
 	mu := s.repoMu.Get(repoID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -162,157 +108,34 @@ func (s *RollbackService) Rollback(repoID string, req *RollbackRequest) (*Rollba
 	if err != nil {
 		return nil, err
 	}
-
-	// Reject if repo is currently backing up
 	if repo.Status == model.RepoStatusBackingUp {
 		return nil, fmt.Errorf("cannot rollback while backup is in progress")
 	}
 
-	// Get changed files in the target commit
-	changedFileEntries, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, req.CommitHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list changed files: %w", err)
-	}
-
-	// Extract paths and deduplicate
-	changedPaths := make([]string, 0, len(changedFileEntries))
-	seen := make(map[string]struct{})
-	for _, entry := range changedFileEntries {
-		if _, ok := seen[entry.Path]; !ok {
-			seen[entry.Path] = struct{}{}
-			changedPaths = append(changedPaths, entry.Path)
+	paths := req.Paths
+	if len(paths) == 0 {
+		changed, err := s.gitEngine.GetChangedFilesInCommit(repo.Path, req.CommitHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list changed files: %w", err)
 		}
-	}
-
-	// Load current symlinks
-	allSymlinks, err := s.store.ListSymlinks(repoID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build resolver and resolve paths
-	resolver := resolver.NewSymlinkResolver(allSymlinks)
-	grouped := resolver.ResolveCommitFiles(changedPaths)
-
-	// Build rollback list (apply symlink_id filter if specified)
-	type rollbackItem struct {
-		symlink    *model.Symlink
-		targetPath string
-		gitRelPath string
-	}
-
-	var items []rollbackItem
-
-	if len(req.SymlinkIDs) > 0 {
-		// Filter by specified symlink IDs with ownership check
-		for _, sid := range req.SymlinkIDs {
-			sym, err := s.store.GetSymlink(sid)
-			if err != nil {
-				log.Printf("[rollback] symlink %s not found, skipping: %v", sid, err)
-				continue
-			}
-			if sym.RepoID != repoID {
-				log.Printf("[rollback] symlink %s belongs to repo %s, not %s, skipping",
-					sid, sym.RepoID, repoID)
-				continue
-			}
-			results, ok := grouped[sid]
-			if !ok {
-				continue
-			}
-			for _, r := range results {
-				items = append(items, rollbackItem{
-					symlink:    r.Symlink,
-					targetPath: r.TargetPath,
-					gitRelPath: r.GitRelPath,
-				})
-			}
-		}
-	} else {
-		// Rollback all
-		for _, results := range grouped {
-			for _, r := range results {
-				items = append(items, rollbackItem{
-					symlink:    r.Symlink,
-					targetPath: r.TargetPath,
-					gitRelPath: r.GitRelPath,
-				})
+		for _, c := range changed {
+			if rel, ok := strings.CutPrefix(c.Path, git.DataDirName+"/"); ok {
+				paths = append(paths, rel)
 			}
 		}
 	}
 
-	result := &RollbackResult{
-		RepoID:     repoID,
-		CommitHash: req.CommitHash,
-	}
-
-	// Track which symlinks have been updated for metadata refresh
-	updatedSymlinks := make(map[string]*model.Symlink)
-
-	for _, item := range items {
+	result := &RollbackResult{RepoID: repoID, CommitHash: req.CommitHash}
+	for _, p := range paths {
 		result.Total++
-
-		// Path safety check: ensure target is within symlink's allowed base
-		var base string
-		if item.symlink.Type == model.SymlinkTypeFile {
-			base = filepath.Dir(item.symlink.TargetPath)
-		} else {
-			base = item.symlink.TargetPath
-		}
-		validatedPath, err := safeRollbackTarget(base, item.targetPath)
-		if err != nil {
+		if err := s.restoreFromCommit(repo, req.CommitHash, p); err != nil {
 			result.Failed++
-			result.Failures = append(result.Failures, RollbackFailure{
-				RelativePath: item.gitRelPath,
-				Error:        fmt.Sprintf("path safety check failed: %v", err),
-			})
+			result.Failures = append(result.Failures, RollbackFailure{RelativePath: p, Error: err.Error()})
 			continue
 		}
-
-		// Get file mode from git for permission preservation
-		gitFilePath := git.DataDirName + "/" + item.gitRelPath
-		perm, err := s.gitEngine.GetCommitFileMode(repo.Path, req.CommitHash, gitFilePath)
-		if err != nil {
-			log.Printf("[rollback] failed to get file mode for %s: %v, using 0644", gitFilePath, err)
-			perm = 0644 // default fallback
-		}
-
-		// Stream write file content from git to source path
-		if err := s.gitEngine.WriteFileContentTo(
-			repo.Path, req.CommitHash, gitFilePath, validatedPath, perm,
-		); err != nil {
-			result.Failed++
-			result.Failures = append(result.Failures, RollbackFailure{
-				RelativePath: item.gitRelPath,
-				Error:        err.Error(),
-			})
-			continue
-		}
-
 		result.Success++
-
-		// Track symlinks that need metadata refresh
-		if _, ok := updatedSymlinks[item.symlink.ID]; !ok {
-			updatedSymlinks[item.symlink.ID] = item.symlink
-		}
 	}
 
-	// Update symlink metadata (file_size, modified_at) after successful rollback
-	for _, sym := range updatedSymlinks {
-		if sym.Type == model.SymlinkTypeFile {
-			info, err := os.Stat(sym.TargetPath)
-			if err == nil {
-				sym.FileSize = info.Size()
-				t := info.ModTime()
-				sym.ModifiedAt = &t
-				if updateErr := s.store.UpdateSymlink(sym); updateErr != nil {
-					log.Printf("[rollback] failed to update symlink %s metadata: %v", sym.ID, updateErr)
-				}
-			}
-		}
-	}
-
-	// Update repo's last backup time to indicate a rollback occurred
 	now := time.Now()
 	repo.UpdatedAt = now
 	if repo.Status == model.RepoStatusError {
@@ -321,65 +144,42 @@ func (s *RollbackService) Rollback(repoID string, req *RollbackRequest) (*Rollba
 	if err := s.store.UpdateRepo(repo); err != nil {
 		log.Printf("[rollback] failed to update repo: %v", err)
 	}
-
 	result.CompletedAt = now.Format(time.RFC3339)
-
 	return result, nil
 }
 
-// GetCommitFile retrieves a file's content from a specific commit for preview.
-// If the file exceeds maxCommitFileSize, only metadata is returned.
+// GetCommitFile 读取提交中某个文件的内容，用于回滚前预览。
 func (s *RollbackService) GetCommitFile(repoID, commitHash, relPath string) (*CommitFileResult, error) {
 	if relPath == "" {
 		return nil, fmt.Errorf("path is required")
 	}
-
-	cleanPath := filepath.Clean(relPath)
-	if strings.HasPrefix(cleanPath, ".") || filepath.IsAbs(cleanPath) {
-		return nil, fmt.Errorf("invalid path: %s", relPath)
+	clean, err := cleanRelPath(relPath)
+	if err != nil {
+		return nil, err
 	}
-
 	repo, err := s.store.GetRepo(repoID)
 	if err != nil {
 		return nil, err
 	}
 
-	gitFilePath := git.DataDirName + "/" + cleanPath
-
-	// Get file size first
+	gitFilePath := git.DataDirName + "/" + clean
 	size, err := s.gitEngine.GetCommitFileSize(repo.Path, commitHash, gitFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("file not found in commit: %w", err)
 	}
-
-	// If file exceeds max size, return metadata only (with truncated flag)
 	if size > maxCommitFileSize {
-		return &CommitFileResult{
-			Size:      size,
-			MimeType:  "application/octet-stream",
-			Text:      false,
-			Truncated: true,
-		}, nil
+		return &CommitFileResult{Size: size, MimeType: "application/octet-stream", Truncated: true}, nil
 	}
 
-	// Read file content from git
 	content, mimeType, isText, err := s.gitEngine.ReadFileContent(repo.Path, commitHash, gitFilePath, maxCommitFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file content: %w", err)
 	}
-
-	return &CommitFileResult{
-		Content:  content,
-		MimeType: mimeType,
-		Size:     size,
-		Text:     isText,
-	}, nil
+	return &CommitFileResult{Content: content, MimeType: mimeType, Size: size, Text: isText}, nil
 }
 
-// RestoreFile restores a single file from a commit back to its source location,
-// syncs to data/, and updates symlink metadata.
-func (s *RollbackService) RestoreFile(repoID, commitHash string, req *RestoreFileRequest) (*RestoreFileResult, error) {
-	// Acquire per-repo mutex — mutual exclusion with backup operations
+// RestoreFile 从提交中恢复单个文件到 data/。
+func (s *RollbackService) RestoreFile(repoID, commitHash, relPath string) (*RestoreFileResult, error) {
 	mu := s.repoMu.Get(repoID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -388,117 +188,46 @@ func (s *RollbackService) RestoreFile(repoID, commitHash string, req *RestoreFil
 	if err != nil {
 		return nil, err
 	}
-
-	// Reject if repo is currently backing up
 	if repo.Status == model.RepoStatusBackingUp {
 		return nil, fmt.Errorf("cannot restore while backup is in progress")
 	}
-
-	// Validate path
-	if req.Path == "" {
-		return nil, fmt.Errorf("path is required")
-	}
-	cleanPath := filepath.Clean(req.Path)
-	if strings.HasPrefix(cleanPath, ".") || filepath.IsAbs(cleanPath) {
-		return nil, fmt.Errorf("invalid path: %s", req.Path)
-	}
-
-	gitFilePath := git.DataDirName + "/" + cleanPath
-
-	// Find matching symlink via resolver
-	allSymlinks, err := s.store.ListSymlinks(repoID)
-	if err != nil {
+	if err := s.restoreFromCommit(repo, commitHash, relPath); err != nil {
 		return nil, err
 	}
-
-	resolver := resolver.NewSymlinkResolver(allSymlinks)
-	resolved, err := resolver.Resolve(gitFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("no matching symlink for %q: %w", req.Path, err)
-	}
-
-	// Path safety check: ensure target is within symlink's allowed base
-	var base string
-	if resolved.Symlink.Type == model.SymlinkTypeFile {
-		base = filepath.Dir(resolved.Symlink.TargetPath)
-	} else {
-		base = resolved.Symlink.TargetPath
-	}
-	validatedPath, err := safeRollbackTarget(base, resolved.TargetPath)
-	if err != nil {
-		return nil, fmt.Errorf("path safety check failed: %w", err)
-	}
-
-	// Get file mode from git for permission preservation
-	perm, err := s.gitEngine.GetCommitFileMode(repo.Path, commitHash, gitFilePath)
-	if err != nil {
-		log.Printf("[restore-file] failed to get file mode for %s: %v, using 0644", gitFilePath, err)
-		perm = 0644
-	}
-
-	// Stream write file content from git to source path
-	if err := s.gitEngine.WriteFileContentTo(repo.Path, commitHash, gitFilePath, validatedPath, perm); err != nil {
-		return nil, fmt.Errorf("failed to write file content: %w", err)
-	}
-
-	// Sync to data/ — CopyFile from source to data/
-	dataPath := filepath.Join(repo.Path, "data", resolved.GitRelPath)
-	if err := os.MkdirAll(filepath.Dir(dataPath), 0755); err != nil {
-		// Source file is already restored; data sync failure is logged but
-		// returned as an error so the user knows to expect a re-sync on next backup.
-		return nil, fmt.Errorf("file restored but failed to sync to data/: %w", err)
-	}
-	if err := util.CopyFile(validatedPath, dataPath); err != nil {
-		return nil, fmt.Errorf("file restored but failed to sync to data/: %w", err)
-	}
-
-	// Update symlink metadata
-	info, err := os.Stat(validatedPath)
-	if err == nil {
-		resolved.Symlink.FileSize = info.Size()
-		t := info.ModTime()
-		resolved.Symlink.ModifiedAt = &t
-		if updateErr := s.store.UpdateSymlink(resolved.Symlink); updateErr != nil {
-			log.Printf("[restore-file] failed to update symlink metadata: %v", updateErr)
-		}
-	}
-
 	return &RestoreFileResult{
-		RelativePath: resolved.GitRelPath,
+		RelativePath: relPath,
 		Success:      true,
 		RestoredAt:   time.Now().Format(time.RFC3339),
 	}, nil
 }
 
-// safeRollbackTarget verifies that the target path stays within the allowed base.
-// For file-type symlinks, base = filepath.Dir(sym.TargetPath).
-// For directory-type symlinks, base = sym.TargetPath.
-// It resolves symlinks in both base and target to prevent symlink-based escapes.
-func safeRollbackTarget(base, target string) (string, error) {
-	absBaseRaw, err := filepath.Abs(base)
+// restoreFromCommit 把 data/<relPath> 写成提交中的版本，保留原始权限。
+func (s *RollbackService) restoreFromCommit(repo *model.Repo, commitHash, relPath string) error {
+	clean, err := cleanRelPath(relPath)
 	if err != nil {
-		return "", err
+		return err
 	}
-	absTargetRaw, err := filepath.Abs(target)
+	gitFilePath := git.DataDirName + "/" + clean
+	dest, err := util.SafeJoin(filepath.Join(repo.Path, "data"), clean)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("path safety check failed: %w", err)
 	}
 
-	// Resolve symlinks to prevent escape via symlink manipulation
-	absBase, err := filepath.EvalSymlinks(absBaseRaw)
+	perm, err := s.gitEngine.GetCommitFileMode(repo.Path, commitHash, gitFilePath)
 	if err != nil {
-		// If base doesn't exist, use the unresolved path
-		absBase = absBaseRaw
+		perm = 0644
 	}
-	absTarget, err := filepath.EvalSymlinks(absTargetRaw)
-	if err != nil {
-		// If target doesn't exist, use the unresolved path
-		absTarget = absTargetRaw
+	if err := s.gitEngine.WriteFileContentTo(repo.Path, commitHash, gitFilePath, dest, perm); err != nil {
+		return err
 	}
+	return os.Chmod(dest, perm)
+}
 
-	if !strings.HasPrefix(absTarget, absBase+string(filepath.Separator)) &&
-		absTarget != absBase {
-		return "", fmt.Errorf("rollback target %q escapes base %q", target, base)
+// cleanRelPath 校验并规范相对路径，拒绝绝对路径与向上穿越。
+func cleanRelPath(p string) (string, error) {
+	clean := filepath.ToSlash(filepath.Clean(p))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+		return "", fmt.Errorf("invalid path: %s", p)
 	}
-	return absTarget, nil
+	return clean, nil
 }

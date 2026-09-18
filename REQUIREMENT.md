@@ -15,7 +15,7 @@
 
 **Reverse Tracking Model**: Contrary to `.gitignore`'s "exclusion mode", users proactively specify which files/directories need to be tracked and backed up; unspecified files are automatically ignored. Similar to a whitelist system.
 
-**Symlink Aggregation**: Inside a backup repository (repo) created by the user, symlinks are used to "point to" source files, centrally managed under the `.links/` directory. During actual backup, the system syncs the content of the source files pointed to by the symlinks to the `data/` directory, which is then version-controlled via Git.
+**Entry & Link Aggregation**: A backup repository (repo) holds the real content under `data/`. An **entry** is one backed-up file or directory at `data/<repo_path>`. An **`in` link** is the local path whose content was moved into that entry (it creates the entry); **`out` links** distribute the same entry to further local paths. Every link is a symlink to `data/<repo_path>`, so `in` is simply a special case of `out` — one mechanism, two roles.
 
 **Unified Frontend and Backend**: The system adopts a unified frontend-backend architecture, running as a single process with one-click startup, eliminating the need to deploy frontend and backend services separately.
 
@@ -41,36 +41,57 @@
 | FR-3 | Delete Backup Repository | Delete an existing backup repository (only removes database records, preserves filesystem data) | P1 |
 | FR-4 | Edit Repository Config | Visually edit repository configuration: remote URL, branch, Git username/email, scheduled backup toggle and interval | P0 |
 
-### 3.2 Symlink Management (.links/ directory)
+### 3.2 Entry & Link Management (data/)
+
+An **entry** is one backed-up file/directory at `data/<repo_path>`. Links bind a local path to an entry: **at most one `in` link** (normally exactly one — it creates the entry by moving content in; zero is allowed while a new device is being initialised) and **0..N `out` links** (pure distribution). An `in` link is a special case of an `out` link.
+
+Any `out` link can be **designated as the new `in` link**. After that designation the entry tracks changes through the new link, and the previous `in` link becomes an ordinary `out` link.
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-5 | Add Symlink | User selects source files/directories via UI, automatically creates corresponding symlinks under `.links/` and copies source files to `data/` | P0 |
-| FR-6 | View Symlink List | Display all symlinks under `.links/` directory in a tree structure | P0 |
-| FR-7 | Delete Symlink | Delete a specified symlink and synchronously remove the corresponding file in `data/` | P0 |
-| FR-8 | Modify Symlink Target | Change the source file/directory path that the symlink points to | P1 |
-| FR-9 | Batch Import Symlinks | Support batch selection of multiple source files/directories to add symlinks, with automatic rollback on partial failure | P1 |
-| FR-10 | Clean Up Deleted Source Files | Detect symlinks whose source files have been deleted, synchronously clean up corresponding files in `data/` and generate a Git commit | P2 |
-| FR-11 | Nested Symlinks | Add child symlinks within directory-type symlinks, with cycle detection and depth limiting | P2 |
+| FR-5 | Create Entry (Adopt) | User selects a local file/directory via UI; its content is **moved** into `data/<repo_path>` and the original location is replaced by a symlink — the entry's `in` link | P0 |
+| FR-6 | View Entry & Link List | Display all entries grouped by `repo_path`, each expandable to show its `in`/`out` links, the owning device, and the link state. Entries with no `in` link are flagged as *unbound* | P0 |
+| FR-7 | Add Out Link | Distribute an entry to another local path by creating a symlink to `data/<repo_path>`; multiple `out` links per entry are allowed, and an entry that has no `in` link yet may still receive one (this is how a new device binds an entry) | P0 |
+| FR-8 | Designate the Tracked Link (`in`) | From any `out` link, designate it as the new `in` link. The entry then tracks changes through it and the previous `in` link becomes an ordinary `out` link. A metadata-only change: no symlink is created, moved or removed. The same action recovers an *unbound* entry (one that legally has no `in` link yet, e.g. on a freshly initialised device) — the UI flags such entries and offers to designate one of their links | P0 |
+| FR-9 | Bulk Link | Pick multiple entries plus one local root directory and create one `out` link per entry at `<local_root>/<repo_path>` | P1 |
+| FR-10 | Link State Diagnosis & Repair | Diagnose each link (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled`) and offer create / repair / re-adopt | P0 |
+| FR-11 | Consistency Audit | Verify the invariants (**at most one `in` per entry**, reporting an entry with none as `no_in_link` warning; links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`) and report unmanaged links; one-click repair for everything convergable | P1 |
+| FR-25 | Remove Link / Entry | Remove a single link (safe), or remove an entry via `release` (keep content in the repo, untracked) / `unlink` (this device only) / `move_back` (content returns to a chosen local path) / `purge` (delete the content) | P0 |
 
-### 3.3 File Preview and Editing
+**Consistency rule (must hold)**: `in` and `out` links stay completely consistent with the backed-up file/directory. If an `in` link tracks a directory, no `out` link may be created for a single file inside that directory. Consequently entries never overlap, and a link is always bound to a whole entry.
+
+**Cardinality rule (must hold)**: an entry has **at most one** `in` link. Exactly one in normal operation; zero only while a new device is being initialised, where the entry is *unbound* until the user designates one. `out` links are unbounded (0..N).
+
+### 3.3 Multi-Device Management
+
+A **device** is one machine referencing the repository, identified by a stable machine fingerprint. Device is metadata; links are its child data.
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-12 | Plain Text File Preview and Edit | View and edit plain text source file contents in the UI (e.g., .txt, .log, .json, .yaml, .py, etc.), with save-to-source-file support. The operation targets the source file pointed to by the symlink. | P0 |
-| FR-13 | Markdown Rendered Preview and Edit | Render and display Markdown source files (.md) using react-markdown + remark-gfm. Supports toggling between edit mode and preview mode, saving edits to the source file. The operation targets the source file pointed to by the symlink. Local references (images/docs) are rendered by browser default without path rewriting. | P0 |
+| FR-26 | Device Registration | Detect the current machine's fingerprint, register it on the repo automatically (name defaults to the hostname, renameable); list all devices with their link counts | P0 |
+| FR-27 | Apply Device | Converge this machine: show a dry-run plan (create / repair / skip / conflict / orphan) and execute it after confirmation. Never overwrites an occupied path | P0 |
+| FR-28 | Detach Device | Remove this device's local symlinks (`unlink`) or just stop managing them (`keep`). `data/` is never touched | P1 |
+| FR-29 | Delete Device | Delete a device's link definitions; if it held an entry's `in` link, automatically promote the oldest enabled remaining `out` link so tracking continues. If no other link remains, the entry becomes *unbound* (legal per the cardinality rule) and is reported by the audit | P1 |
+
+### 3.4 File Preview and Editing
+
+| ID | Feature | Description | Priority |
+|----|------|------|--------|
+| FR-12 | Plain Text File Preview and Edit | View and edit plain text content in the UI (e.g., .txt, .log, .json, .yaml, .py, etc.), with save support. The operation targets `data/<repo_path>`; every link reflects the change immediately because it is a symlink to that same file. | P0 |
+| FR-13 | Markdown Rendered Preview and Edit | Render and display Markdown files (.md) using react-markdown + remark-gfm. Supports toggling between edit mode and preview mode, saving edits to `data/<repo_path>`. Local references (images/docs) are rendered by browser default without path rewriting. | P0 |
 | FR-14 | Binary File Identification | Display file type information and size for non-text files, without attempting to preview content | P2 |
 
-### 3.4 Backup Execution
+### 3.5 Backup Execution
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-15 | Execute Backup | Manually trigger a backup operation: incremental detection (mtime+size) → sync changes to `data/` → `git add` → `git commit` → (optional) `git push`, with progress display | P0 |
+| FR-15 | Execute Backup | Manually trigger a backup: flush any pending manifest change → `git add -A` → `git commit` → (optional) `git push`. No incremental sync is involved, because content already lives in `data/` | P0 |
 | FR-16 | Scheduled/Auto Backup | Automatically execute backups at scheduled times based on configured cron expression, auto-load enabled repositories on application startup | P1 |
 | FR-17 | View Backup History | View the repository's Git commit history with pagination support | P1 |
-| FR-18 | Source File Rollback | Select a historical commit version and restore source files to the version in the specified commit. Supports full rollback, selective rollback by symlink, and single-file restore. Commit file content can be previewed before rollback. | P1 |
+| FR-18 | Content Rollback | Select a historical commit and restore `data/` to that version. Supports full rollback, selective rollback by entry, and single-file restore; commit file content can be previewed before rollback. Because every link points into `data/`, all local paths reflect the rollback immediately | P1 |
+| FR-30 | Uncommitted Change Indicator | Show the number of uncommitted changes under `data/` (from `git status`) as the "this entry has an update" signal | P2 |
 
-### 3.5 Configuration Management
+### 3.6 Configuration Management
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
@@ -78,12 +99,12 @@
 | FR-20 | Git Authentication Config | Configure authentication information required for Git operations (SSH private key or HTTPS username/password), stored encrypted in SQLite | P1 |
 | FR-21 | Application Global Settings | Application-level basic settings (port number, theme, whether to auto-open browser) | P1 |
 
-### 3.6 System Management
+### 3.7 System Management
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
 | FR-22 | Application Start/Stop | One-click start and stop of the entire application, auto-open browser after startup. System tray icon provides "Open UI", "Start/Stop Server", and "Quit" controls. | P0 |
-| FR-23 | Local File Browser | Safely browse the local filesystem for selecting symlink source files and previewing files, limited to the user's home directory and repo root directory | P0 |
+| FR-23 | Local File Browser | Safely browse the local filesystem for selecting entry sources and link target paths, limited to the user's home directory and repo root directory | P0 |
 | FR-24 | Health Check | Provide `/health` endpoint returning application running status, startup time, and version information | P2 |
 
 ---
@@ -95,8 +116,8 @@
 | NFR-1 | **Unified Frontend and Backend Architecture** | Frontend UI and backend service integrated into a single application, running as a single process |
 | NFR-2 | **Cross-Platform Support** | Support at least macOS and Linux |
 | NFR-3 | **Responsive UI** | Interface adapts to different screen sizes |
-| NFR-4 | **Security** | Require confirmation before deleting symlinks and repositories; path safety checks required when previewing and editing source files |
-| NFR-5 | **Data Consistency** | `.links/` and `data/` directory structures must be mirror-consistent |
+| NFR-4 | **Security** | Require confirmation before removing links/entries and repositories; path safety checks on every user-supplied path; deleting content requires typed confirmation |
+| NFR-5 | **Entry-Level Consistency** | Each entry has **at most one** `in` link (zero allowed during new-device initialisation) and 0..N `out` links; once an `in` link tracks a directory, no `out` link may bind a single file inside it — links always bind whole entries and entries never overlap |
 | NFR-6 | **Backup Atomicity** | Failed backups should have clear prompts and error status |
 | NFR-7 | **Usability** | Core features should be completable within 3 clicks |
 | NFR-8 | **Startup Behavior** | Auto-open browser after startup |
@@ -112,19 +133,20 @@
 
 ```
 <repo-root>/
-├── .links/              # Symlink directory, structure mirrors data/ exactly
-│   ├── documents/
-│   │   ├── report.docx -> /Users/xxx/Documents/report.docx
-│   │   └── notes.txt -> /Users/xxx/Documents/notes.txt
-│   └── config/
-│       └── settings.json -> /Users/xxx/.config/settings.json
-├── data/                # Actual backup data directory, structure mirrors .links/ exactly
+├── .backup-manager/
+│   └── manifest.json    # devices + entries + links (git-tracked, single source of truth)
+├── data/                # the real content — the only content store
 │   ├── documents/
 │   │   ├── report.docx
 │   │   └── notes.txt
 │   └── config/
 │       └── settings.json
 └── .git/                # Git repository
+
+Local machine — every link is a symlink into the repo:
+  ~/Documents/report.docx  ->  <repo>/data/documents/report.docx   (in link)
+  ~/Desktop/notes.txt      ->  <repo>/data/documents/notes.txt     (out link)
+  ~/Desktop/report.docx    ->  <repo>/data/documents/report.docx   (out link)
 ```
 
 ### 5.2 Core Entities
@@ -145,29 +167,78 @@ BackupRepo
 │   ├── autoBackupInterval: string (cron expression)
 │   ├── gitUserName: string
 │   └── gitUserEmail: string
-└── symlinks: Symlink[]
+└── entries: Entry[]
+    └── links: Link[]
 
-Symlink
+Entry                          # one backed-up file/directory
 ├── id: string
-├── repoId: string
-├── relativePath: string   # Relative path under .links/ (including filename)
-├── targetPath: string     # Absolute path to the source file/directory (target for preview and edit operations)
-├── type: 'file' | 'directory'
-├── size: number           # Source file size
-├── modifiedAt: timestamp  # Source file's last modification time
+├── repoPath: string           # path under data/ — the identity of the content
+├── kind: 'file' | 'dir'
+├── createdAt: timestamp
+└── links: Link[]              # 0..1 `in` (0 only during new-device init), 0..N `out`
+
+Link                           # a local path bound to an entry
+├── id: string
+├── entryId: string
+├── type: 'in' | 'out'         # `in` is a special case of `out`
+├── device: string             # device fingerprint
+├── localPath: string          # absolute local path of the symlink
+├── enabled: boolean
 └── createdAt: timestamp
+
+Device                         # metadata about one machine
+├── fingerprint: string        # stable machine id (sha256 hex) — primary key
+├── name: string               # defaults to the hostname, renameable
+├── hostname, os: string
+└── lastSeenAt: timestamp
 ```
 
-### 5.3 Database Schema
+### 5.3 Persistence
 
-4 core tables with foreign key cascading deletes:
+There are **three separate stores** with different files, formats and reasons to exist:
+
+| Data | File | Format | Why there |
+|------|------|------|------|
+| `repos`, `repo_configs`, `repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite (binary) | Machine-private: encrypted credentials, local paths, schedules. Never committed |
+| entries, links, devices | `<repo-root>/.backup-manager/manifest.json` | JSON, Git-tracked | Must travel across machines. The SQLite file is per machine and cannot |
+| app settings | `~/.config/backup-manager/config.json` | JSON | Application-level settings |
+
+**SQLite database** — `~/.config/backup-manager/backup-manager.db`, three tables, unchanged:
 
 ```sql
 repos         — Repository: id, name, path, created_at, updated_at, last_backup_at, status
 repo_configs  — Config: repo_id(FK), remote_url, branch, auto_backup, auto_backup_interval, git_user_name, git_user_email
 repo_auths    — Auth: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_private_key_path, username, password_encrypted(BLOB)
-symlinks      — Symlink: id, repo_id(FK), relative_path(UNIQUE), target_path, type, file_size, modified_at, created_at
 ```
+
+The old `symlinks` table is removed and no table replaces it — entries, links and devices are **not** stored in SQLite.
+
+**Repository manifest** — `<repo-root>/.backup-manager/manifest.json`, a JSON file inside the repo:
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-09-18T10:00:00Z",
+  "devices": [
+    { "fingerprint": "9f2c…", "name": "MacBook Pro", "hostname": "mbp.local",
+      "os": "darwin", "last_seen_at": "2026-09-18T10:00:00Z" }
+  ],
+  "entries": [
+    { "id": "e1a2…", "repo_path": "documents/notes.txt", "kind": "file",
+      "created_at": "2026-09-01T08:12:00Z",
+      "links": [
+        { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+          "local_path": "/Users/x/Documents/notes.txt", "enabled": true,
+          "created_at": "2026-09-01T08:12:00Z" },
+        { "id": "l2b3…", "type": "out", "device": "9f2c…",
+          "local_path": "/Users/x/Desktop/notes.txt", "enabled": true,
+          "created_at": "2026-09-10T12:00:00Z" }
+      ] }
+  ]
+}
+```
+
+Entries, links and devices live inside the repository rather than in SQLite because the database is per-machine. Storing them in the repo (where Git versions and transports them) is what lets a new machine discover every device's links with a plain `git clone`.
 
 ---
 
@@ -176,9 +247,13 @@ symlinks      — Symlink: id, repo_id(FK), relative_path(UNIQUE), target_path, 
 | Issue | Decision |
 |------|------|
 | Git Remote Repository | `git push` is optional. When remote is not configured, only local commits are made without push |
-| Strategy After Source File Deletion | Corresponding files in `data/` are deleted synchronously, and a Git commit is generated |
-| File Conflict | If two symlinks point to the same source file, no special handling is needed — proceed normally |
-| Backup Granularity | Incremental sync, only sync modified files (compare mtime+size) |
+| **Content Ownership** | Content lives **only** in `data/<repo_path>`. A local path is never a second copy but a symlink view onto it |
+| **`in` / `out` Links** | An entry has **at most one** `in` link and 0..N `out` links. Zero `in` links is allowed while initialising a new device. `in` is a **special case of** `out` — the same mechanism, distinguished only by role |
+| **Entry-Level Consistency** | Links always bind a whole entry. An `in` link tracking a directory forbids any `out` link to a file inside it; entries never overlap |
+| **Tracked Link** | The `in` link is the entry's tracked link. Any `out` link can be designated as the new `in`; the entry then tracks that link's changes and the previous `in` becomes a plain `out`. A metadata-only switch that does not touch the filesystem |
+| **Device Metadata Location** | Devices, entries and links are stored in `<repo>/.backup-manager/manifest.json` inside the repository (git-tracked), not in the per-machine SQLite database, so a new machine learns them with a plain `git clone` |
+| **Adopt Semantics** | Creating an entry **moves** the source into the repo and replaces the original location with a symlink. The original file is never left behind as a second copy |
+| Content Removal | Removing content requires a typed `repo_path` confirmation; `release` / `move_back` are offered as non-destructive alternatives; a commit precedes every removal so `git revert` always works |
 | Frontend Technology Stack | React 18 + TypeScript + Vite + Ant Design 5 |
 | Startup Behavior | Auto-open browser after startup |
 | Markdown Images | Support local image display in Markdown |
@@ -186,9 +261,10 @@ symlinks      — Symlink: id, repo_id(FK), relative_path(UNIQUE), target_path, 
 | Backend Framework | Gin (Go lightweight high-performance HTTP framework) |
 | Database | SQLite (pure Go implementation via modernc.org/sqlite, no CGO required) |
 | Authentication Encryption | SSH private keys and HTTPS passwords stored encrypted with AES-256-GCM |
-| Source File Rollback | Rollback overwrites source files (requires user confirmation), displays list of changed files before rollback |
+| Content Rollback | Rollback overwrites `data/` (requires user confirmation) and displays the changed-file list first. All local links reflect it immediately |
 | Repository Deletion | Deleting a repository only removes database records and scheduled tasks, preserving filesystem data without loss |
-| **Preview/Edit Target** | Preview and edit operations target the **source file pointed to by the symlink** (target_path), not the copy in the data/ directory |
+| **Preview/Edit Target** | Preview and edit operate on `data/<repo_path>` — a single write, no dual write to a separate source file |
+| **Backward Compatibility** | Not required. The old `symlinks` table and the `.links/` directory are dropped; `data/` content is preserved |
 
 ---
 
@@ -196,25 +272,27 @@ symlinks      — Symlink: id, repo_id(FK), relative_path(UNIQUE), target_path, 
 
 ### 7.1 Feature Description
 
-In the Preview tab of the repository detail page, users can select symlink files through the file tree to:
-- **Plain text files**: View file contents (read-only preview) and switch to edit mode to modify and save to the source file
-- **Markdown files**: Toggle between rendered preview mode and raw text edit mode, save changes to the source file after editing
+In the Browse tab of the repository detail page, users select a node in the `data/` tree to:
+- **Plain text files**: View contents (read-only preview) and switch to edit mode to modify and save
+- **Markdown files**: Toggle between rendered preview mode and raw text edit mode, then save
 - **Binary files**: Only display file type information, not editable
 
 ### 7.2 Operation Target Description
 
 | Operation | Target | Description |
 |------|------|------|
-| Preview (Read) | Source file pointed to by the symlink (`symlink.target_path`) | Read the current content of the source file and display it to the user |
-| Edit (Save) | Source file pointed to by the symlink (`symlink.target_path`) | Write the edited content back to the source file |
-| Backup | Copy in the data/ directory | Git version management operates on the copy in data/, unrelated to preview/edit |
+| Preview (Read) | `data/<repo_path>` | Read the entry's content and display it |
+| Edit (Save) | `data/<repo_path>` | Write in place. Every link of that entry reflects the change immediately, because each one is a symlink to that same file |
+| Backup | `data/` | `git add -A` captures the edit — no incremental sync step exists |
 
 ### 7.3 Relationship with Backup
 
-Editing the source file does not automatically trigger a backup. The user's modifications to the source file will be detected by incremental checking (mtime+size changes) during the next manual or scheduled backup, synced to the `data/` directory, and then tracked by Git version management. This is a reasonable design — editing source files is an independent action, and the backup timing is controlled by the user.
+Editing does not automatically trigger a backup. The change sits in `data/` as an uncommitted working-tree modification and is captured by the next manual or scheduled backup. The Backup tab shows the uncommitted change count as the "there is an update" indicator. This is a reasonable design — editing is an independent action, and the backup timing stays under user control.
+
+Because the same file backs every link, editing through the entry's `in` link, through any `out` link, or through the Browse tab are all the same operation on the same content.
 
 ---
 
-**Document Version**: v1.3  
+**Document Version**: v2.0  
 **Status**: Confirmed  
-**Date Prepared**: 2026-07-16
+**Date Prepared**: 2026-07-16 (v2.0 revised 2026-09-18 — entry/link model replaces the `.links/` symlink model; see §3.2, §3.3, §5)

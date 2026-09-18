@@ -124,15 +124,22 @@ func (e *GitEngine) Log(repoPath string, limit, offset int) ([]CommitEntry, erro
 	var stdout, stderr bytes.Buffer
 	err := e.runGitCommand(repoPath, args, &stdout, &stderr)
 	if err != nil {
-		// An empty repository (no commits yet) causes git log to exit non-zero.
-		// Return an empty list instead of an error.
-		if strings.Contains(stderr.String(), "does not have any commits yet") {
+		// 空仓库（尚无提交）时 git log 会非零退出。这里用 rev-parse 判断，
+		// 而不是匹配 stderr 文案 —— 文案会随语言环境变化（如中文 locale）。
+		if !e.hasCommit(repoPath) {
 			return []CommitEntry{}, nil
 		}
 		return nil, fmt.Errorf("failed to get git log: %w", err)
 	}
 
 	return parseLogOutput(stdout.String())
+}
+
+// hasCommit 判断仓库是否已有提交。与语言环境无关。
+func (e *GitEngine) hasCommit(repoPath string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", "HEAD")
+	cmd.Dir = repoPath
+	return cmd.Run() == nil
 }
 
 // Status returns the working tree status.

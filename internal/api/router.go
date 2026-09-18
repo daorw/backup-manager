@@ -1,21 +1,24 @@
 package api
 
 import (
-	"backup-manager/internal/api/handler"
 	"bytes"
 	"io/fs"
 	"net/http"
 	"strings"
 
+	"backup-manager/internal/api/handler"
+
 	"github.com/gin-gonic/gin"
 )
 
-// SetupRouter configures the Gin router with all API routes.
+// SetupRouter 注册全部 API 路由。
 func SetupRouter(
 	repoHandler *handler.RepoHandler,
-	symlinkHandler *handler.SymlinkHandler,
+	entryHandler *handler.EntryHandler,
+	linkHandler *handler.LinkHandler,
+	deviceHandler *handler.DeviceHandler,
 	browseHandler *handler.BrowseHandler,
-	previewHandler *handler.PreviewHandler,
+	contentHandler *handler.ContentHandler,
 	backupHandler *handler.BackupHandler,
 	authHandler *handler.AuthHandler,
 	systemHandler *handler.SystemHandler,
@@ -24,56 +27,63 @@ func SetupRouter(
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.New()
-
-	// Global middleware
 	r.Use(CORSMiddleware(DefaultCORSConfig()))
 	r.Use(ErrorRecoveryMiddleware())
 
-	// API v1 routes
 	v1 := r.Group("/api/v1")
 	{
-		// Health check
 		v1.GET("/health", systemHandler.Health)
 
-		// Repo CRUD
+		// 仓库
 		v1.POST("/repos", repoHandler.Create)
 		v1.GET("/repos", repoHandler.List)
 		v1.GET("/repos/:id", repoHandler.Get)
 		v1.DELETE("/repos/:id", repoHandler.Delete)
 		v1.PUT("/repos/:id/config", repoHandler.UpdateConfig)
+		v1.POST("/repos/:id/git-init", repoHandler.GitInit)
 
-		// Symlink CRUD
-		v1.POST("/repos/:id/symlinks", symlinkHandler.Create)
-		v1.GET("/repos/:id/symlinks", symlinkHandler.List)
-		v1.GET("/repos/:id/symlinks/:linkId", symlinkHandler.Get)
-		v1.DELETE("/repos/:id/symlinks/:linkId", symlinkHandler.Delete)
-		v1.PUT("/repos/:id/symlinks/:linkId", symlinkHandler.UpdateTarget)
-		v1.POST("/repos/:id/symlinks/batch", symlinkHandler.BatchImport)
-		v1.GET("/repos/:id/symlinks/:linkId/entries", symlinkHandler.BrowseDirEntries)
-		v1.POST("/repos/:id/symlinks/:linkId/nested", symlinkHandler.AddNestedSymlink)
+		// 设备
+		v1.GET("/devices/current", deviceHandler.Current)
+		v1.GET("/repos/:id/devices", deviceHandler.List)
+		v1.POST("/repos/:id/devices", deviceHandler.Register)
+		v1.PATCH("/repos/:id/devices/:fingerprint", deviceHandler.Rename)
+		v1.DELETE("/repos/:id/devices/:fingerprint", deviceHandler.Delete)
+		v1.POST("/repos/:id/devices/:fingerprint/apply", deviceHandler.Apply)
 
-		// File browsing
+		// 条目
+		v1.GET("/repos/:id/entries", entryHandler.List)
+		v1.POST("/repos/:id/entries/adopt", entryHandler.Adopt)
+		v1.GET("/repos/:id/entries/:entryId", entryHandler.Get)
+		v1.POST("/repos/:id/entries/:entryId/switch", entryHandler.Switch)
+		v1.DELETE("/repos/:id/entries/:entryId", entryHandler.Delete)
+
+		// 链接
+		v1.POST("/repos/:id/links/bulk", linkHandler.Bulk)
+		v1.POST("/repos/:id/entries/:entryId/links", linkHandler.Create)
+		v1.POST("/repos/:id/entries/:entryId/links/:linkId/repair", linkHandler.Repair)
+		v1.POST("/repos/:id/entries/:entryId/links/:linkId/remove", linkHandler.Remove)
+
+		// 本机文件浏览
 		v1.GET("/browse", browseHandler.Browse)
 		v1.GET("/browse/allowed-roots", browseHandler.AllowedRoots)
 
-		// File preview and save
-		v1.GET("/repos/:id/preview", previewHandler.Preview)
-		v1.PUT("/repos/:id/save", previewHandler.Save)
+		// 仓库内容
+		v1.GET("/repos/:id/tree", contentHandler.Tree)
+		v1.GET("/repos/:id/preview", contentHandler.Preview)
+		v1.PUT("/repos/:id/save", contentHandler.Save)
+		v1.GET("/repos/:id/changes", contentHandler.Changes)
 
-		// Git init
-		v1.POST("/repos/:id/git-init", repoHandler.GitInit)
-
-		// Backup
+		// 备份
 		v1.POST("/repos/:id/backup", backupHandler.Trigger)
 		v1.GET("/repos/:id/backup/history", backupHandler.History)
 		v1.POST("/repos/:id/push", backupHandler.Push)
 
-		// Git auth
+		// Git 认证
 		v1.GET("/repos/:id/auth", authHandler.Get)
 		v1.PUT("/repos/:id/auth", authHandler.Set)
 		v1.DELETE("/repos/:id/auth", authHandler.Clear)
 
-		// Rollback
+		// 回滚
 		v1.GET("/repos/:id/commits/:hash/changed-files", rollbackHandler.ListFiles)
 		v1.GET("/repos/:id/commits/:hash/files", rollbackHandler.GetCommitFile)
 		v1.POST("/repos/:id/commits/:hash/restore", rollbackHandler.RestoreFile)
@@ -83,29 +93,17 @@ func SetupRouter(
 	return r
 }
 
-// MountStatic mounts the frontend static files from an embed.FS onto the router.
-// It serves static assets from the embedded filesystem and provides SPA fallback
-// routing (all non-API GET requests return index.html).
+// MountStatic 挂载前端静态资源，并为 SPA 提供 index.html 回退。
 func MountStatic(r *gin.Engine, frontendFS fs.FS) {
-	// Try to use the subdirectory
 	staticFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
-		// Maybe the FS is already the dist directory
 		staticFS = frontendFS
 	}
 
 	fileServer := http.FileServer(http.FS(staticFS))
 
-	// Handle all GET requests that are not API calls
 	r.Use(func(c *gin.Context) {
-		// Skip API routes
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-			c.Next()
-			return
-		}
-
-		// Only handle GET requests for static files
-		if c.Request.Method != "GET" {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || c.Request.Method != "GET" {
 			c.Next()
 			return
 		}
@@ -115,18 +113,15 @@ func MountStatic(r *gin.Engine, frontendFS fs.FS) {
 			path = "/index.html"
 		}
 
-		// Check if the file exists in the embedded filesystem
 		cleanPath := strings.TrimPrefix(path, "/")
-		f, err := staticFS.Open(cleanPath)
-		if err == nil {
+		if f, err := staticFS.Open(cleanPath); err == nil {
 			f.Close()
-			// File exists, serve it
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
 		}
 
-		// File doesn't exist, serve index.html for SPA routing
+		// 未命中静态文件 → 返回 index.html 交给前端路由
 		indexFile, err := staticFS.Open("index.html")
 		if err != nil {
 			c.Next()
@@ -134,7 +129,6 @@ func MountStatic(r *gin.Engine, frontendFS fs.FS) {
 		}
 		defer indexFile.Close()
 
-		// Read index.html into memory for ServeContent
 		stat, _ := indexFile.Stat()
 		var buf bytes.Buffer
 		if _, err := buf.ReadFrom(indexFile); err != nil {

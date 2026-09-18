@@ -7,11 +7,13 @@ import {
   SettingOutlined,
   FolderOutlined,
   FolderOpenOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useAppStore } from '../store/appStore';
 import FilesPanel from '../components/files/FilesPanel';
+import EntriesPanel from '../components/entry/EntriesPanel';
 import BackupPanel from '../components/backup/BackupPanel';
 import ConfigPanel from '../components/config/ConfigPanel';
 
@@ -79,7 +81,17 @@ const RepoDetail: React.FC = () => {
           <span>Browse</span>
         </Space>
       ),
-      children: <FilesPanel repoId={currentRepo.id} repoPath={currentRepo.path} />,
+      children: <FilesPanel repoId={currentRepo.id} />,
+    },
+    {
+      key: 'entries',
+      label: (
+        <Space>
+          <LinkOutlined />
+          <span>Entries</span>
+        </Space>
+      ),
+      children: <EntriesPanel repoId={currentRepo.id} />,
     },
     {
       key: 'backup',

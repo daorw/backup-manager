@@ -5,32 +5,49 @@
 ## 核心概念
 
 ```
-指定哪些文件需要备份 → 自动创建软链接聚合 → 增量同步到备份仓库 → Git 版本管理
+指定要备份什么 → 内容移入仓库 → 本机路径变成软链接视图 → Git 版本管理
 ```
 
 ### 工作原理
 
-1. **创建备份仓库** — 在本地路径下初始化仓库（含 `.links/`、`data/` 目录和 `.git/`）
-2. **添加软链接** — 选择要追踪的源文件/目录，自动在 `.links/` 中创建软链接，同时复制源文件到 `data/`
-3. **执行备份** — 增量检测（mtime+size）→ 同步变更到 `data/` → `git add` → `git commit` →（可选）`git push`
+1. **创建备份仓库** — 在本地路径下初始化仓库（含 `data/`、`.backup-manager/` 目录和 `.git/`）
+2. **创建条目** — 选择一个要追踪的本机文件/目录。其内容被**移动**到 `data/<repo_path>`，原位置被替换为软链接 —— 即该条目的 **`in`** 链接
+3. **分发（可选）** — 添加 **`out`** 链接，让同一条目出现在更多本机路径上。`in` 是 `out` 的特例：两者都是指向 `data/<repo_path>` 的软链接
+4. **执行备份** — 落盘清单 → `git add -A` → `git commit` →（可选）`git push`。不存在增量同步步骤，因为内容本来就在 `data/` 中
 
 ### 仓库目录结构
 
 ```
 <repo-root>/
-├── .links/        # 软链接目录（指向源文件）
-├── data/          # 实际备份数据（与 .links/ 目录结构一致）
-└── .git/          # Git 版本库
+├── .backup-manager/
+│   └── manifest.json   # 设备 + 条目 + 链接（Git 跟踪，唯一事实来源）
+├── data/               # 真实内容 —— 唯一的内容存放处
+└── .git/               # Git 版本库
 ```
+
+### 多设备
+
+设备、条目与链接存放在仓库清单中，而不是按机器独立的本地 SQLite 数据库中 —— 因此新机器仅凭 `git clone` 就能获知所有设备的链接。注册该机器、点击 **Apply** 重建它的软链接，再对任意 `out` 链接执行 **Set as tracked**，把它指定为条目的 `in` 链接 —— 此后条目通过它跟踪变更，原先的 `in` 链接转为普通 `out` 链接。
+
+### 数量规则与一致性规则
+
+- 每个条目**至多一个 `in` 链接**。正常情况恰为一个；**初始化新设备时允许为 0**，此时条目处于**未绑定**状态，UI 会提示你指定一个。
+- 每个条目有 **0..N 个 `out` 链接**，其中任意一个都可以被指定为新的 `in` 链接。
+- 系统强制条目级一致性：一旦 `in` 链接跟踪的是目录，就不允许对该目录内的单个文件建 `out` 链接。条目之间永不重叠，链接永远绑定完整条目、绝不绑定子路径。
+
+任何违反上述规则的创建请求都会被拒绝，已发生的漂移由一致性巡检报告。
 
 ## 功能特性
 
 - **仓库管理** — 创建/删除/查看备份仓库，可视化配置（远程仓库、分支、Git 用户）
-- **软链接管理** — 树形展示、添加/删除/批量导入、修改目标路径、已删除源文件同步清理
-- **文件预览** — 纯文本/代码语法高亮、Markdown 渲染、二进制文件标识
-- **备份执行** — 手动触发或定时自动备份（秒级 cron），增量同步，Git push（可选）
-- **备份历史** — 查看 Git 提交历史，支持分页
-- **源文件回滚** — 选择历史提交版本，将源文件恢复到指定版本（支持全量或部分回滚）
+- **条目与链接管理** — 每个被备份的文件/目录是一个条目，含**至多一个 `in` 链接**（0..N 个 `out` 链接）；可查看、分发、指定跟踪 `in` 链接、批量链接，以及移除（release / move_back / purge）
+- **链接状态诊断** — 逐链接状态（`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`），支持一键修复与重新纳入
+- **一致性巡检** — 校验各项不变量（每条目**至多一个** `in` 链接、链接只绑定完整条目、条目不重叠、`data/` 内无软链接），并报告未托管链接
+- **多设备** — 机器指纹识别、设备注册、dry-run `apply` 重建本机链接、detach，以及删除设备时自动提升 `in` 链接
+- **文件预览与编辑** — 纯文本/代码语法高亮、Markdown 渲染、二进制文件标识；编辑直接写入 `data/`，所有链接立即反映
+- **备份执行** — 手动触发或定时自动备份（秒级 cron），Git push（可选）
+- **备份历史** — 查看 Git 提交历史，支持分页，并展示未提交变更数量
+- **内容回滚** — 选择历史提交版本，把 `data/` 恢复到指定版本（全量、按条目、或单文件）
 - **单文件恢复** — 预览和恢复历史提交中的单个文件
 - **Git 集成** — 远程仓库配置、SSH/HTTPS 认证管理（AES-256-GCM 加密存储）
 - **本地文件浏览** — 安全限定在用户主目录和仓库根目录，防止路径穿越
@@ -40,7 +57,7 @@
 
 ## 快速开始
 
-详细图文指南请参考 [Quick Start Guide](docs/quick-start.md)。
+详细图文指南请参考 [Quick Start Guide](quick-start.md)。
 
 ### 前置条件
 
@@ -122,22 +139,38 @@ go build -o backup-manager .
 | 仓库 | `GET /repos/:id` | 仓库详情（含配置和状态） |
 | 仓库 | `PUT /repos/:id/config` | 更新配置（部分更新） |
 | 仓库 | `POST /repos/:id/git-init` | 初始化 Git 仓库 |
-| 软链接 | `POST/GET /repos/:id/symlinks` | 软链接创建/列表（列表含 `is_new` 变更标记） |
-| 软链接 | `GET/DELETE/PUT /repos/:id/symlinks/:linkId` | 软链接详情/删除/修改目标 |
-| 软链接 | `POST /repos/:id/symlinks/batch` | 批量导入 |
-| 软链接 | `GET /repos/:id/symlinks/:linkId/entries?sub_path=` | 浏览目录 symlink 内容 |
-| 软链接 | `POST /repos/:id/symlinks/:linkId/nested` | 在目录 symlink 内添加嵌套软链接 |
+| 条目 | `GET /repos/:id/entries?device=&state=` | 条目列表（含链接与状态） |
+| 条目 | `GET /repos/:id/entries/:entryId` | 条目详情 |
+| 条目 | `POST /repos/:id/entries/adopt` | 创建条目及其 `in` 链接（移入内容） |
+| 条目 | `PATCH /repos/:id/entries/:entryId` | 重命名 `repo_path`（重新校验不重叠） |
+| 条目 | `POST /repos/:id/entries/:entryId/switch` | 把某个 `out` 链接提升为条目的 `in` 链接 |
+| 条目 | `DELETE /repos/:id/entries/:entryId?mode=` | `release` / `unlink` / `move_back` / `purge` |
+| 链接 | `GET/POST /repos/:id/entries/:entryId/links` | 列出 / 添加 `out` 链接 |
+| 链接 | `POST /repos/:id/links/bulk` | 在某个本机根目录下批量创建 `out` 链接 |
+| 链接 | `PATCH /repos/:id/entries/:entryId/links/:linkId` | 修改 `local_path` / `enabled` |
+| 链接 | `POST .../links/:linkId/repair` | 重建软链接 |
+| 链接 | `POST .../links/:linkId/readopt` | `replaced` → 把新内容移入 `data/` 并重建链接 |
+| 链接 | `POST .../links/:linkId/remove` | 移除单个链接 |
+| 设备 | `GET /devices/current` | 当前机器的指纹 / 主机名 |
+| 设备 | `GET/POST/PATCH/DELETE /repos/:id/devices[/:fp]` | 设备注册、重命名、删除 |
+| 设备 | `GET /repos/:id/devices/:fp/links` | 该设备的链接及状态 |
+| 设备 | `POST /repos/:id/devices/:fp/apply` | 让本机收敛（支持 dry-run） |
+| 设备 | `POST /repos/:id/devices/:fp/detach` | 卸载本机 |
+| 一致性 | `GET /repos/:id/consistency` | 巡检结论 |
+| 一致性 | `POST /repos/:id/consistency/repair` | 修复所有可收敛项 |
+| 内容 | `GET /repos/:id/tree?path=` | 列出 `data/` 下的条目及徽标 |
+| 内容 | `GET /repos/:id/preview?path=...` | 预览文件内容 |
+| 内容 | `PUT /repos/:id/save` | 保存到 `data/` |
+| 内容 | `GET /repos/:id/changes` | `data/` 下的未提交变更（`git status`） |
 | 浏览 | `GET /browse?path=...` | 浏览本地文件系统 |
 | 浏览 | `GET /browse/allowed-roots` | 列出可浏览根目录 |
-| 预览 | `GET /repos/:id/preview?path=...` | 预览源文件内容 |
-| 预览 | `PUT /repos/:id/save` | 编辑保存源文件（同步到 data/） |
 | 备份 | `POST /repos/:id/backup` | 触发备份（可指定 commit_message） |
 | 备份 | `GET /repos/:id/backup/history?limit=&offset=` | 备份历史（分页） |
 | 备份 | `POST /repos/:id/push` | 推送到远程仓库（可选 force 参数） |
 | 回滚 | `GET /repos/:id/commits/:hash/changed-files` | 提交中变更的文件列表 |
 | 回滚 | `GET /repos/:id/commits/:hash/files?path=` | 预览提交中的文件内容 |
 | 回滚 | `POST /repos/:id/commits/:hash/restore` | 从提交恢复单个文件 |
-| 回滚 | `POST /repos/:id/rollback` | 批量回滚源文件到历史版本 |
+| 回滚 | `POST /repos/:id/rollback` | 批量回滚 `data/` 到历史版本 |
 | 认证 | `GET/PUT/DELETE /repos/:id/auth` | Git 认证管理 |
 | 系统 | `GET /health` | 健康检查（状态+运行时间+版本） |
 
@@ -148,12 +181,14 @@ go build -o backup-manager .
 2. 点击托盘图标 → "Open UI" 打开浏览器
 3. 仪表盘显示仓库列表
 4. 点击"创建仓库" → 输入名称、选择路径
-5. 进入仓库详情 → 添加软链接（选择要备份的源文件）
-6. 在预览标签页查看文件内容
-7. 切换到备份标签页 → 点击"触发备份"
-8. 配置远程仓库和认证信息（可选）
-9. 设置定时备份（可选）
-10. 在备份历史中选择提交 → 回滚源文件到历史版本（可选）
+5. 进入仓库详情 → Entries 标签页 → "+ New Entry"（内容移入仓库，原位置成为 `in` 链接）
+6. （可选）添加 `out` 链接，把同一条目分发到更多本机路径
+7. 在 Browse 标签页浏览、预览和编辑内容
+8. 切换到备份标签页 → 点击"触发备份"
+9. 配置远程仓库和认证信息（可选）
+10. 设置定时备份（可选）
+11. 在备份历史中选择提交 → 回滚（可选）
+12. 在另一台机器上：克隆仓库、打开它，点击 "Apply" 重建该机器的链接
 ```
 
 ## 环境配置
@@ -162,13 +197,17 @@ go build -o backup-manager .
 |------|------|
 | `~/.config/backup-manager/config.json` | 应用配置（端口、主题、自动打开浏览器等）— JSON 字段：`port`, `open_browser`, `theme` |
 | `~/.config/backup-manager/master.key` | AES-256 加密密钥（首次启动自动生成） |
-| `~/.config/backup-manager/backup-manager.db` | SQLite 数据库 |
+| `~/.config/backup-manager/backup-manager.db` | SQLite 数据库（本机，按机器独立）—— 存 `repos`、`repo_configs`、`repo_auths` |
+| `<repo-root>/.backup-manager/manifest.json` | **位于仓库内**，由 Git 跟踪 —— 存条目、链接与设备。它**不是** SQLite 数据库；放在仓库里才能随 `git clone` / `git push` 传输 |
 
 ## 安全设计
 
-- **路径安全**: 四层校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越
+- **路径安全**: 四层校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越；本机链接路径限定在允许根目录（`$HOME` + 仓库根目录）内，并拒绝指向仓库内部的自引用
+- **条目级一致性**: 加载时按 R-1..R-5 校验清单（每条目**至多一个** `in` 链接 —— 0 个按**未绑定**接受；链接只绑定完整条目；条目不重叠；链接不在目录条目内部）；文件无法解析时阻止写入，而不是静默重写
+- **清单原子写**: `manifest.json.tmp` → `fsync` → `os.Rename`
+- **默认非破坏性**: 建链接拒绝已占用路径；`apply` 从不覆盖；删除内容需输入路径二次确认，且删除前先提交，因此 `git revert` 可恢复
 - **认证加密**: SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储
-- **并发控制**: 仓库级互斥锁防止并发备份，预览接口限流（最大 5 并发）
+- **并发控制**: 仓库级互斥锁串行化备份、回滚以及所有会改文件系统的链接操作；预览接口限流（最大 5 并发）
 - **错误隔离**: Git push 失败不阻断本地 commit
 
 ## 开发
@@ -197,38 +236,42 @@ backup-manager/
 │   │   ├── middleware.go       # CORS + 错误恢复
 │   │   └── handler/            # HTTP 处理器
 │   │       ├── repo.go         # 仓库 CRUD + Git Init
-│   │       ├── symlink.go      # 软链接 CRUD + 批量导入 + 嵌套
+│   │       ├── entry.go        # 条目 list / adopt / switch / delete
+│   │       ├── link.go         # 链接 add / bulk / repair / remove
+│   │       ├── device.go       # 设备 current / register / rename / delete / apply
 │   │       ├── browse.go       # 本地文件浏览 + 允许根目录
-│   │       ├── preview.go      # 文件预览 + 保存
+│   │       ├── content.go      # tree / preview / save / changes
 │   │       ├── backup.go       # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go         # Git 认证管理
-│   │       ├── rollback.go     # 源文件回滚 + 单文件恢复
+│   │       ├── rollback.go     # 内容回滚 + 单文件恢复
 │   │       ├── system.go       # 健康检查
 │   │       └── errors.go       # 错误码映射
+│   ├── entry/                  # 条目与链接子系统
+│   │   ├── manifest.go         # 清单加载/保存/原子写 + R-1..R-5 校验
+│   │   ├── service.go          # Service 装配、仓库互斥锁、清单提交、公共辅助
+│   │   ├── entry_service.go    # adopt、list、remove（unlink/move_back/purge）
+│   │   ├── link_service.go     # 添加 out 链接、批量链接、switch、repair、remove
+│   │   ├── device_service.go   # register、rename、delete、apply
+│   │   └── entry_state.go      # 逐链接状态诊断与视图构建
 │   ├── service/                # 业务逻辑层
 │   │   ├── repo_service.go     # 仓库生命周期
-│   │   ├── symlink_service.go  # 软链接 CRUD + 镜像同步 + 嵌套
-│   │   ├── backup_service.go   # 备份执行引擎
+│   │   ├── backup_service.go   # 备份执行（git add/commit/push）
 │   │   ├── auth_service.go     # Git 认证管理
 │   │   ├── browser_service.go  # 安全文件浏览
-│   │   ├── preview_service.go  # 文件预览 + 保存逻辑
-│   │   ├── rollback_service.go # 源文件回滚逻辑
-│   │   └── repo_mutex.go       # 仓库级互斥锁
+│   │   ├── content_service.go  # 内容树 / 预览 / 保存
+│   │   └── rollback_service.go # 回滚逻辑
 │   ├── store/                  # 数据持久化层
 │   │   ├── db.go               # SQLite 初始化 + 迁移
 │   │   ├── store.go            # Store 聚合
 │   │   ├── repo_store.go       # repos 表操作
 │   │   ├── repo_config_store.go# repo_configs 表操作
-│   │   ├── repo_auth_store.go  # repo_auths 表操作
-│   │   └── symlink_store.go    # symlinks 表操作
+│   │   └── repo_auth_store.go  # repo_auths 表操作
 │   ├── model/                  # 数据模型
 │   │   ├── repo.go             # Repo, RepoConfig, RepoStatus
-│   │   ├── symlink.go          # Symlink, SymlinkType
+│   │   ├── link.go             # Entry, Link, Device, Manifest, LinkState
 │   │   └── auth.go             # GitAuth, GitAuthType
 │   ├── git/                    # Git 引擎
 │   │   └── git.go              # Init/Add/Commit/Push/Log/Status/Config/LsTree/Show/WriteFileContentTo
-│   ├── resolver/               # Git 路径解析
-│   │   └── symlink_resolver.go # data/ 路径 ↔ 源文件路径映射
 │   ├── scheduler/              # 定时调度器
 │   │   └── scheduler.go        # 基于 cron 的注册/注销
 │   ├── servermgr/              # HTTP 服务器生命周期管理
@@ -237,6 +280,8 @@ backup-manager/
 │   └── util/                   # 工具包
 │       ├── path.go             # SafeResolve 四层路径校验
 │       ├── crypto.go           # KeyManager (AES-256-GCM)
+│       ├── device.go           # MachineFingerprint()
+│       ├── repo_mutex.go       # 仓库级互斥锁（备份/回滚/链接操作共享）
 │       └── file.go             # CopyFile/CopyDir/DetectMIME
 └── frontend/                   # React SPA
     ├── package.json
@@ -258,9 +303,11 @@ backup-manager/
             ├── repo/
             │   ├── RepoCard.tsx
             │   └── CreateRepoModal.tsx
-            ├── symlink/
-            │   ├── SymlinkPanel.tsx
-            │   └── SymlinkAddModal.tsx
+            ├── entry/
+            │   ├── EntriesPanel.tsx        # 条目与链接：列表、指定跟踪、修复、移除、apply
+            │   └── AdoptModal.tsx          # 创建条目（内容移入仓库）
+            ├── files/
+            │   └── FilesPanel.tsx          # 浏览 data/ 树 + 预览编辑
             ├── preview/
             │   ├── PreviewPanel.tsx
             │   ├── TextPreview.tsx

@@ -3,13 +3,19 @@ import type {
   BackupRepo,
   CreateRepoRequest,
   UpdateConfigRequest,
-  Symlink,
-  CreateSymlinkRequest,
-  UpdateSymlinkRequest,
-  BatchSymlinkRequest,
+  Entry,
+  Device,
+  CurrentDeviceInfo,
+  AdoptRequest,
+  AddLinkRequest,
+  BulkLinkRequest,
+  ApplyResult,
+  ContentEntry,
   BrowseEntry,
-  SymlinkDirEntry,
   PreviewResult,
+  SaveFileRequest,
+  SaveFileResult,
+  ChangesResult,
   BackupResult,
   CommitEntry,
   GitAuth,
@@ -19,8 +25,6 @@ import type {
   FileRestoreResult,
   RollbackRequest,
   RollbackResult,
-  SaveFileRequest,
-  SaveFileResult,
 } from '../types';
 
 const api = axios.create({
@@ -31,10 +35,9 @@ const api = axios.create({
   },
 });
 
-// Response interceptor: unwrap { data: ... } wrapper from backend
+// 响应拦截器：解开后端的 { data: ... } 包装
 api.interceptors.response.use(
   (response) => {
-    // If the response has a data wrapper, unwrap it
     if (response.data && typeof response.data === 'object' && 'data' in response.data) {
       response.data = response.data.data;
     }
@@ -46,7 +49,8 @@ api.interceptors.response.use(
   }
 );
 
-// Repo APIs
+// ── 仓库 ──────────────────────────────────────────────────────────────
+
 export async function fetchRepos(): Promise<BackupRepo[]> {
   const { data } = await api.get<BackupRepo[]>('/repos');
   return data;
@@ -66,132 +70,176 @@ export async function deleteRepo(id: string): Promise<void> {
   await api.delete(`/repos/${id}`);
 }
 
-export async function updateRepoConfig(
-  id: string,
-  config: UpdateConfigRequest
-): Promise<void> {
+export async function updateRepoConfig(id: string, config: UpdateConfigRequest): Promise<void> {
   await api.put(`/repos/${id}/config`, config);
 }
 
-// Symlink APIs
-export async function fetchSymlinks(repoId: string): Promise<Symlink[]> {
-  const { data } = await api.get<Symlink[]>(`/repos/${repoId}/symlinks`);
+export async function gitInitRepo(repoId: string): Promise<void> {
+  await api.post(`/repos/${repoId}/git-init`);
+}
+
+// ── 条目 ──────────────────────────────────────────────────────────────
+
+export async function fetchEntries(repoId: string): Promise<Entry[]> {
+  const { data } = await api.get<Entry[]>(`/repos/${repoId}/entries`);
   return data;
 }
 
-export async function createSymlink(
-  repoId: string,
-  req: CreateSymlinkRequest
-): Promise<Symlink> {
-  const { data } = await api.post<Symlink>(`/repos/${repoId}/symlinks`, req);
+/** 创建条目：内容移入仓库，原位置替换为软链接（条目的 in 链接）。 */
+export async function adoptEntry(repoId: string, req: AdoptRequest): Promise<Entry> {
+  const { data } = await api.post<Entry>(`/repos/${repoId}/entries/adopt`, req);
   return data;
 }
 
-export async function deleteSymlink(
+/** 指定新的 in 链接（纯元数据变更）。 */
+export async function switchTrackedLink(
   repoId: string,
+  entryId: string,
   linkId: string
+): Promise<Entry> {
+  const { data } = await api.post<Entry>(`/repos/${repoId}/entries/${entryId}/switch`, {
+    link_id: linkId,
+  });
+  return data;
+}
+
+export type EntryRemoveMode = 'unlink' | 'move_back' | 'purge';
+
+export async function removeEntry(
+  repoId: string,
+  entryId: string,
+  mode: EntryRemoveMode,
+  linkId?: string
 ): Promise<void> {
-  await api.delete(`/repos/${repoId}/symlinks/${linkId}`);
+  await api.delete(`/repos/${repoId}/entries/${entryId}`, {
+    params: { mode, link_id: linkId },
+  });
 }
 
-export async function updateSymlink(
+// ── 链接 ──────────────────────────────────────────────────────────────
+
+export async function addLink(
   repoId: string,
-  linkId: string,
-  req: UpdateSymlinkRequest
-): Promise<Symlink> {
-  const { data } = await api.put<Symlink>(
-    `/repos/${repoId}/symlinks/${linkId}`,
-    req
+  entryId: string,
+  req: AddLinkRequest
+): Promise<Entry> {
+  const { data } = await api.post<Entry>(`/repos/${repoId}/entries/${entryId}/links`, req);
+  return data;
+}
+
+/** 把一个本地根目录下的多个条目批量链接到本机。 */
+export async function bulkLink(repoId: string, req: BulkLinkRequest): Promise<Entry[]> {
+  const { data } = await api.post<Entry[]>(`/repos/${repoId}/links/bulk`, req);
+  return data;
+}
+
+export async function repairLink(
+  repoId: string,
+  entryId: string,
+  linkId: string
+): Promise<Entry> {
+  const { data } = await api.post<Entry>(
+    `/repos/${repoId}/entries/${entryId}/links/${linkId}/repair`
   );
   return data;
 }
 
-export async function batchImportSymlinks(
+export async function removeLink(
   repoId: string,
-  req: BatchSymlinkRequest
-): Promise<Symlink[]> {
-  const { data } = await api.post<Symlink[]>(
-    `/repos/${repoId}/symlinks/batch`,
-    req
+  entryId: string,
+  linkId: string
+): Promise<Entry> {
+  const { data } = await api.post<Entry>(
+    `/repos/${repoId}/entries/${entryId}/links/${linkId}/remove`
   );
   return data;
 }
 
-export interface AddNestedSymlinkRequest {
-  target_path: string;
-  sub_path: string;
+// ── 设备 ──────────────────────────────────────────────────────────────
+
+export async function fetchCurrentDevice(): Promise<CurrentDeviceInfo> {
+  const { data } = await api.get<CurrentDeviceInfo>('/devices/current');
+  return data;
 }
 
-export async function addNestedSymlink(
+export async function fetchDevices(repoId: string): Promise<Device[]> {
+  const { data } = await api.get<Device[]>(`/repos/${repoId}/devices`);
+  return data;
+}
+
+export async function registerDevice(repoId: string, name?: string): Promise<Device> {
+  const { data } = await api.post<Device>(`/repos/${repoId}/devices`, { name });
+  return data;
+}
+
+export async function renameDevice(
   repoId: string,
-  linkId: string,
-  req: AddNestedSymlinkRequest
-): Promise<Symlink> {
-  const { data } = await api.post<Symlink>(
-    `/repos/${repoId}/symlinks/${linkId}/nested`,
-    req
+  fingerprint: string,
+  name: string
+): Promise<void> {
+  await api.patch(`/repos/${repoId}/devices/${fingerprint}`, { name });
+}
+
+export async function deleteDevice(repoId: string, fingerprint: string): Promise<void> {
+  await api.delete(`/repos/${repoId}/devices/${fingerprint}`);
+}
+
+/** 让本机与清单收敛。dry_run 时只返回计划。 */
+export async function applyDevice(
+  repoId: string,
+  fingerprint: string,
+  dryRun = false
+): Promise<ApplyResult> {
+  const { data } = await api.post<ApplyResult>(
+    `/repos/${repoId}/devices/${fingerprint}/apply`,
+    { dry_run: dryRun }
   );
   return data;
 }
 
-// Directory symlink browsing API
-export async function fetchDirEntries(
-  repoId: string,
-  linkId: string,
-  subPath?: string
-): Promise<SymlinkDirEntry[]> {
-  const { data } = await api.get<SymlinkDirEntry[]>(
-    `/repos/${repoId}/symlinks/${linkId}/entries`,
-    { params: { sub_path: subPath || '' } }
-  );
+// ── 仓库内容 ──────────────────────────────────────────────────────────
+
+export async function fetchTree(repoId: string, path?: string): Promise<ContentEntry[]> {
+  const { data } = await api.get<ContentEntry[]>(`/repos/${repoId}/tree`, {
+    params: { path: path || '' },
+  });
   return data;
 }
 
-// Browse API
-export async function browsePath(path: string): Promise<BrowseEntry[]> {
-  const { data } = await api.get<BrowseEntry[]>('/browse', {
+export async function previewFile(repoId: string, path: string): Promise<PreviewResult> {
+  const { data } = await api.get<PreviewResult>(`/repos/${repoId}/preview`, {
     params: { path },
   });
   return data;
 }
 
-// Allowed roots (browse root directories)
+export async function saveFile(repoId: string, req: SaveFileRequest): Promise<SaveFileResult> {
+  const { data } = await api.put<SaveFileResult>(`/repos/${repoId}/save`, req);
+  return data;
+}
+
+export async function fetchChanges(repoId: string): Promise<ChangesResult> {
+  const { data } = await api.get<ChangesResult>(`/repos/${repoId}/changes`);
+  return data;
+}
+
+// ── 本机文件浏览 ──────────────────────────────────────────────────────
+
+export async function browsePath(path: string): Promise<BrowseEntry[]> {
+  const { data } = await api.get<BrowseEntry[]>('/browse', { params: { path } });
+  return data;
+}
+
 export async function fetchAllowedRoots(): Promise<string[]> {
   const { data } = await api.get<string[]>('/browse/allowed-roots');
   return data;
 }
 
-// Preview API
-export async function previewFile(
-  repoId: string,
-  path: string
-): Promise<PreviewResult> {
-  const { data } = await api.get<PreviewResult>(
-    `/repos/${repoId}/preview`,
-    { params: { path } }
-  );
-  return data;
-}
+// ── 备份 ──────────────────────────────────────────────────────────────
 
-// Save file API
-export async function saveFile(
-  repoId: string,
-  req: SaveFileRequest
-): Promise<SaveFileResult> {
-  const { data } = await api.put<SaveFileResult>(
-    `/repos/${repoId}/save`,
-    req
-  );
-  return data;
-}
-
-// Backup APIs
 export async function triggerBackup(repoId: string, commitMessage?: string): Promise<BackupResult> {
   const body = commitMessage ? { commit_message: commitMessage } : {};
-  const { data } = await api.post<BackupResult>(
-    `/repos/${repoId}/backup`,
-    body
-  );
+  const { data } = await api.post<BackupResult>(`/repos/${repoId}/backup`, body);
   return data;
 }
 
@@ -200,48 +248,18 @@ export async function fetchBackupHistory(
   limit = 20,
   offset = 0
 ): Promise<CommitEntry[]> {
-  const { data } = await api.get<CommitEntry[]>(
-    `/repos/${repoId}/backup/history`,
-    { params: { limit, offset } }
-  );
+  const { data } = await api.get<CommitEntry[]>(`/repos/${repoId}/backup/history`, {
+    params: { limit, offset },
+  });
   return data;
 }
 
-// Auth APIs
-export async function fetchAuth(repoId: string): Promise<GitAuth> {
-  const { data } = await api.get<GitAuth>(`/repos/${repoId}/auth`);
-  return data;
-}
-
-export async function setAuth(
-  repoId: string,
-  req: SetAuthRequest
-): Promise<GitAuth> {
-  const { data } = await api.put<GitAuth>(`/repos/${repoId}/auth`, req);
-  return data;
-}
-
-export async function clearAuth(repoId: string): Promise<void> {
-  await api.delete(`/repos/${repoId}/auth`);
-}
-
-// Git init API
-export async function gitInitRepo(repoId: string): Promise<void> {
-  await api.post(`/repos/${repoId}/git-init`);
-}
-
-// Push API
 export async function pushRepo(repoId: string, force = false): Promise<void> {
   await api.post(`/repos/${repoId}/push`, { force });
 }
 
-// Health API
-export async function healthCheck(): Promise<{ status: string }> {
-  const { data } = await api.get<{ status: string }>('/health');
-  return data;
-}
+// ── 回滚 ──────────────────────────────────────────────────────────────
 
-// Rollback APIs
 export async function fetchCommitChangedFiles(
   repoId: string,
   commitHash: string
@@ -252,7 +270,6 @@ export async function fetchCommitChangedFiles(
   return data;
 }
 
-// Commit file content preview API
 export async function fetchCommitFileContent(
   repoId: string,
   commitHash: string,
@@ -265,7 +282,6 @@ export async function fetchCommitFileContent(
   return data;
 }
 
-// File restore API
 export async function restoreCommitFile(
   repoId: string,
   commitHash: string,
@@ -278,14 +294,34 @@ export async function restoreCommitFile(
   return data;
 }
 
-export async function rollbackSourceFiles(
+export async function rollbackFiles(
   repoId: string,
   req: RollbackRequest
 ): Promise<RollbackResult> {
-  const { data } = await api.post<RollbackResult>(
-    `/repos/${repoId}/rollback`,
-    req
-  );
+  const { data } = await api.post<RollbackResult>(`/repos/${repoId}/rollback`, req);
+  return data;
+}
+
+// ── Git 认证 ──────────────────────────────────────────────────────────
+
+export async function fetchAuth(repoId: string): Promise<GitAuth> {
+  const { data } = await api.get<GitAuth>(`/repos/${repoId}/auth`);
+  return data;
+}
+
+export async function setAuth(repoId: string, req: SetAuthRequest): Promise<GitAuth> {
+  const { data } = await api.put<GitAuth>(`/repos/${repoId}/auth`, req);
+  return data;
+}
+
+export async function clearAuth(repoId: string): Promise<void> {
+  await api.delete(`/repos/${repoId}/auth`);
+}
+
+// ── 系统 ──────────────────────────────────────────────────────────────
+
+export async function healthCheck(): Promise<{ status: string }> {
+  const { data } = await api.get<{ status: string }>('/health');
   return data;
 }
 

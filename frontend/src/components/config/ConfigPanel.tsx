@@ -344,7 +344,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
       >
         <Typography.Paragraph type="danger">
           Deleting the repository will permanently remove all data, including
-          symlinks, backup data, and Git history. This action cannot be undone.
+          the manifest, backup data, and Git history. This action cannot be undone.
         </Typography.Paragraph>
         <Space>
           <Popconfirm

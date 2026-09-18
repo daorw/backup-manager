@@ -59,7 +59,7 @@ body {
  * Tab Panel Layout Isolation
  * ============================================================
  * 仅对激活的 Tab 面板启用 flex 布局，避免影响非激活 Tab。
- * 这确保了 Symlinks Tab 的 flex 布局不会干扰其他 Tab 的布局。
+ * 这确保了各 Tab 的 flex 布局不会互相干扰。
  * ============================================================ */
 .repo-detail-tabs > .ant-tabs-content-holder,
 .markdown-preview-tabs > .ant-tabs-content-holder {

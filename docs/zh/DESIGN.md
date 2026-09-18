@@ -45,12 +45,13 @@
 └────────────────────────────────────────────────────────────┘
          │                          │
          ▼                          ▼
-   ┌──────────┐           ┌──────────────────┐
-    │  Source  │           │  Repository Root │
-    │  Files   │◀─symlink──│  ├─ .links/       │
-    │  (任意   │           │  ├─ data/         │
-    │   路径)  │────copy──▶│  └─ .git/         │
-                          └──────────────────┘
+   ┌──────────────┐        ┌──────────────────────────┐
+   │  本机路径     │        │  仓库根目录               │
+   │  （视图）     │◀───────│  ├─ .backup-manager/     │
+   │  软链接 ──────┼───────▶│  │   └─ manifest.json    │
+   └──────────────┘        │  ├─ data/   （真实文件）  │
+                           │  └─ .git/                │
+                           └──────────────────────────┘
 ```
 
 ### 架构核心原则
@@ -58,9 +59,10 @@
 | 原则 | 说明 |
 |------|------|
 | **前后端一体** | 所有代码编译为单一二进制，前端通过 embed.FS 内嵌 |
-| **响应式 API** | RESTful JSON API，无状态设计（状态由 SQLite 持久化） |
+| **响应式 API** | RESTful JSON API；仓库固有状态存 SQLite，条目/链接/设备定义存于仓库内（§9） |
 | **路径安全第一** | 所有用户输入的路径必须通过 SafeResolve 安全校验函数 |
-| **镜像一致性** | `.links/` 和 `data/` 始终镜像一致（添加/删除软链接时同步操作） |
+| **内容单一归属** | 内容只存在于 `data/`；本机路径只是指向它的软链接视图 —— 没有镜像目录，没有同步步骤（§9） |
+| **条目级一致性** | 链接只绑定完整条目，绝不绑定子路径；`in` 链接是 `out` 链接的特例（§9.3.3） |
 | **认证隔离** | Git 认证信息加密存储，仅 git 操作时注入环境变量 |
 
 ## 3. 详细设计
@@ -75,20 +77,40 @@ DELETE /api/v1/repos/:id                      → RepoHandler.Delete
 PUT    /api/v1/repos/:id/config               → RepoHandler.UpdateConfig  // ★ P0-1: 配置编辑
 POST   /api/v1/repos/:id/git-init             → RepoHandler.GitInit
 
-POST   /api/v1/repos/:id/symlinks             → SymlinkHandler.Create
-GET    /api/v1/repos/:id/symlinks             → SymlinkHandler.List
-GET    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Get
-DELETE /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.Delete
-PUT    /api/v1/repos/:id/symlinks/:linkId     → SymlinkHandler.UpdateTarget
-POST   /api/v1/repos/:id/symlinks/batch       → SymlinkHandler.BatchImport
-GET    /api/v1/repos/:id/symlinks/:linkId/entries?sub_path= → SymlinkHandler.BrowseDirEntries
-POST   /api/v1/repos/:id/symlinks/:linkId/nested → SymlinkHandler.AddNestedSymlink
+POST   /api/v1/repos/:id/entries/adopt          → EntryHandler.Adopt          // 创建条目及其 `in` 链接（mv 本机 → data/）
+GET    /api/v1/repos/:id/entries?device=&state= → EntryHandler.List
+GET    /api/v1/repos/:id/entries/:entryId       → EntryHandler.Get
+PATCH  /api/v1/repos/:id/entries/:entryId       → EntryHandler.Update
+POST   /api/v1/repos/:id/entries/:entryId/switch → EntryHandler.Switch        // 把 `out` 链接提升为 `in`
+DELETE /api/v1/repos/:id/entries/:entryId       → EntryHandler.Delete
+
+GET    /api/v1/repos/:id/entries/:entryId/links           → LinkHandler.List
+POST   /api/v1/repos/:id/entries/:entryId/links           → LinkHandler.Create // 添加 `out` 链接
+POST   /api/v1/repos/:id/links/bulk                       → LinkHandler.Bulk
+PATCH  /api/v1/repos/:id/entries/:entryId/links/:linkId   → LinkHandler.Update
+POST   /api/v1/repos/:id/entries/:entryId/links/:linkId/repair  → LinkHandler.Repair
+POST   /api/v1/repos/:id/entries/:entryId/links/:linkId/readopt → LinkHandler.Readopt
+POST   /api/v1/repos/:id/entries/:entryId/links/:linkId/remove  → LinkHandler.Remove
+
+GET    /api/v1/devices/current                  → DeviceHandler.Current
+GET    /api/v1/repos/:id/devices                → DeviceHandler.List
+POST   /api/v1/repos/:id/devices                → DeviceHandler.Register
+PATCH  /api/v1/repos/:id/devices/:fp            → DeviceHandler.Rename
+DELETE /api/v1/repos/:id/devices/:fp            → DeviceHandler.Delete
+GET    /api/v1/repos/:id/devices/:fp/links       → DeviceHandler.Links
+POST   /api/v1/repos/:id/devices/:fp/apply       → DeviceHandler.Apply
+POST   /api/v1/repos/:id/devices/:fp/detach      → DeviceHandler.Detach
+
+GET    /api/v1/repos/:id/consistency             → ConsistencyHandler.Audit
+POST   /api/v1/repos/:id/consistency/repair      → ConsistencyHandler.Repair
 
 GET    /api/v1/browse         ?path=...         → BrowseHandler.Browse       // ★ P0-2: 安全修复
 GET    /api/v1/browse/allowed-roots              → BrowseHandler.AllowedRoots
 
-GET    /api/v1/repos/:id/preview ?path=...        → PreviewHandler.Preview    // ★ P0-2: 安全修复
-PUT    /api/v1/repos/:id/save                     → PreviewHandler.Save
+GET    /api/v1/repos/:id/tree    ?path=...        → ContentHandler.Tree
+GET    /api/v1/repos/:id/preview ?path=...        → ContentHandler.Preview
+PUT    /api/v1/repos/:id/save                     → ContentHandler.Save
+GET    /api/v1/repos/:id/changes                  → ContentHandler.Changes
 
 POST   /api/v1/repos/:id/backup                   → BackupHandler.Trigger
 GET    /api/v1/repos/:id/backup/history?limit=&offset= → BackupHandler.History
@@ -157,31 +179,26 @@ func SafeResolve(allowedRoot, userPath string) (string, error) {
 | 编码检测 | 非 UTF-8 编码文件返回提示 |
 | 并发限制 | Preview 最大 5 并发 |
 
-### 3.4 软链接镜像一致性（★ P0-5 修复）
+### 3.4 条目与链接模型（取代 P0-5 镜像一致性设计）
 
-添加软链接时**同步复制源文件到 data/**，确保 `.links/` 和 `data/` 始终一致：
+最初的 P0-5 修复靠「复制」维持 `.links/`、`data/` 与源文件三者一致。条目/链接模型（§9）取消了这份重复：**条目**持有内容，而每个**链接**（无论 `in` 还是 `out`）都是同一种东西 —— 指向 `data/<repo_path>` 的软链接。
 
 ```
-CREATE Symlink:
-  1. 校验 sourcePath → SafeResolve
-  2. 计算相对路径
-  3. os.Symlink(sourcePath → .links/<relPath>)
-  4. copyFile/copyDir(sourcePath → data/<relPath>)  ← 同步复制
-  5. INSERT symlinks 表
+ADOPT（创建条目及其 `in` 链接）:
+  1. 校验 local_path → SafeResolve
+  2. 计算 repo_path
+  3. 移动 local_path → data/<repo_path>          （os.Rename，跨文件系统降级）
+  4. os.Symlink(data/<repo_path> → local_path)
+  5. 把 {条目, link(type=in)} 写入 .backup-manager/manifest.json 并提交
 
-DELETE Symlink:
-  1. 删除 .links/<relPath>
-  2. 删除 data/<relPath>
-  3. 清理空目录
-  4. DELETE FROM symlinks
-
-UPDATE Symlink Target:
-  1. 删除旧 .links/ + data/ 文件
-  2. 创建新软链接 → 复制新源文件
-  3. 更新数据库
+添加 OUT 链接（分发；`in` 是它的特例）:
+  1. 校验条目存在且 data/<repo_path> 存在
+  2. os.Symlink(data/<repo_path> → local_path)   （不复制内容）
+  3. 向该条目追加 link(type=out)，提交
 ```
 
-备份操作退化为：`增量检测源文件变更 → 同步到 data/ → git add -A → git commit → git push`
+不再有镜像目录与复制步骤，因此备份操作退化为：`git add -A → git commit → git push`。
+完整设计见 §9，其中包含防止 `out` 链接绑定到目录条目子路径的各项一致性不变量。
 
 ### 3.5 定时备份调度器（★ P0-3 修复）
 
@@ -234,7 +251,17 @@ type GitAuth struct {
 
 ## 4. 数据存储
 
-### SQLite 表结构
+共有**三份彼此独立的存储**，各自有独立的文件与存在理由，不可混为一谈：
+
+| 数据 | 文件 | 格式 | 为什么放这里 |
+|------|------|------|------|
+| `repos`、`repo_configs`、`repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite（单个二进制文件） | 本机私有：含加密凭据、本机仓库路径、定时任务。**绝不能**提交进仓库 |
+| 条目、链接、设备 | `<repo-root>/.backup-manager/manifest.json` | JSON，由 Git 跟踪 | 必须随 `git clone` / `git push` 跨机器传输。SQLite 文件是按机器独立的，传不过去 |
+| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置，与具体仓库无关 |
+
+### 4.1 SQLite 数据库（本机，按机器独立）
+
+**文件**：`~/.config/backup-manager/backup-manager.db` —— 单个 SQLite 二进制文件。
 
 ```sql
 CREATE TABLE repos (
@@ -268,24 +295,38 @@ CREATE TABLE repo_auths (
     updated_at          DATETIME DEFAULT (datetime('now')),
     FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
 );
-
-CREATE TABLE symlinks (
-    id              TEXT PRIMARY KEY,
-    repo_id         TEXT NOT NULL,
-    relative_path   TEXT NOT NULL,
-    target_path     TEXT NOT NULL,
-    type            TEXT NOT NULL,
-    file_size       INTEGER,
-    modified_at     DATETIME,
-    created_at      DATETIME DEFAULT (datetime('now')),
-    FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
-    UNIQUE(repo_id, relative_path)
-);
 ```
 
-### 应用配置
+这就是完整表结构 —— 三张表。**没有**任何一张表存条目、链接或设备：旧的 `symlinks` 表已删除（§9.17），也没有新建表替代。这些定义**有意**放在 SQLite 之外，见 §4.2。
 
-路径: `~/.config/backup-manager/config.json`
+### 4.2 仓库清单（位于仓库内，由 Git 跟踪）
+
+**文件**：`<repo-root>/.backup-manager/manifest.json` —— 一个位于**仓库内**的 JSON 文件，**不在** SQLite 数据库中。
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-09-18T10:00:00Z",
+  "devices": [ { "fingerprint": "9f2c…", "name": "MacBook Pro", "hostname": "mbp.local",
+                 "os": "darwin", "last_seen_at": "2026-09-18T10:00:00Z" } ],
+  "entries": [ { "id": "e1a2…", "repo_path": "opencode/opencode.json", "kind": "file",
+                 "created_at": "2026-09-01T08:12:00Z",
+                 "links": [ { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+                              "local_path": "/Users/x/.config/opencode/opencode.json",
+                              "enabled": true, "created_at": "2026-09-01T08:12:00Z" } ] } ]
+}
+```
+
+条目/链接/设备**为什么不放进 SQLite** —— 见 §9.3.6：
+
+- SQLite 数据库位于 `~/.config/backup-manager/`，因此是**按机器独立**的。存在那里的定义无法到达第二台机器。
+- 仓库才是被克隆、被推送的对象。把定义放进仓库，才使备份自带描述，并让另一台机器仅凭 `git clone` 就能发现所有设备的链接。
+- 同时免费获得版本化、diff、合并与传输能力 —— 无需另设同步机制。
+
+### 4.3 应用配置
+
+**文件**：`~/.config/backup-manager/config.json`
+
 ```json
 {
   "port": 9800,
@@ -309,9 +350,12 @@ backup-manager/
 │   │   ├── middleware.go
 │   │   └── handler/
 │   │       ├── repo.go
-│   │       ├── symlink.go
+│   │       ├── entry.go         # 条目：adopt / switch / delete
+│   │       ├── link.go          # 链接：add / repair / readopt / remove / bulk
+│   │       ├── device.go        # 设备：register / apply / detach
+│   │       ├── consistency.go   # 巡检 + 修复
 │   │       ├── browse.go
-│   │       ├── preview.go
+│   │       ├── content.go       # tree / preview / save / changes
 │   │       ├── backup.go
 │   │       ├── auth.go
 │   │       ├── rollback.go
@@ -319,15 +363,21 @@ backup-manager/
 │   │       └── errors.go
 │   ├── model/
 │   │   ├── repo.go
-│   │   ├── symlink.go
+│   │   ├── link.go              # Entry、Link、Device、Manifest、LinkState
 │   │   └── auth.go
+│   ├── entry/                   # 条目与链接子系统（§9）
+│   │   ├── manifest.go          # 加载 / 保存 / 原子写 / R-1..R-5 校验
+│   │   ├── entry_service.go     # adopt、rename、release/unlink/move_back/purge
+│   │   ├── link_service.go      # 添加 / 修复 / 重新纳入 / 移除链接、批量链接
+│   │   ├── device_service.go    # register、rename、apply、detach
+│   │   ├── entry_state.go       # 文件系统状态诊断
+│   │   └── consistency.go       # 巡检
 │   ├── service/
 │   │   ├── repo_service.go
-│   │   ├── symlink_service.go
 │   │   ├── backup_service.go
 │   │   ├── auth_service.go
 │   │   ├── browser_service.go
-│   │   ├── preview_service.go
+│   │   ├── content_service.go
 │   │   ├── rollback_service.go
 │   │   └── repo_mutex.go
 │   ├── store/
@@ -335,12 +385,9 @@ backup-manager/
 │   │   ├── store.go
 │   │   ├── repo_store.go
 │   │   ├── repo_config_store.go
-│   │   ├── repo_auth_store.go
-│   │   └── symlink_store.go
+│   │   └── repo_auth_store.go
 │   ├── git/
 │   │   └── git.go
-│   ├── resolver/
-│   │   └── symlink_resolver.go
 │   ├── scheduler/
 │   │   └── scheduler.go
 │   ├── servermgr/
@@ -349,6 +396,7 @@ backup-manager/
 │   └── util/
 │       ├── path.go          # SafeResolve 安全函数
 │       ├── crypto.go        # AES-GCM 加密
+│       ├── device.go        # MachineFingerprint()
 │       └── file.go          # 文件操作工具
 ├── frontend/
 │   ├── package.json
@@ -382,219 +430,45 @@ backup-manager/
 | **P1-5** SafeResolve EvalSymlinks 降级安全盲区 | 区分错误类型：fs.ErrNotExist 可降级，其他错误拒绝 |
 | **P1-6** 缺少错误处理与用户通知方案 | 补充完整错误处理章节：错误分类、SSE 通知、崩溃恢复、回滚机制 |
 
-## 7. 预览编辑功能设计
+## 7. 预览与编辑
 
-### 7.1 概述
+挂载模型（§9）取消了「源文件 / data/ 副本」的二元结构：内容存放在 `<repo>/data/`，本机路径只是指向它的软链接。因此预览与编辑始终只操作同一个文件 `data/<repo_path>`，不存在双写与同步步骤。
 
-在 Preview 页面中，用户可以直接预览和编辑软链接指向的**源文件**（非 `data/` 副本）。编辑保存时，同时写入源文件和同步到 `data/` 目录保持镜像一致性。
+| 操作 | 目标 | 说明 |
+|------|------|------|
+| 预览 | `<repo>/data/<repo_path>` | `repo_path` 即 Browse 树中的节点路径 |
+| 保存 | `<repo>/data/<repo_path>` | 就地写入；本机挂载是同一 inode 的软链接，会立即反映变更 |
+| 备份 | `data/` | `git add -A` 直接收录改动 —— 不涉及任何增量同步 |
 
-**核心变化**：Preview 读取路径从 `data/` 切换到源文件路径（`symlink.TargetPath`）。
-
-### 7.2 后端设计
-
-#### 7.2.1 Store 层 — 新增查询方法
-
-在 `internal/store/symlink_store.go` 中新增通过 `relative_path` 查询 symlink 的方法：
-
-```go
-func (s *Store) GetSymlinkByRelativePath(repoID, relativePath string) (*model.Symlink, error)
-```
-
-利用已有的 `UNIQUE(repo_id, relative_path)` 约束，无需新增索引。
-
-#### 7.2.2 Service 层 — 新增 PreviewService
-
-新建 `internal/service/preview_service.go`，包含以下核心方法：
-
-**ResolveSource** — 将 `relative_path` 解析为源文件绝对路径：
+### 7.1 API 契约
 
 ```
-输入: repoID, relPath = "docs/notes/readme.md"
-
-匹配策略（按优先级）：
-  1. 精确匹配: sym.RelativePath == relPath → 返回 sym.TargetPath
-  2. 最长前缀: 遍历 directory-type symlinks,
-     检查 strings.HasPrefix(relPath, sym.RelativePath+"/")
-     → 返回 filepath.Join(sym.TargetPath, suffix)
-  3. 无匹配: 返回错误
+GET  /api/v1/repos/:id/tree?path=          → 列出 data/<path> 下的条目，含挂载徽标
+GET  /api/v1/repos/:id/preview?path=       → {content, mime_type, size, text, truncated}
+PUT  /api/v1/repos/:id/save                → {path, content} → {file_size, modified_at}
+GET  /api/v1/repos/:id/changes             → {dirty, changes:[{status, path}]}  (git status --porcelain data/)
 ```
 
-**SaveFile** — 保存编辑后的文件内容到源文件，并同步到 `data/`：
+`path` 始终相对于 `data/`（不再是本机绝对路径），因此原先 `ResolveSource` 的最长前缀匹配逻辑被完全删除。
 
-```
-流程:
-  1. ResolveSource 获取源文件路径
-  2. 验证非 directory-type symlink
-  3. os.Stat 获取原始文件权限 mode
-  4. os.WriteFile(sourcePath, content, mode) → 写入源文件
-  5. os.Chmod(sourcePath, mode) → 确保权限不受 umask 影响
-  6. os.MkdirAll(filepath.Dir(dataPath), 0755)
-     os.WriteFile(dataPath, content, mode) → 同步 data/
-     os.Chmod(dataPath, mode) → data/ 也保留权限
-  7. store.UpdateSymlink → 更新 file_size, modified_at
-```
+### 7.2 约束条件
 
-**API 合同**：
-
-```go
-// PUT /api/v1/repos/:id/save
-// Content-Type: application/json
-type SaveRequest struct {
-    Path    string `json:"path" binding:"required"`    // symlink relative path
-    Content string `json:"content" binding:"required"` // 文件内容（UTF-8 文本）
-}
-// 响应: {"data": {"file_size": 1234, "modified_at": "2026-06-12T10:30:00Z"}}
-```
-
-约束：
-| 条件 | 处理 |
+| 场景 | 处理 |
 |------|------|
-| Content > 10MB | 413 Request Entity Too Large |
-| 目录 symlink | 400 Bad Request |
-| 无匹配 symlink | 404 Not Found |
-| 源文件已被删除 | 404 Not Found |
+| `path` 逃逸出 `data/` | `util.SafeJoin` 拒绝 → 400 |
+| 内容 > 10MB | 413 |
+| `path` 是目录 | 400 |
+| `path` 不存在 | 404 |
+| 并发 | 保存走仓库级互斥锁；预览限流 5 并发 |
+| 权限保持 | 先读原始 mode，写入后 `Chmod` 还原 |
 
-#### 7.2.3 Handler 层 — 改造 PreviewHandler
-
-改造 `internal/api/handler/preview.go`：
-
-```go
-type PreviewHandler struct {
-    previewSvc *service.PreviewService
-    semaphore  chan struct{}     // 最大 5 并发，Preview 和 Save 共用
-}
-```
-
-- **Preview 方法**：重写为通过 `PreviewService.Preview(repoID, relPath)` 从源文件读取
-- **Save 方法**：新增，调用 `PreviewService.SaveFile(repoID, path, content)`
-
-#### 7.2.4 路由注册
-
-```go
-v1.GET("/repos/:id/preview", previewHandler.Preview)  // 不变
-v1.PUT("/repos/:id/save", previewHandler.Save)         // 新增
-```
-
-#### 7.2.5 main.go 依赖注入
-
-```go
-previewSvc := service.NewPreviewService(dataStore)      // 新增
-previewHandler := handler.NewPreviewHandler(previewSvc)  // 改造
-```
-
-### 7.3 前端设计
-
-#### 7.3.1 类型定义
-
-```typescript
-export interface SaveFileRequest {
-  path: string;
-  content: string;
-}
-
-export interface SaveFileResult {
-  file_size: number;
-  modified_at: string;
-}
-```
-
-#### 7.3.2 API 客户端
-
-```typescript
-export async function saveFile(repoId: string, req: SaveFileRequest): Promise<SaveFileResult> {
-  const { data } = await api.put<SaveFileResult>(`/repos/${repoId}/save`, req);
-  return data;
-}
-```
-
-#### 7.3.3 TextPreview 改造
-
-- 新增 `editable`, `onContentChange`, `onSave`, `saving` props
-- 展示模式：现有 `<pre>` 只读显示 + "编辑"按钮
-- 编辑模式：`<textarea>` + "保存"/"取消"按钮
-- truncated 文件禁用编辑按钮
-
-#### 7.3.4 MarkdownPreview 改造
-
-- 新增 `editable`, `onContentChange`, `onSave`, `saving` props
-- 使用 Ant Design Tabs 实现 Preview/Edit 模式切换
-- 预览模式：使用 react-markdown + remark-gfm 渲染 Markdown；本地引用（图片/文档）按浏览器默认行为处理，不做路径重写
-- 编辑模式：Markdown 源码 textarea
-- 切换 Tab 不丢失编辑内容
-
-#### 7.3.5 PreviewPanel 改造
-
-- 新增 `editingContent` 编辑中内容状态
-- 新增 `saving` 保存中状态
-- `handleSave` 调用 `saveFile` API → 刷新预览 → 提示成功
-
-### 7.4 数据流
-
-**预览流**：
-```
-用户点击文件节点 → GET /preview?path=<relPath>
-  → PreviewService.ResolveSource → 解析到源文件路径
-  → 从源文件读取内容 → 返回 {content, mime_type, size, text, truncated}
-  → 前端渲染 TextPreview / MarkdownPreview / BinaryInfo
-```
-
-**保存流**：
-```
-用户编辑内容 → 点击保存 → PUT /repos/:id/save {path, content}
-  → 校验: content ≤ 10MB, path 非空
-  → ResolveSource → 解析源文件路径
-  → os.WriteFile(sourcePath, content, origMode) → 写入源文件
-  → os.WriteFile(dataPath, content, origMode) → 同步 data/
-  → UpdateSymlink → 更新元数据
-  → 返回 {file_size, modified_at}
-  → 前端刷新预览 → 提示 "File saved successfully"
-```
-
-### 7.5 边界与异常处理
-
-| 场景 | 处理方式 | 状态码 |
-|------|----------|--------|
-| path 为空 | 返回错误 | 400 |
-| content 为空 | 返回错误 | 400 |
-| content > 10MB | 返回大小限制提示 | 413 |
-| 无匹配 symlink | 返回 "no matching symlink" | 404 |
-| 目标为目录 symlink | 返回 "cannot save directory" | 400 |
-| 源文件已被外部删除 | os.Stat 失败 | 404 |
-| 写源文件成功但 data/ 同步失败 | 记录日志，源文件已更新不回滚 | 200（日志告警） |
-| 无写权限 | os.WriteFile 失败 | 500 |
-
-### 7.6 安全考量
+### 7.3 安全考量
 
 | 风险 | 防护 |
 |------|------|
-| 路径遍历 | 路径来自数据库（WHERE repo_id = ?），非用户直接拼接 |
-| 写入二进制文件 | 前端 truncated 禁用编辑；后端 content 大小校验 |
+| 路径遍历 | 每个请求都过 `util.SafeJoin(dataDir, path)` |
+| 写入二进制内容 | `truncated` 或 `text == false` 时前端禁用编辑；后端做大小校验 |
 | 超大内容 OOM | Content 长度 ≤ 10MB |
-| 权限丢失 | 写入前读取原始 mode，写入后 Chmod 恢复 |
-
-### 7.7 变更影响
-
-| 影响点 | 变更 | 影响程度 |
-|--------|------|----------|
-| Preview 读取路径 | data/ → 源文件 | ✅ 行为变化，符合需求 |
-| Preview 响应格式 | 不变 | ✅ 兼容 |
-| ListDirEntries | 仍读 data/ | ✅ 无需修改 |
-| 备份流程 | 不变。保存后 mtime 变化，下次备份自动检测 | ✅ 兼容 |
-| 回滚服务 | 不变。SymlinkResolver 已正确处理 | ✅ 兼容 |
-| SafeResolveFile(dataDir) | Preview 不再使用 | ⚠️ 移除一处调用 |
-
-### 7.8 测试策略
-
-**单元测试**：
-- `PreviewService.ResolveSource`：精确匹配、前缀匹配、无匹配
-- `PreviewService.SaveFile`：保存后元数据更新、权限保持、源文件不存在
-- Save Handler：content 超限、目录 symlink、请求格式错误
-
-**集成测试**：
-- 文件 symlink 预览 → 源文件内容正确
-- 目录 symlink 内部文件预览 → 内容正确
-- 编辑保存 → 重新预览 → 内容已更新
-- 并发保存与备份 → 无数据损坏
 
 ## 8. 系统托盘设计
 
@@ -626,3 +500,787 @@ main()
   ├── srvMgr.Stop() → 优雅关闭 HTTP 服务器
   └── 最终清理（关闭 DB、销毁 key manager）
 ```
+
+## 9. 条目与链接模型 —— 全新设计
+
+> 落地 Issue #4（双向软链接管理 + 多设备支持）。
+> **取代 §3.4 与整个 `/symlinks` API。** 不兼容旧的 `symlinks` 表、`.links/` 目录与「复制式」备份流程 —— 见 §9.17。
+
+### 9.1 旧模型为什么复杂
+
+旧设计为同一个文件维护了**三份表示**：源文件、`data/` 副本、`.links/` 软链接。维持三者一致带来大量机制：
+
+| 机制 | 存在的原因 |
+|------|------|
+| 增量检测（mtime + size） | 源文件与 `data/` 会漂移 |
+| `syncOneFile` / `syncDirectoryFiles` / `walkSourceDir` | 需要把源文件重新拷入 `data/` |
+| `.links/` 镜像一致性 | 第三份表示也要同步 |
+| `SyncDeletedSource` | 要猜「路径消失」是「源被删」还是「链接被删」（一个数据丢失缺陷） |
+| `is_new` 比较 | 源 ≠ `data/` |
+| 预览双写（源文件 **和** `data/`） | 存在两份可写副本 |
+| `ResolveSource` 最长前缀匹配 | 需要把仓库路径反查回本机路径 |
+| 嵌套软链接特例 | 源目录树内还要放软链接 |
+
+根因就是这份重复。因此本次设计直接取消它：
+
+> **内容归属于仓库。本机路径只是它的视图。**
+
+### 9.2 设计原则
+
+| # | 原则 | 推论 |
+|------|------|------|
+| **P-1** | 内容只有一个归属：`data/<repo_path>` | 无漂移、无同步、无比对 |
+| **P-2** | 本机路径是指向 `data/` 的**软链接** | 通过它写入即写入仓库副本 |
+| **P-3** | **`in` 是 `out` 的特例** | 只有一套链接机制；`in` 角色是其中被特别对待的那一个实例 |
+| **P-4** | 链接绑定**完整条目**，绝不绑定子路径 | 条目与其 in/out 链接保持完全一致 |
+| **P-5** | 定义存放在仓库内并由 Git 跟踪 | `<repo>/.backup-manager/manifest.json` 是唯一事实来源 |
+| **P-6** | Git 是安全网 | 每次破坏性操作前先提交 |
+| **P-7** | 幂等收敛，而非增量记账 | `apply` 比对「期望状态 vs 实际状态」并收敛 |
+
+### 9.3 核心模型
+
+两个实体：**条目（Entry）** 是被备份的文件/目录，**链接（Link）** 是它的 `in` 或 `out` 视图。
+
+#### 9.3.1 条目（Entry）
+
+```
+条目:  repo_path = opencode/opencode.json   kind = file
+       内容    = <repo>/data/opencode/opencode.json      ← 唯一的一份副本
+```
+
+**条目**是备份的最小单位：`data/` 下的一个 `repo_path`，加上所有指向它的链接。条目由 `in` 链接创建（§9.4.1），且条目之间永不重叠（§9.3.4 R-3）。
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 稳定短 id，供 API 使用 |
+| `repo_path` | 相对 `data/` 的路径 —— 内容的全局身份 |
+| `kind` | `file` \| `dir` —— 缓存的内容类型 |
+| `created_at` | |
+| `links` | 绑定到该条目的链接列表（有序） |
+
+#### 9.3.2 链接（Link）
+
+```
+   link.local_path                          entry.repo_path
+   /Users/x/.config/opencode/o.json   ⟷   opencode/opencode.json
+                  │
+                  └── 软链接 ──▶  <repo>/data/opencode/opencode.json
+```
+
+**链接**把一个本机路径绑定到一个条目。它的物理形态**永远相同**：`local_path` 是指向 `<repo>/data/<entry.repo_path>` 的软链接。
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 稳定短 id |
+| `type` | **`in`** —— 条目的主链接 / 跟踪链接，每个条目**至多一个**<br>**`out`** —— 额外的分发链接，每个条目 0..N 个 |
+| `device` | 所属设备的指纹 |
+| `local_path` | 软链接的本机绝对路径 |
+| `enabled` | 禁用后仍保留，但 `apply` 跳过 |
+| `created_at` | |
+
+#### 9.3.3 `in` 是 `out` 的特例
+
+这是本次设计的核心简化。物理上，`in` 链接与 `out` 链接**无法区分** —— 都是指向 `data/<repo_path>` 的软链接。它们的差别只在角色：
+
+| 维度 | `in` | `out` |
+|------|------|------|
+| 每个条目数量 | **0 或 1** —— 正常情况恰为 1，仅在新设备初始化时为 0 | 0..N 个 |
+| 由谁创建 | `adopt`（把源内容移入 `data/`），或 `switch`（由 `out` 提升而来） | 「添加链接」—— 只对已存在的内容建立视图 |
+| 语义 | 条目的**归属 / 跟踪**链接 | 额外的分发位置 |
+| 是否为默认跟踪链接 | 是 | 否 |
+| 能否直接移除 | 可以，但条目会变成**未绑定**（§9.9） | 可以 |
+| `move_back` 的默认目标 | 是 | 仅在显式指定时 |
+
+实际推论：
+
+- **只有一套实现。** `createLink(entry, localPath, type)` 同时服务两者。`in` 流程 = `out` 流程 + 前置的「内容移入」。
+- **任何 `out` 链接都可以提升为 `in`** —— 这是纯元数据变更，完全不触碰文件系统（§9.5）。
+- **没有 `in` 链接的机器也能正常工作。** 设备 B 上的一个 out 链接，功能上就是一个完整的条目光标副本。
+
+#### 9.3.4 一致性不变量
+
+Issue #4 要求 in 与 out 链接必须与被备份的文件/目录保持**完整一致性**：不能 in 跟踪一个目录，却对这个目录里的单独一个文件做 out 软链接。这里把该规则泛化为五条不变量：
+
+| # | 不变量 | 由谁强制 |
+|------|------|------|
+| **R-1** | 每个条目**至多一个** `in` 链接。正常情况恰为 1 个；**初始化新设备时允许为 0**，此时该条目处于**未绑定**状态，等待用户指定 | API、清单校验、巡检 |
+| **R-2** | 条目的每个链接都绑定**该条目的完整 `repo_path`** —— 绝不指向其内部路径 | 结构性保证：链接只能挂在条目上，API 不接受子路径 |
+| **R-3** | 条目之间**永不重叠**：任何 `repo_path` 都不是另一个的祖先或后代 | `adopt` / 重命名时校验 → 409 |
+| **R-4** | 链接的 `local_path` 不得位于某个目录条目的 `local_path` **之内** | 创建链接时校验 → 409 |
+| **R-5** | 同一条目的所有链接物理形态完全一致：同一目标 `data/<repo_path>`、同一 `kind` | 由构造保证（同一目标）+ 一致性巡检（§9.8） |
+
+R-3 是 Issue 规则的泛化：如果某个 `in` 链接以目录条目形式跟踪 `~/Documents`，那么它内部的任何东西都不能被单独跟踪或单独链接。要单独处理就改用互不重叠的 `repo_path`（例如把 `~/Projects/vendor` 记为 `projects/vendor`，而不是 `docs/vendor`）。
+
+R-4 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 上时，在 `~/Desktop/notes/file.md` 建 out 链接会被拒绝。
+
+#### 9.3.5 设备（Device）
+
+**设备**是引用该仓库的一台机器，是元数据；链接通过指纹引用它。
+
+| 字段 | 说明 |
+|------|------|
+| `fingerprint` | 稳定机器标识，`sha256("<GOOS>|<raw>")` 十六进制 —— 即设备主键 |
+| `name` | 用户可见名称，默认取 hostname，可重命名 |
+| `hostname`、`os` | 仅用于展示 |
+| `last_seen_at` | 每次 `apply` 更新 |
+
+指纹取值顺序：
+
+| 系统 | 来源 | 兜底 |
+|------|------|------|
+| Linux | `/etc/machine-id`，其次 `/var/lib/dbus/machine-id` | — |
+| macOS | `ioreg -rd1 -c IOPlatformExpertDevice` → `IOPlatformUUID` | — |
+| Windows | `reg query HKLM\SOFTWARE\Microsoft\Cryptography /v MachineGuid` | — |
+| 任意 | — | `sha256(hostname + "|" + username)` |
+
+只存哈希。缓存于 `~/.config/backup-manager/device.json`。
+
+#### 9.3.6 仓库结构与清单
+
+```
+<repo-root>/
+├── .backup-manager/
+│   └── manifest.json      # 设备 + 条目 + 链接（Git 跟踪，唯一事实来源）
+├── data/                  # 真实内容，Git 跟踪 —— 唯一的内容存放处
+└── .git/
+```
+
+清单以**条目**为单位组织，这正是让 R-2、R-3 在结构上显而易见的原因 —— 一个条目的所有链接都紧邻该条目，子路径链接根本无法被表达出来。
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-09-18T10:00:00Z",
+  "devices": [
+    { "fingerprint": "9f2c1a4b7d8e0f31", "name": "MacBook Pro",
+      "hostname": "mbp.local", "os": "darwin",
+      "last_seen_at": "2026-09-18T10:00:00Z" }
+  ],
+  "entries": [
+    {
+      "id": "e1a2b3c4d5e6f708",
+      "repo_path": "opencode/opencode.json",
+      "kind": "file",
+      "created_at": "2026-09-01T08:12:00Z",
+      "links": [
+        { "id": "l1a2b3c4d5e6f708", "type": "in",
+          "device": "9f2c1a4b7d8e0f31",
+          "local_path": "/Users/x/.config/opencode/opencode.json",
+          "enabled": true, "created_at": "2026-09-01T08:12:00Z" },
+        { "id": "l2b3c4d5e6f70819", "type": "out",
+          "device": "9f2c1a4b7d8e0f31",
+          "local_path": "/Users/x/Desktop/opencode.json",
+          "enabled": true, "created_at": "2026-09-10T12:00:00Z" }
+      ]
+    },
+    {
+      "id": "e2b3c4d5e6f70819",
+      "repo_path": "docs/notes",
+      "kind": "dir",
+      "created_at": "2026-09-02T09:00:00Z",
+      "links": [
+        { "id": "l3c4d5e6f7081920", "type": "in",
+          "device": "9f2c1a4b7d8e0f31",
+          "local_path": "/Users/x/Documents/notes",
+          "enabled": true, "created_at": "2026-09-02T09:00:00Z" }
+      ]
+    }
+  ]
+}
+```
+
+| 规则 | 说明 |
+|------|------|
+| 事实来源 | 清单是权威。SQLite 只保存 `repos`、`repo_configs`、`repo_auths` 这类天生属于单机的数据 |
+| 写入 | 任何变更都重写文件并立即提交（`link: add out /Users/x/Desktop/opencode.json`）。写入是原子的：`manifest.json.tmp` → `fsync` → `os.Rename` |
+| 读取 | 打开仓库时加载，按 `repoID` + 文件 mtime 缓存于内存 |
+| 传输 | 它位于仓库内，随 `git clone` / `git push` 一起走。新机器一次即可获知所有设备的链接 |
+| 手工编辑 | 支持。缺少 `id` 的条目在加载时补全；未知字段原样保留；无法解析的文件会阻止所有写入，而不是被静默重写 |
+| 冲突 | Git 就是冲突解决器。合并冲突表现为该文件上的普通 Git 冲突；在冲突解决前应用拒绝写入 |
+
+### 9.4 创建流程
+
+#### 9.4.1 Adopt —— 创建条目及其 `in` 链接
+
+```
+1. 校验 local_path：存在、不是软链接、父目录可写、不在 repo.Path 内
+2. repo_path = 用户输入，默认 filepath.Base(local_path)
+3. R-3 校验：repo_path 不得是任何既有条目的祖先或后代 → 409
+4. data/<repo_path> 不得已存在 → 409
+5. 若 local_path 是目录，扫描其中的软链接。
+     发现任何软链接 → 拒绝（它会把仓库之外的内容拖进来，破坏「内容只存在于 data/」），
+     并列出问题路径。可用 `follow_symlinks: true` 改为解引用。
+6. 移动 local_path → <repo>/data/<repo_path>
+     - 优先 os.Rename；跨文件系统（EXDEV）降级为 CopyFile + 校验大小 + Remove
+7. 创建 `in` 链接：local_path → <repo>/data/<repo_path>
+8. 把 {条目, link(type=in)} 追加到清单，提交
+```
+
+失败回滚：
+
+| 失败点 | 补偿动作 |
+|------|------|
+| 步骤 6 失败 | 未移动任何内容 —— 直接返回错误 |
+| 步骤 7 失败 | 把 `data/<repo_path>` 移回 `local_path` |
+| 步骤 8 失败 | 删除软链接，把 `data/<repo_path>` 移回 `local_path` |
+
+#### 9.4.2 添加链接 —— 创建 `out` 链接
+
+```
+1. 解析条目；它必须存在。**不要求**已有 `in` 链接 —— 这条流程正是
+   新初始化的设备为「尚未绑定 in 链接」的条目建立首个链接的方式
+2. 校验 local_path：不存在，或为空目录
+3. R-4 校验：local_path 不得位于任何目录条目的 local_path 之内 → 409
+4. local_path 不得位于 repo.Path 内
+5. 确保 local_path 的父目录存在
+6. 创建软链接：local_path → <repo>/data/<entry.repo_path>
+7. 向该条目追加 link(type=out)，提交
+```
+
+同一个 `repo_path` 可以带多个 `out` 链接，同设备或跨设备皆可 —— 这正是 Issue 所说的「把同一份备份分发到不同位置」。
+
+#### 9.4.3 批量链接 —— 把仓库落到一台机器上
+
+```
+POST /api/v1/repos/:id/links/bulk  { local_root, entry_ids? }
+```
+
+选择一个或多个条目（或全部）与一个本机根目录；服务端为每个条目在 `<local_root>/<repo_path>` 创建一个 `out` 链接。`local_root` 同样要过 R-4 校验。这就是「我刚把这台新机器 clone 下来，一键把我的文件放回去」的操作。
+
+#### 9.4.4 禁止的形态
+
+| 形态 | 为什么禁止 | 错误 |
+|------|------|------|
+| 对目录条目内部的单个文件建 `out` 链接 | 破坏 Issue 要求的完整一致性（R-2、R-4） | 409 |
+| 嵌套条目：某条目的 `repo_path` 位于另一条目之内 | 同一个子树出现两个归属（R-3）；这也取代了旧的 `AddNestedSymlink` 功能 | 409 |
+| 链接的 `local_path` 位于目录条目的 `local_path` 之内 | 归属含糊（R-4） | 409 |
+| 条目有**两个** `in` 链接 | R-1（「至多一个」） | 加载时拒绝 / 巡检报错 |
+
+> 没有 `in` 链接**不属于**禁止形态。按 R-1，它是「内容已在 `data/` 中（clone 或其它方式导入）、而新设备尚未指定链接」时的合法状态 —— 即**未绑定**条目（§9.7）。UI 会明确提示，并提供「把某个链接指定为 `in`」的操作。
+
+> 注意这里是有意为之的删减：旧的 `AddNestedSymlink` 允许目录软链接内部再放指向无关位置的链接。在 R-3 下，这种需求改为把该子内容作为**自己的、互不重叠的条目**来 adopt（例如用 `projects/vendor` 而不是 `docs/vendor`）。
+
+### 9.5 切换跟踪链接
+
+#### 9.5.1 「跟踪」的含义
+
+条目通过它的**跟踪链接**跟踪变更，而跟踪链接就是它的 `in` 链接。跟踪链接是条目的指定工作副本：UI 里「编辑」打开的路径、条目展示的主位置、`move_back` 的默认来源，以及「该条目有新变更」的归属锚点。
+
+硬性要求是：**可以在任意 `out` 链接中指定一个新的 `in` 链接**。指定之后，被备份的文件/目录就改为跟踪这个新的链接对应的变更，而原先的 `in` 链接转为普通的 `out` 链接。
+
+```
+指定前：  in  ~/Documents/notes   ──  跟踪中
+          out ~/Desktop/notes
+          out ~/work/notes
+
+POST /entries/:id/switch { link_id: <~/work/notes> }
+
+指定后：  out ~/Documents/notes
+          out ~/Desktop/notes
+          in  ~/work/notes        ──  跟踪中（整体取代原来的 in 链接）
+```
+
+由于 `in` 是 `out` 的特例，**切换跟踪链接是纯元数据操作**：所有链接本来就指向同一个 inode，文件系统上不存在任何变化。
+
+没有 `in` 链接的条目（未绑定，R-1）没有跟踪链接；指定一个即可同时完成绑定并（重新）建立跟踪。
+
+#### 9.5.2 切换流程
+
+```
+POST /api/v1/repos/:id/entries/:entryId/switch  { link_id }
+
+1. 校验：目标链接属于该条目且处于启用状态
+2. 原 `in` → type = "out"        （条目未绑定时跳过）
+3. 目标链接 → type = "in"        （条目此后跟踪该链接）
+4. 重写清单，提交
+```
+
+不创建、不移动、不删除任何软链接。正因为如此，Issue 提出的「后期把当前跟踪的 in 链接切换到另一个 out 链接上」几乎零成本。
+
+#### 9.5.3 换机场景
+
+```
+设备 A 退役：
+  1. 在设备 B 上选中 ~/dev/opencode/opencode.json 这个 out 链接
+     POST /entries/:id/switch { link_id: <B 的链接> }
+     → B 的链接成为该条目的 `in`；A 的链接降为 `out`
+  2. 删除设备 A（或 detach 它）
+     → A 的链接从清单移除，A 上的软链接被删除
+  条目、data/ 中的内容、以及其他所有链接都不受影响。
+```
+
+### 9.6 设备生命周期
+
+#### 9.6.1 注册
+
+```
+1. 计算当前机器指纹
+2. 打开仓库 → 解析清单
+3. 若已存在同指纹设备 → 更新 last_seen_at
+   否则 → 追加新设备（name = hostname），提交
+4. 将其设为当前设备（会话内存态，不写入清单）
+```
+
+注册是隐式的：打开仓库、执行 `apply`、创建链接时都会发生。UI 不会把「先创建设备」作为前置步骤。
+
+#### 9.6.2 Apply —— 让本机收敛
+
+```
+POST /api/v1/repos/:id/devices/:fingerprint/apply   { dry_run: true }
+
+1. 收集 device 为当前指纹的全部链接
+2. 逐条诊断实际文件系统状态（§9.7）
+3. 生成计划：
+     create  —— missing      → 创建软链接
+     repair  —— wrong_target → 重建软链接
+     skip    —— ok / disabled / replaced
+     conflict—— occupied     → 报告，绝不覆盖
+     orphan  —— dangling     → 仅报告（仓库内容已缺失）
+4. 返回计划（dry run）→ UI 在确认弹窗中展示
+5. 用户确认后，在仓库级互斥锁下执行，并逐条返回结果
+```
+
+`apply` 是幂等的，且从不触碰内容：它只创建、修复或报告软链接。
+
+#### 9.6.3 Detach / 移交
+
+```
+POST /api/v1/repos/:id/devices/:fingerprint/detach  { mode: "unlink" | "keep" }
+```
+
+| 模式 | 行为 |
+|------|------|
+| `unlink` | 删除该设备的所有本机软链接。`data/` 完全不动，内容完整保留 |
+| `keep` | 不动文件系统，只是不再管理（用于把机器交出去） |
+
+Detach **不会**删除设备条目 —— 定义仍留在清单里，重新挂载只需一次点击。
+
+删除设备（`DELETE /devices/:fingerprint`）会移除它的链接定义。对每个受影响的条目，如果被删设备持有该条目的 `in` 链接，则**自动把剩下最早的启用 `out` 链接提升为 `in`**，使跟踪无需人工干预即可延续。若已无其他链接，条目只是变为**未绑定**（0 个 `in` 链接）—— 按 R-1 这是合法状态，由巡检报告，并在 UI 上提供一键「指定 `in` 链接」。删除设备从不触碰该设备的文件系统。当前设备不允许被删除。
+
+### 9.7 链接状态与修复
+
+状态按需从文件系统计算，从不持久化。
+
+| 状态 | 判定条件 | 可提供的动作 |
+|------|------|------|
+| `ok` | `local_path` 是软链接，且解析目标为 `data/<entry.repo_path>` | — |
+| `missing` | `Lstat(local_path)` 返回 `ErrNotExist` | 创建 |
+| `wrong_target` | 是软链接但指向别处 | 修复 |
+| `replaced` | `local_path` 存在且是**真实**文件/目录 | 「重新纳入」（把内容移入 `data/` 后重建链接）或移除链接 |
+| `dangling` | 软链接存在但仓库中 `data/<repo_path>` 缺失 | 从 Git 历史回滚，或移除 |
+| `occupied` | 路径被无关对象占用，无法安全替换 | 人工处理 |
+| `disabled` | `enabled == false` | — |
+| `not_current` | 属于其他设备 | 只读展示 |
+
+> `replaced` 值得强调：采用「临时文件 + rename」原子写配置的应用，会把软链接替换成真实文件。UI 将其呈现为 `replaced`，并提供一键**重新纳入**：把新内容移入 `data/` 后恢复软链接。建议：当某个应用自己管理该文件时，优先跟踪**目录**而不是单个文件。
+
+> `dangling` 天生安全：内容都在 Git 里，`git checkout <commit> -- data/<repo_path>` 即可恢复。UI 直接给出回滚入口。
+
+**条目级状态 —— `unbound`（未绑定）**：与上面的逐链接状态不同，一个条目可能有 **0 个 `in` 链接**（§9.3.4 R-1）。这是条目自身的属性而非某个链接的属性：该条目没有跟踪链接，UI 会显示横幅并提供「把某个 `out` 链接指定为新的 `in`」（§9.5）或「创建链接」（§9.4.2）。这正是初始化新设备后的预期状态 —— 内容已存在于 `data/`，但还没有任何本机路径绑定到它。`apply` **绝不**自动解决它，因为「哪条链接应当成为 `in`」只能由用户决定。
+
+### 9.8 一致性巡检
+
+```
+GET  /api/v1/repos/:id/consistency            # 条目级 + 链接级的巡检结论
+POST /api/v1/repos/:id/consistency/repair     # 收敛所有可收敛项
+```
+
+| 检查项 | 结论码 | 级别 |
+|------|------|------|
+| 条目有**多于一个** `in` 链接 | `multiple_in` | error |
+| 条目**没有** `in` 链接（未绑定） | `no_in_link` | warning —— 按 R-1 合法（例如新设备尚未指定）；`apply` 绝不自动解决 |
+| 两个条目重叠（手工编辑清单造成） | `overlapping_entries` | error |
+| 链接的 `local_path` 位于某目录条目的 `local_path` 之内 | `nested_link` | error |
+| 链接未解析到其条目的 `data/<repo_path>` | `link_drift`（附带 §9.7 的状态） | warning |
+| 活跃条目对应的 `data/<repo_path>` 在仓库中缺失 | `content_missing` | error |
+| `data/` **内部**存在软链接 | `symlink_in_data` | error —— 破坏「内容只存在于 `data/`」 |
+| 扫描已注册链接的父目录时，发现指向 `data/` 的未托管软链接 | `unmanaged_link` | warning（可选扫描） |
+
+`unmanaged_link` 正是 Issue 所禁止形态的直接探测手段：一个绕过应用创建的、指向子路径的链接。它无法扫描整个文件系统，因此范围限定在已注册链接的父目录，并作为 warning 而非 error 报告。
+
+### 9.9 移除
+
+**链接级** —— 永远安全：
+
+```
+POST /api/v1/repos/:id/entries/:entryId/links/:linkId/remove
+```
+
+删除本机软链接与该链接记录。`data/` 不动，条目的其他链接继续可用。
+
+移除 `in` 链接是允许的，但条目会变成**未绑定** —— 没有跟踪链接。UI 会提示并提供「把另一个 `out` 链接指定为新的 `in`」（§9.5）；若希望跟踪无缝交接、不出现未绑定窗口，应优先使用 `/switch`。下面的条目级操作用于「该链接本就不应存在」的情形。
+
+**条目级**：
+
+```
+DELETE /api/v1/repos/:id/entries/:entryId?mode=...
+```
+
+| 模式 | 行为 | 守卫 |
+|------|------|------|
+| `release` | 移除条目记录与全部链接记录；**保留** `data/<repo_path>` 作为未跟踪内容；只删除本机软链接 | 无 —— 安全 |
+| `unlink` | 只删除本机的软链接；条目保留。若本机持有 `in` 链接，条目将变为未绑定 —— 若需继续跟踪请先指定另一条链接 | R-1（≤ 1） |
+| `move_back` | 把 `data/<repo_path>` 移到指定链接的 `local_path`，然后移除整个条目 | 提示其他链接将失效；需要确认 |
+| `purge` | 删除 `data/<repo_path>` **以及**整个条目 | 需要输入 `repo_path` 二次确认；提示其他设备的链接将失效，并在其下次 `apply` 时被报告 |
+
+每次移除前都会先提交，因此 `git revert` 永远可用 —— **Git 就是回收站**，无需再设计一套独立的回收机制。
+
+### 9.10 服务与存储划分
+
+```
+internal/
+├── entry/                        # 新包 —— 整个子系统
+│   ├── manifest.go               # 加载 / 保存 / 原子写 / R-1..R-5 校验
+│   ├── service.go                # Service 装配、仓库互斥锁、清单提交、公共辅助
+│   ├── entry_service.go          # adopt、list、remove（unlink / move_back / purge）
+│   ├── link_service.go           # 添加 out 链接、批量链接、switch、repair、remove
+│   ├── device_service.go         # register、rename、delete、apply
+│   ├── entry_state.go            # 逐链接状态诊断与视图构建（§9.7）
+│   └── entry_service_test.go
+├── model/
+│   ├── repo.go                   # 不变
+│   ├── auth.go                   # 不变
+│   └── link.go                   # 新增 —— Entry、Link、Device、Manifest、LinkState
+└── util/
+    ├── device.go                 # 新增 —— MachineFingerprint()
+    └── repo_mutex.go             # 从 service 迁入 —— 备份/回滚/链接操作共享
+```
+
+重构后的 SQLite 表 —— 全部位于 `~/.config/backup-manager/backup-manager.db`；条目/链接/设备定义则位于仓库清单中（§4.2）：
+
+```sql
+repos         — id, name, path, created_at, updated_at, last_backup_at, status   （不变）
+repo_configs  — repo_id(FK), remote_url, branch, auto_backup, ...                （不变）
+repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                      （不变）
+-- symlinks 表：已删除
+```
+
+### 9.11 API
+
+**条目**
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/v1/repos/:id/entries?device=&state=` | 条目列表（含链接与状态；`?group=device` 按设备聚合视图） |
+| GET | `/api/v1/repos/:id/entries/:entryId` | 条目详情 |
+| POST | `/api/v1/repos/:id/entries/adopt` | 创建条目及其 `in` 链接：`{local_path, repo_path?, follow_symlinks?}` |
+| PATCH | `/api/v1/repos/:id/entries/:entryId` | `{repo_path?}` —— 重命名；重新校验 R-3 |
+| POST | `/api/v1/repos/:id/entries/:entryId/switch` | 指定某个 `out` 链接为新的 `in` 链接：`{link_id}`。此后条目跟踪它的变更，原 `in` 转为普通 `out`。纯元数据变更，也可用于给未绑定条目建立绑定 |
+| DELETE | `/api/v1/repos/:id/entries/:entryId?mode=` | `release` / `unlink` / `move_back` / `purge` |
+
+**链接**
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/v1/repos/:id/entries/:entryId/links` | 条目的链接及状态 |
+| POST | `/api/v1/repos/:id/entries/:entryId/links` | 添加 `out` 链接：`{local_path, device?}` |
+| POST | `/api/v1/repos/:id/links/bulk` | 批量 `out` 链接：`{local_root, entry_ids?}` |
+| PATCH | `/api/v1/repos/:id/entries/:entryId/links/:linkId` | `{local_path?, enabled?}` |
+| POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/repair` | 重建软链接 |
+| POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/readopt` | `replaced` → 把新内容移入 `data/` 并重建链接 |
+| POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/remove` | 移除单个链接 |
+
+**设备**
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/v1/devices/current` | 当前机器的指纹 / 主机名 / 建议名称 |
+| GET | `/api/v1/repos/:id/devices` | 设备列表（`fingerprint`、名称、`last_seen_at`、链接数、`is_current`） |
+| POST | `/api/v1/repos/:id/devices` | 注册 / 认领设备（`name`、可选 `fingerprint`） |
+| PATCH | `/api/v1/repos/:id/devices/:fingerprint` | 重命名设备 |
+| DELETE | `/api/v1/repos/:id/devices/:fingerprint` | 删除设备（必要时自动提升新的 `in` 链接） |
+| GET | `/api/v1/repos/:id/devices/:fingerprint/links` | 该设备的链接及状态 |
+| POST | `/api/v1/repos/:id/devices/:fingerprint/apply` | 收敛本机（支持 `dry_run`） |
+| POST | `/api/v1/repos/:id/devices/:fingerprint/detach` | 卸载本机 |
+
+**一致性**
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/v1/repos/:id/consistency` | 巡检结论（§9.8） |
+| POST | `/api/v1/repos/:id/consistency/repair` | 收敛所有可收敛项 |
+
+**内容**（结构不变，语义简化 —— 见 §7）
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/v1/repos/:id/tree?path=` | `data/` 下的条目，附条目徽标与链接数 |
+| GET | `/api/v1/repos/:id/preview?path=` | 文件预览 |
+| PUT | `/api/v1/repos/:id/save` | 保存到 `data/` |
+| GET | `/api/v1/repos/:id/changes` | `git status --porcelain data/` |
+
+载荷：
+
+```go
+type Entry struct {
+    ID        string `json:"id"`
+    RepoID    string `json:"repo_id"`
+    RepoPath  string `json:"repo_path"`
+    Kind      string `json:"kind"` // file | dir
+    CreatedAt string `json:"created_at"`
+    Links     []Link `json:"links"`
+}
+
+type Link struct {
+    ID         string `json:"id"`
+    EntryID    string `json:"entry_id"`
+    Type       string `json:"type"`   // in | out
+    Device     string `json:"device"` // 设备指纹
+    DeviceName string `json:"device_name,omitempty"`
+    LocalPath  string `json:"local_path"`
+    Enabled    bool   `json:"enabled"`
+    Tracked    bool   `json:"tracked"`  // 派生：type == "in"
+    IsCurrent  bool   `json:"is_current"` // 派生：device == 当前指纹
+    CreatedAt  string `json:"created_at"`
+    State      string `json:"state"`
+    StateNote  string `json:"state_note,omitempty"`
+}
+
+type ApplyRequest struct {
+    DryRun  bool     `json:"dry_run"`
+    LinkIDs []string `json:"link_ids,omitempty"` // 为空表示该设备全部链接
+}
+
+type ApplyResult struct {
+    Device      string       `json:"device"`
+    Created     []LinkAction `json:"created"`
+    Repaired    []LinkAction `json:"repaired"`
+    Skipped     []LinkAction `json:"skipped"`
+    Conflicts   []LinkAction `json:"conflicts"`
+    Orphans     []LinkAction `json:"orphans"`
+    Failed      []LinkAction `json:"failed"`
+    DryRun      bool         `json:"dry_run"`
+    CompletedAt string       `json:"completed_at"`
+}
+```
+
+### 9.12 前端设计
+
+仓库详情页标签：**Browse** · **Entries** · **Backup** · **Config**。
+
+```
+components/entry/
+├── EntriesPanel.tsx          # Tab 根组件：设备选择器 + 条目树 + 一致性横幅
+├── DeviceSelector.tsx        # 设备下拉、注册 / 应用 / 卸载
+├── EntryList.tsx             # 按 repo_path 分组展示条目，可展开查看链接
+├── LinkRow.tsx               # 单条链接：类型徽标（in/out）、设备、本机路径、状态、操作
+├── LinkStateTag.tsx          # ok / missing / wrong_target / replaced / dangling / occupied
+├── AdoptModal.tsx            # 创建条目：本机选择 + repo_path 编辑 + R-3 冲突提示
+│                             #   + 「内容将被移入仓库」警告
+├── AddLinkModal.tsx          # 添加 out 链接：本机路径选择，R-4 提示
+├── BulkLinkModal.tsx         # 批量选条目 + 一个本机根目录
+├── SwitchTrackedModal.tsx    # 把 out 提升为 in（说明：仅元数据变更，不动文件系统）
+├── ApplyPlanModal.tsx        # dry-run 计划 → 确认执行
+├── ConsistencyPanel.tsx      # 巡检结论 + 一键修复
+└── RemoveEntryModal.tsx      # release / unlink / move_back / purge 单选 + 守卫
+```
+
+列表以条目为中心，因为不变量本身就是条目级的：
+
+```
+[设备: MacBook Pro（当前）▾]  [+ 新建条目]  [应用]  [巡检]
+────────────────────────────────────────────────────────────────────
+▾ opencode/opencode.json                             文件   ✓ 一致
+    ● in   ~/.config/opencode/opencode.json   MacBook Pro    [跟踪中]  [移除]
+    ● out  ~/Desktop/opencode.json            MacBook Pro    [设为跟踪][移除]
+    ○ out  ~/work/opencode/opencode.json      MacBook-Pro-2  其他设备
+▸ docs/notes                                          目录   ⚠ 1 个链接待修复
+▸ projects/vendor                                     目录   ⚠ 无 in 链接 —— [指定]
+```
+
+每条 `out` 链接行都带 **设为跟踪** 操作（§9.5）。没有 `in` 链接的条目展示 §9.7 所述的 `unbound` 横幅，而不是某个逐链接状态。
+
+`components/files/FilesPanel.tsx`（Browse）渲染 `data/` 目录树，并在每个节点显示徽标：是条目 / 不是条目 / 存在链接漂移。`symlink/` 下组件全部删除。
+
+`frontend/src/types/index.ts` 新增类型：
+
+```typescript
+export type LinkType = 'in' | 'out';
+export type EntryKind = 'file' | 'dir';
+export type LinkState =
+  | 'ok' | 'missing' | 'wrong_target' | 'replaced'
+  | 'dangling' | 'occupied' | 'disabled' | 'not_current';
+
+export interface Device {
+  fingerprint: string;
+  name: string;
+  hostname?: string;
+  os?: string;
+  is_current: boolean;
+  last_seen_at?: string | null;
+  link_count: number;
+}
+
+export interface Link {
+  id: string;
+  entry_id: string;
+  type: LinkType;
+  device: string;
+  device_name?: string;
+  local_path: string;
+  enabled: boolean;
+  tracked: boolean;
+  is_current: boolean;
+  created_at: string;
+  state: LinkState;
+  state_note?: string;
+}
+
+export interface Entry {
+  id: string;
+  repo_id: string;
+  repo_path: string;
+  kind: EntryKind;
+  created_at: string;
+  links: Link[];
+  unbound: boolean; // 派生：没有任何链接的 type === 'in'（§9.7）
+}
+```
+
+`api/client.ts` 删除全部软链接函数，新增条目、链接、设备与一致性巡检函数。
+
+### 9.13 本次设计删除了什么
+
+| 删除项 | 替代 |
+|------|------|
+| `internal/service/symlink_service.go`（约 720 行） | `internal/entry/entry_service.go` + `link_service.go` |
+| `internal/service/backup_service.go` 的同步部分（`syncChangedFiles`、`syncOneFile`、`syncDirectoryFiles`、`walkSourceDir`、`cleanEmptyDataDirs`） | 无需替代 —— 内容本来就在 `data/` |
+| `SymlinkService.SyncDeletedSource` | 无需替代 —— 同类数据丢失缺陷不可能再发生，因为「是否存在」由 `data/` 判定，而非本机路径 |
+| `internal/resolver/symlink_resolver.go` | 无需替代 —— 回滚直接写 `data/`，所有链接自动反映 |
+| `internal/store/symlink_store.go`、`model/symlink.go` | `internal/entry/manifest.go`、`model/link.go` |
+| `.links/` 及全部镜像一致性代码 | 无需替代 —— 只有一份表示 |
+| `SymlinkHandler`（8 个端点，含 `nested`） | `EntryHandler` + `LinkHandler` + `DeviceHandler` |
+| `is_new` 计算 | `GET /repos/:id/changes`（`git status`） |
+| `PreviewService.ResolveSource` 前缀匹配 | `path` 始终是仓库相对路径 |
+| 预览双写（源文件 **和** `data/`） | 只写 `data/` 一次 |
+| `repo_service.go` 生成 `.gitignore` | 无需替代 —— 没有需要忽略的内容 |
+
+`BackupService.Trigger` 退化为：
+
+```
+1. 仓库级互斥锁
+2. status = backing_up
+3. 落盘清单（冲刷待写的定义变更），若为脏则提交
+4. git add -A
+5. git commit -m <message>
+6. 可选 git push（失败不阻断本地提交）
+7. last_backup_at = now；status = active（失败则为 error）
+```
+
+### 9.14 安全考量
+
+| 风险 | 防护 |
+|------|------|
+| `adopt` 破坏原始文件 | 明确确认：「文件将被移入仓库，此位置将被替换为软链接」；任一失败路径全量回滚；跨文件系统路径下先校验大小再删除源文件 |
+| 链接覆盖无关数据 | 添加链接时拒绝已存在的非空路径；`apply` 从不覆盖 —— `occupied` 条目只报告，不强制 |
+| `purge` 删除内容 | 需输入 `repo_path` 确认；上一个提交可恢复；操作前先报告其余所有链接 |
+| 路径遍历 | 所有用户路径过 `util.SafeResolve` / `util.SafeJoin`；本机路径限定在 AllowedRoots（`$HOME` + 仓库根目录） |
+| 自引用 | 拒绝位于 `repo.Path` 内的 `local_path` |
+| 危险目标 | 拒绝把 `/`、`$HOME`、仓库根目录本身作为 `local_path` |
+| 软链接成环 | 创建任何链接前用 `util.ResolveNestedSymlink` 解析候选链；检测到环即拒绝 |
+| adopt 一棵含软链接的目录树 | 除非设置 `follow_symlinks`，否则拒绝（§9.4.1），从而 `data/` 内永不出现指向外部的软链接 |
+| 手工编辑的清单 | 加载时按 R-1..R-5 校验；每条路径重新过 `SafeResolve`；文件异常时阻止写入 |
+| 并发变更 | 所有会改文件系统的操作都持有 `RepoMutexManager` 的仓库级互斥锁 |
+| 清单写入撕裂 | `manifest.json.tmp` → `fsync` → `os.Rename` |
+
+### 9.15 边界与异常处理
+
+| 场景 | 处理 |
+|------|------|
+| `adopt` 的源已是软链接 | 400 —— 拒绝（避免链式链接） |
+| `adopt` 的源位于 `repo.Path` 内 | 400 —— 拒绝 |
+| `adopt` 的源是仓库本身或其祖先 | 400 —— 拒绝 |
+| `adopt` 的源目录树内含软链接 | 409 —— 拒绝并列出；可用 `follow_symlinks: true` 解引用 |
+| `repo_path` 与既有条目重叠 | 409（R-3） |
+| `data/<repo_path>` 已存在 | 409 |
+| `os.Rename` 跨文件系统 | 降级为 `CopyFile` + 校验大小 + `Remove` |
+| `mv` 成功但建链接失败 | 回滚：把内容移回 |
+| 链接目标已存在真实文件 | 409 —— 提示用户先移走 |
+| 链接目标是非空目录 | 409 |
+| 链接的 `local_path` 位于目录条目的 `local_path` 之内 | 409（R-4） |
+| 直接移除 `in` 链接 | 允许；条目变为**未绑定**，UI 提示把另一个 `out` 链接指定为 `in`（§9.5） |
+| 删除持有某条目唯一 `in` 链接的设备 | 自动提升剩下最早的启用 `out` 链接；若已无其他链接，条目变为未绑定 |
+| 仓库中 `data/<repo_path>` 缺失 | `dangling`；`apply` 只报告，绝不创建链接 |
+| 清单中某条目有 **2 个** `in` 链接 | 加载时以精确错误拒绝（R-1 是「至多一个」） |
+| 清单中某条目有 **0 个** `in` 链接 | 接受 —— 合法的 `unbound` 状态，巡检按 warning 报告 |
+| 给未绑定条目添加 `out` 链接 | 允许 —— 这正是新设备为「尚无 `in` 链接」的条目建立绑定的方式 |
+| 无法获取设备指纹 | 降级为 `sha256(hostname+username)` 并告警；允许用户手动命名设备 |
+| 清单无法解析（Git 冲突） | 409 并返回原始错误；在冲突解决前阻止所有写入 |
+| 两台机器同时改清单 | Git 冲突，由 Git 解决；应用绝不自动合并 |
+| 同一设备上两个链接使用同一 `local_path` | 409 |
+
+### 9.16 测试策略
+
+**单元测试**（`internal/entry/`）：
+
+- 清单：加载 / 保存 / 原子写 / 文件缺失 / 文件格式错误 / 未知字段保留 / id 自动补全
+- 清单校验：2 个 `in` 链接被拒绝；**0 个 `in` 链接按 `unbound` 接受**；条目重叠、嵌套链接以正确错误拒绝
+- `MachineFingerprint`：各平台分支 + 兜底逻辑的确定性
+- Adopt：正常路径、R-3 冲突、`data/` 冲突、跨文件系统降级、各失败点回滚、源目录树含软链接
+- 添加链接：正常路径、目标被占用、非空目录、自引用、R-4 违规、同一条目的多个 `out` 链接
+- **`in` 是 `out` 的特例**：两条流程产生完全相同的文件系统状态，仅 `type` 字段不同
+- 切换：指定某 `out` 为新的 `in` 会同时把原 `in` 降级为 `out`，且**不产生任何文件系统调用**（用带插桩的 FS 或比对 mtime 断言）
+- 未绑定 → 已绑定：只有 `out` 链接的条目可以 `switch` 指定其中之一为 `in`
+- 移除 `in` 链接后条目变为 `unbound`，且不删除任何内容
+- 未绑定条目（0 个 `in` 链接）经清单保存/加载往返后保持不变
+- 状态诊断：全部 8 种状态
+- 模拟原子写（把软链接替换为真实文件）后的「重新纳入」
+- 移除：链接级移除、条目级 `release` / `unlink` / `move_back` / `purge`，以及各项守卫
+- 删除设备时自动提升新的 `in` 链接
+- 一致性巡检：每个结论码各一组 fixture
+
+**集成测试**：
+
+- Adopt → 通过 `in` 链接编辑 → 变更立即体现在 `data/` → `git commit` 收录
+- Adopt → 删除 `in` 链接的软链接 → `data/` 保留 → 状态为 `missing` → `apply` 重建
+- 一个条目在本机有 3 个 `out` 链接 → 编辑任意一个在 `data/` 中只产生一处变更
+- 把跟踪链接切换到某个 out 链接 → 验证清单变化且文件系统未变
+- 双设备模拟：在 A 上生成清单 → clone → 注册设备 B → 批量链接 → B 的链接符合 B 的布局且 `data/` 不变
+- 删除持有唯一 `in` 链接的设备 A → B 的 out 链接被提升，R-1（≤ 1）继续成立；若 A 持有该条目仅有的链接，条目转为 `unbound`
+- HTTP 层的 R-3 / R-4 拒绝路径（409 且信息可读）
+- `purge` 后 `git revert` → 内容恢复
+- 并发 `apply` 与备份 → 无数据损坏
+
+### 9.17 升级行为（不做迁移）
+
+由于明确不要求向后兼容：
+
+| 项目 | 行为 |
+|------|------|
+| `symlinks` 表 | 新版本首次启动时删除 |
+| `.links/` 目录 | 首次打开旧仓库时删除（一次 `os.RemoveAll`） |
+| `data/` 内容 | **原样保留** —— 不删除任何承载用户数据的内容 |
+| `manifest.json` | 以空清单创建（`{"version":1,"devices":[],"entries":[]}`） |
+| 重建条目与链接 | 对每个要跟踪的文件/目录执行 `adopt`，再用批量链接做分发 |
+| 恢复旧的源路径 | 无法自动恢复 —— 旧的 `target_path` 随表一并丢弃 |
+| SQLite 中已注册的仓库 | 保留；`repos` / `repo_configs` / `repo_auths` 不变 |
+| 仓库的 `.gitignore` | 已存在的保持原样；新仓库不再生成 |
+
+### 9.18 里程碑
+
+| 里程碑 | 范围 |
+|------|------|
+| M1 | `model/link.go`、`entry/manifest.go`、原子写、R-1..R-5 校验、id 分配 |
+| M2 | `util/device.go`（指纹）+ 设备注册/列表/重命名/删除（含 `in` 链接自动提升） |
+| M3 | 条目创建：adopt（mv、R-3 校验、软链接扫描、跨文件系统降级、回滚） |
+| M4 | 链接创建：`out` 链接、R-4 校验、批量链接、路径安全 |
+| M5 | `switch`（跟踪链接提升）+ 状态诊断 + `apply`（dry run 与执行）+ repair + readopt |
+| M6 | 移除：链接级、条目级 `release` / `unlink` / `move_back` / `purge`、守卫、`detach` |
+| M7 | 一致性巡检 + 修复 |
+| M8 | 拆除旧子系统：删除 `.links/`、`symlinks` 表、同步机制、resolver、软链接 API；简化 `BackupService.Trigger` |
+| M9 | 内容 API 简化（§7）+ `changes` 端点 |
+| M10 | 前端：Entries 标签页、弹窗、徽标、Browse 集成 |
+| M11 | 文档同步（所有文档与 README，中英双份） |
+
+### 9.19 待办项（尚未实现）
+
+上述主线已实现并通过验证。以下为有意推迟的部分 —— 它们都是增量功能，且不改变模型：
+
+| 项目 | 推迟原因 |
+|------|------|
+| **一致性巡检**（`GET /repos/:id/consistency` + 修复，§9.8） | 各项不变量在写入时已由 `validateManifest` 强制（R-1/R-3/R-4），巡检只是额外发现「手工编辑或外部造成的不一致」。暂未新增 `consistency.go` |
+| **`readopt`**（`replaced` 链接的恢复） | `apply` 已把 `replaced` 作为冲突报告而不覆盖，这是安全的一半；自动恢复是独立动作 |
+| **`detach`**（设备卸载，§9.6.3） | 删除设备已可用；detach 是更温和的变体 |
+| **条目重命名**（`PATCH /entries/:id`） | 需要重指该条目的每一个既有软链接，不只是元数据变更 |
+| 批量链接 UI、逐链接启用/禁用、巡检面板 | 前端便利项；前两者的 API 已经具备 |
+

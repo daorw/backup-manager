@@ -104,7 +104,7 @@ func (h *RollbackHandler) GetCommitFile(c *gin.Context) {
 }
 
 // RestoreFile handles POST /api/v1/repos/:id/commits/:hash/restore
-// Restores a single file from the commit back to its source location.
+// Restores a single file from the commit back into data/（本机链接会自动反映）。
 func (h *RollbackHandler) RestoreFile(c *gin.Context) {
 	repoID := c.Param("id")
 	hash := c.Param("hash")
@@ -114,13 +114,15 @@ func (h *RollbackHandler) RestoreFile(c *gin.Context) {
 		return
 	}
 
-	var req service.RestoreFileRequest
+	var req struct {
+		Path string `json:"path" binding:"required"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, err)
 		return
 	}
 
-	result, err := h.rollbackSvc.RestoreFile(repoID, hash, &req)
+	result, err := h.rollbackSvc.RestoreFile(repoID, hash, req.Path)
 	if err != nil {
 		respondError(c, err)
 		return

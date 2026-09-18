@@ -19,7 +19,7 @@ func NewLinkHandler(svc *entry.Service) *LinkHandler {
 }
 
 // Create 处理 POST /api/v1/repos/:id/entries/:entryId/links
-// 为条目添加一条 out 链接（不复制内容）。
+// 为条目添加一条链接：在目标路径创建指向 data/<repo_path> 的软链接，不复制内容。
 func (h *LinkHandler) Create(c *gin.Context) {
 	var req entry.AddLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

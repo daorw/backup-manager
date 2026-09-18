@@ -63,7 +63,7 @@ interface AppState {
   fetchEntries: (repoId: string) => Promise<void>;
   adoptEntry: (repoId: string, req: AdoptRequest) => Promise<void>;
   addLink: (repoId: string, entryId: string, req: AddLinkRequest) => Promise<void>;
-  bulkLink: (repoId: string, req: BulkLinkRequest) => Promise<void>;
+  bulkLink: (repoId: string, req: BulkLinkRequest) => Promise<Entry[]>;
 
   repairLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
   readoptLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
@@ -82,8 +82,8 @@ interface AppState {
   repairConsistency: (repoId: string) => Promise<RepairResult>;
 
   // 设备
-  fetchCurrentDevice: () => Promise<void>;
-  fetchDevices: (repoId: string) => Promise<void>;
+  fetchCurrentDevice: () => Promise<CurrentDeviceInfo | null>;
+  fetchDevices: (repoId: string) => Promise<Device[]>;
   registerDevice: (repoId: string, name?: string) => Promise<void>;
   renameDevice: (repoId: string, fingerprint: string, name: string) => Promise<void>;
   deleteDevice: (repoId: string, fingerprint: string) => Promise<void>;
@@ -226,8 +226,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   bulkLink: async (repoId, req) => {
     set({ error: null });
     try {
-      await api.bulkLink(repoId, req);
+      const views = await api.bulkLink(repoId, req);
       await get().fetchEntries(repoId);
+      return views;
     } catch (err: unknown) {
       set({ error: errMsg(err, 'Failed to bulk link') });
       throw err;
@@ -313,18 +314,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   fetchCurrentDevice: async () => {
     try {
-      set({ currentDevice: await api.fetchCurrentDevice() });
+      const info = await api.fetchCurrentDevice();
+      set({ currentDevice: info });
+      return info;
     } catch (err: unknown) {
       set({ error: errMsg(err, 'Failed to fetch the current device') });
+      return null;
     }
   },
 
   fetchDevices: async (repoId: string) => {
     set({ error: null });
     try {
-      set({ devices: await api.fetchDevices(repoId) });
+      const devices = await api.fetchDevices(repoId);
+      set({ devices });
+      return devices;
     } catch (err: unknown) {
       set({ error: errMsg(err, 'Failed to fetch devices') });
+      return [];
     }
   },
 

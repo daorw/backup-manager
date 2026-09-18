@@ -42,7 +42,7 @@ function normalizeRepoPath(value?: string): string | undefined {
  * 创建条目（adopt）对话框。
  *
  * adopt 会把本机内容「移动」进仓库 data/<repo_path>，并把原位置替换为软链接 ——
- * 该软链接即条目的 in 链接，因此这里必须明确提示用户。
+ * 该软链接就是条目的第一条链接（所有链接等价，不存在 in/out 之分），因此这里必须明确提示用户。
  */
 const AdoptModal: React.FC<AdoptModalProps> = ({ open, onClose, onSubmit }) => {
   const [form] = Form.useForm();
@@ -106,8 +106,8 @@ const AdoptModal: React.FC<AdoptModalProps> = ({ open, onClose, onSubmit }) => {
           <Form.Item
             label="Repo Path"
             name="repo_path"
-            tooltip="内容在仓库 data/ 下的路径。留空则取文件名。不得与其它条目重叠。"
-            extra="起点固定为当前仓库的 data/：只能填相对路径，不能出现 ..，也无法跳出该目录。"
+            tooltip="Path of the content under the repository's data/. Defaults to the file name. Must not overlap another entry."
+            extra="Rooted at this repository's data/: relative paths only — '..' is rejected, so the content cannot escape it."
             rules={[
               {
                 validator: (_, value) => {

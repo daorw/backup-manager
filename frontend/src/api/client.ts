@@ -89,7 +89,7 @@ export async function fetchEntries(repoId: string): Promise<Entry[]> {
   return data;
 }
 
-/** 创建条目：内容移入仓库，原位置替换为软链接（条目的 in 链接）。 */
+/** 创建条目：内容移入仓库，原位置替换为指向它的软链接（条目的第一条链接）。 */
 export async function adoptEntry(repoId: string, req: AdoptRequest): Promise<Entry> {
   const { data } = await api.post<Entry>(`/repos/${repoId}/entries/adopt`, req);
   return data;

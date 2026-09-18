@@ -26,9 +26,8 @@ const (
 
 // Link 一条链接：把一个本机路径绑定到一个条目。
 //
-// 所有链接**完全等价** —— 物理上都是指向 <repo>/data/<repo_path> 的软链接。
-// 不存在 in/out 类型之分：条目创建时产生的那条链接就是「入」，后续的是「出」，
-// 但两者语义与形态完全相同，因此不落库区分。
+// 所有链接**完全等价** —— 物理上都是指向 <repo>/data/<repo_path> 的软链接，
+// 语义也完全相同：不存在 in/out 类型，也没有主次或先后之分，因此清单里不做区分。
 type Link struct {
 	ID        string    `json:"id"`
 	Device    string    `json:"device"`     // 所属设备的指纹

@@ -22,6 +22,7 @@ interface TreeMeta {
   entryId?: string;
   mountedHere: boolean;
   drift: boolean;
+  notBackedUp: boolean;
 }
 
 type TreeNode = DataNode & TreeMeta;
@@ -30,7 +31,7 @@ type TreeNode = DataNode & TreeMeta;
  * 浏览标签页：展示仓库 data/ 下的真实内容并支持预览与编辑。
  *
  * 内容只存在于 data/，本机路径只是指向它的软链接 —— 因此保存一次即可让该条目的
- * 所有链接同步反映，不存在双写与同步步骤。
+ * 所有链接立即反映，不存在双写与同步步骤。
  */
 const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
   const entries = useAppStore((s) => s.entries);
@@ -54,21 +55,40 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
         entryId: e.id,
         mountedHere: currentLinks.length > 0,
         drift: currentLinks.some((l) => l.state !== 'ok' && l.state !== 'not_current'),
+        notBackedUp: false,
       });
     }
     return map;
   }, [entries]);
 
+  /** 节点是否被某个条目覆盖：本身是条目、位于条目之内、或包含条目。 */
+  const isCovered = useCallback(
+    (path: string) =>
+      entries.some(
+        (en) =>
+          en.repo_path === path ||
+          en.repo_path.startsWith(`${path}/`) ||
+          path.startsWith(`${en.repo_path}/`)
+      ),
+    [entries]
+  );
+
   const toNode = useCallback(
     (e: ContentEntry): TreeNode => {
       const meta = entryIndex.get(e.path);
       const isDir = e.type === 'directory';
+      const notBackedUp = !meta && !isCovered(e.path);
       return {
         key: e.path,
         title: (
           <Space size={4}>
             <span>{e.name}</span>
             {meta && <Tag color="blue" style={{ marginInlineStart: 4 }}>entry</Tag>}
+            {notBackedUp && (
+              <Tooltip title="No entry covers this path. Create an entry to make it a backed-up member.">
+                <Tag style={{ marginInlineStart: 4 }}>not backed up</Tag>
+              </Tooltip>
+            )}
             {meta?.drift && (
               <Tooltip title="A link of this entry needs repair">
                 <WarningOutlined style={{ color: '#faad14' }} />
@@ -81,9 +101,10 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
         entryId: meta?.entryId,
         mountedHere: !!meta?.mountedHere,
         drift: !!meta?.drift,
+        notBackedUp,
       };
     },
-    [entryIndex]
+    [entryIndex, isCovered]
   );
 
   const loadChildren = useCallback(
@@ -114,7 +135,7 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId]);
 
-  // 条目状态变化后重建树，让徽标同步
+  // 条目状态变化后重建树，让徽标刷新
   useEffect(() => {
     if (treeData.length > 0) {
       loadRoot();

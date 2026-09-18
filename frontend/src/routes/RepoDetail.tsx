@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, Typography, Button, Space, Spin, Tag } from 'antd';
 import {
@@ -22,6 +22,7 @@ dayjs.extend(relativeTime);
 const RepoDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('browse');
   const currentRepo = useAppStore((s) => s.currentRepo);
   const loading = useAppStore((s) => s.loading);
   const error = useAppStore((s) => s.error);
@@ -101,7 +102,7 @@ const RepoDetail: React.FC = () => {
           <span>Backup</span>
         </Space>
       ),
-      children: <BackupPanel repoId={currentRepo.id} />,
+      children: <BackupPanel repoId={currentRepo.id} active={activeTab === 'backup'} />,
     },
     {
       key: 'config',
@@ -151,7 +152,8 @@ const RepoDetail: React.FC = () => {
       </Space>
 
       <Tabs
-        defaultActiveKey="browse"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={tabItems}
         className="repo-detail-tabs"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}

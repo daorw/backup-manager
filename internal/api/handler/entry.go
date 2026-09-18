@@ -39,7 +39,7 @@ func (h *EntryHandler) Get(c *gin.Context) {
 }
 
 // Adopt 处理 POST /api/v1/repos/:id/entries/adopt
-// 创建条目：内容移入仓库，原位置替换为软链接（条目的 in 链接）。
+// 创建条目：内容移入仓库，原位置替换为指向它的软链接（条目的第一条链接）。
 func (h *EntryHandler) Adopt(c *gin.Context) {
 	var req entry.AdoptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

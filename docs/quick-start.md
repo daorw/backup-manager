@@ -79,7 +79,7 @@ Click "+ New Entry" in the Entries tab:
 
 ### Distributing an Entry (add a link):
 
-Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none.
+Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none. The path may be absolute or start with `~` (expanded to your home directory), and it must be free — a missing entry or an empty directory.
 
 ### All Links Are Equal:
 
@@ -105,7 +105,11 @@ Devices, entries and links are stored inside the repository in `.backup-manager/
 2. Open it — the current machine's device is registered automatically, and every device's links are listed
 3. Click **Apply** — a dry-run plan appears (create / repair / skip / conflict / orphan)
 4. Confirm. Missing links are created, drifted ones repaired, occupied paths are only reported
-5. To put the files somewhere else, use **Bulk Link**: pick entries plus a local root directory
+5. To put the files somewhere else, use **Bulk Link**: pick entries plus a local root directory (absolute or starting with `~`)
+
+### Managing Devices:
+
+**Devices** in the Entries tab lists every registered machine with its link count. Rename a device inline, or delete a device whose link definitions should go away — entries left without links stay legal, and a device's filesystem is never touched by its deletion.
 
 ### Handing an Entry Over:
 1. On the new machine, add a link wherever you want the files

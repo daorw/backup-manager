@@ -103,7 +103,7 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
         type="info"
         showIcon
         message="Next Steps"
-        description="The rollback updated your source files. Run a backup to sync these changes to the data/ directory and create a new commit."
+        description="The rollback rewrote the content under data/. Every link points there, so all local paths already show the restored version — run a backup to record it in a new commit."
         style={{ marginTop: 16 }}
       />
     </Modal>

@@ -11,11 +11,9 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import 'dayjs/locale/zh-cn';
 import type { BackupRepo } from '../../types';
 
 dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
 
 interface RepoCardProps {
   repo: BackupRepo;

@@ -343,13 +343,17 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
         styles={{ header: { background: '#fff2f0', borderColor: '#ffccc7' } }}
       >
         <Typography.Paragraph type="danger">
-          Deleting the repository will permanently remove all data, including
-          the manifest, backup data, and Git history. This action cannot be undone.
+          Deleting the repository only removes it from this app: the database record and the
+          scheduled tasks are cleared. Everything on disk —{' '}
+          <Typography.Text code>data/</Typography.Text>,{' '}
+          <Typography.Text code>.backup-manager/manifest.json</Typography.Text> and Git history — is
+          preserved, so the repository can be re-created later by pointing a new one at the same
+          directory.
         </Typography.Paragraph>
         <Space>
           <Popconfirm
             title="Delete this repository?"
-            description="All data will be permanently deleted. This cannot be undone."
+            description="Removes the repository from the app only. Files on disk are preserved."
             onConfirm={handleDeleteRepo}
             okText="Delete"
             cancelText="Cancel"

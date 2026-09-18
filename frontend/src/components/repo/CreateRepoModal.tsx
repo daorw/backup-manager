@@ -101,9 +101,11 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
           </Form.Item>
           <Form.Item>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              The repository will be created at the specified path. A{' '}
-              <Typography.Text code>.links/</Typography.Text> directory and Git
-              repository will be initialized automatically.
+              The repository will be created at the specified path and Git will be initialized
+              automatically. Backed-up content lives in{' '}
+              <Typography.Text code>data/</Typography.Text>; entries, links and devices are stored in{' '}
+              <Typography.Text code>.backup-manager/manifest.json</Typography.Text> and travel with
+              Git.
             </Typography.Text>
           </Form.Item>
         </Form>

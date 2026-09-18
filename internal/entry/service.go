@@ -181,7 +181,7 @@ func ensureDevice(m *model.Manifest, fingerprint string) *model.Device {
 }
 
 // createSymlink 创建指向 data/<repoPath> 的软链接。
-// in 与 out 的物理形态完全相同 —— 这正是「in 是 out 的特例」的落地。
+// 条目的第一条链接与后续链接走的是同一个函数，形态与语义完全一致。
 func createSymlink(localPath, repoRoot, repoPath string) error {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 		return fmt.Errorf("failed to create parent directory: %w", err)

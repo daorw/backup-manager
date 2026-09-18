@@ -1,4 +1,4 @@
-// Package entry 实现「条目 + 链接」模型：条目持有内容，链接是它的 in/out 视图。
+// Package entry 实现「条目 + 链接」模型：条目持有内容，链接是指向该内容的软链接视图。
 //
 // 核心不变量（R-1..R-3），加载与写入时强制校验：
 //
@@ -217,32 +217,32 @@ func checkManifest(m *model.Manifest) []Finding {
 
 	for _, e := range m.Entries {
 		if e.ID == "" || e.RepoPath == "" {
-			add(CodeInvalidEntry, e.RepoPath, "", "", "条目缺少 id 或 repo_path")
+			add(CodeInvalidEntry, e.RepoPath, "", "", "entry is missing id or repo_path")
 			continue
 		}
 		if entryIDs[e.ID] {
-			add(CodeInvalidEntry, e.RepoPath, "", "", "条目 id 重复：%q", e.ID)
+			add(CodeInvalidEntry, e.RepoPath, "", "", "duplicate entry id: %q", e.ID)
 		}
 		entryIDs[e.ID] = true
 
 		// R-1：链接只能绑定完整条目，repo_path 必须是干净的非空相对路径
 		if e.RepoPath != filepath.ToSlash(filepath.Clean(e.RepoPath)) ||
 			strings.HasPrefix(e.RepoPath, "../") || e.RepoPath == "." {
-			add(CodeInvalidEntry, e.RepoPath, "", "", "repo_path 非法")
+			add(CodeInvalidEntry, e.RepoPath, "", "", "invalid repo_path")
 		}
 
 		for _, l := range e.Links {
 			if linkIDs[l.ID] {
-				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "链接 id 重复：%q", l.ID)
+				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "duplicate link id: %q", l.ID)
 			}
 			linkIDs[l.ID] = true
 
 			if l.LocalPath == "" || l.Device == "" {
-				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "链接缺少 local_path 或 device")
+				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "link is missing local_path or device")
 			}
 			// 引用完整性：链接必须指向已登记的设备
 			if m.FindDevice(l.Device) == nil {
-				add(CodeUnknownDevice, e.RepoPath, l.ID, l.LocalPath, "链接引用了未登记的设备：%q", l.Device)
+				add(CodeUnknownDevice, e.RepoPath, l.ID, l.LocalPath, "link references an unregistered device: %q", l.Device)
 			}
 		}
 	}
@@ -252,7 +252,7 @@ func checkManifest(m *model.Manifest) []Finding {
 		for j := i + 1; j < len(m.Entries); j++ {
 			if repoPathsOverlap(m.Entries[i].RepoPath, m.Entries[j].RepoPath) {
 				add(CodeOverlappingEntries, m.Entries[i].RepoPath, "", "",
-					"与条目 %q 重叠（R-2 禁止嵌套条目）", m.Entries[j].RepoPath)
+					"overlaps entry %q (R-2: entries must not nest)", m.Entries[j].RepoPath)
 			}
 		}
 	}
@@ -274,7 +274,7 @@ func checkManifest(m *model.Manifest) []Finding {
 					}
 					if localPathsOverlap(l.LocalPath, owner.LocalPath) {
 						add(CodeNestedLink, e.RepoPath, l.ID, l.LocalPath,
-							"位于目录条目 %q 的本机路径之内（R-3）", dir.RepoPath)
+							"is inside the local path of directory entry %q (R-3)", dir.RepoPath)
 					}
 				}
 			}

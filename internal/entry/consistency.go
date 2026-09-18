@@ -219,22 +219,22 @@ func auditFilesystem(repoRoot string, m *model.Manifest, currentDevice string) [
 			case model.LinkStateOK, model.LinkStateDisabled:
 				continue
 			case model.LinkStateMissing:
-				code, severity, message = CodeLinkMissing, SeverityWarning, "本机软链接不存在，可用 Apply 或 Repair 重建"
+				code, severity, message = CodeLinkMissing, SeverityWarning, "local symlink is missing; rebuild it with Apply or Repair"
 			case model.LinkStateWrongTarget:
-				code, severity, message = CodeLinkWrongTarget, SeverityWarning, "本机软链接指向别处"
+				code, severity, message = CodeLinkWrongTarget, SeverityWarning, "local symlink points elsewhere"
 			case model.LinkStateReplaced:
 				code, severity, message = CodeLinkReplaced, SeverityWarning,
-					"本机路径是真实文件/目录而非软链接（应用可能做了原子写），需重新纳入"
+					"local path is a real file or directory, not a symlink (an app may have replaced it atomically); use Re-adopt"
 			case model.LinkStateOccupied:
-				code, severity, message = CodeLinkOccupied, SeverityError, "本机路径被无关对象占用，需人工处理"
+				code, severity, message = CodeLinkOccupied, SeverityError, "local path is occupied by an unrelated object; resolve it manually"
 			case model.LinkStateDangling:
 				code, severity, message = CodeContentMissing, SeverityError,
-					"仓库内容缺失，链接悬空；可从 Git 历史回滚恢复"
+					"repository content is missing and the link dangles; restore it from Git history"
 			default:
 				continue
 			}
 			if note != "" {
-				message += "（" + note + "）"
+				message += " (" + note + ")"
 			}
 			findings = append(findings, Finding{
 				Code: code, Severity: severity,
@@ -269,7 +269,7 @@ func scanSymlinksInData(repoRoot string) []Finding {
 		findings = append(findings, Finding{
 			Code: CodeSymlinkInData, Severity: SeverityError,
 			RepoPath: filepath.ToSlash(rel), LocalPath: p,
-			Message: "data/ 内出现软链接；内容必须只存在于 data/，请改为普通文件/目录",
+			Message: "symlink found inside data/; content must exist only in data/ as real files or directories",
 		})
 		return nil
 	})
@@ -326,7 +326,7 @@ func scanUnmanagedLinks(repoRoot string, m *model.Manifest) []Finding {
 			findings = append(findings, Finding{
 				Code: CodeUnmanagedLink, Severity: SeverityWarning,
 				RepoPath: filepath.ToSlash(rel), LocalPath: full,
-				Message: "发现未被托管的软链接；若要托管它，请为对应条目添加一条链接",
+				Message: "unmanaged symlink into data/; add a link to the corresponding entry to manage it",
 			})
 		}
 	}

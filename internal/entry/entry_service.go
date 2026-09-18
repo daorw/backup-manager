@@ -63,13 +63,10 @@ func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 		return nil, fmt.Errorf("local_path is required")
 	}
 
-	local := filepath.Clean(req.LocalPath)
-	if !filepath.IsAbs(local) {
-		abs, err := filepath.Abs(local)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve local_path: %w", err)
-		}
-		local = abs
+	// 与链接一致：展开开头的 `~`，再取绝对路径
+	local, err := absPath(req.LocalPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve local_path: %w", err)
 	}
 
 	// 拒绝把仓库自身或其内部路径纳入
@@ -124,7 +121,7 @@ func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 		return nil, fmt.Errorf("failed to move content into repository: %w", err)
 	}
 
-	// 2) 原位置替换为软链接（in 链接）
+	// 2) 原位置替换为软链接（条目的第一条链接）
 	if err := os.Symlink(content, local); err != nil {
 		_ = movePath(content, local)
 		return nil, fmt.Errorf("failed to create in link: %w", err)

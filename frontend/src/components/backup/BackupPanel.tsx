@@ -43,6 +43,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import type { ColumnsType } from 'antd/es/table';
 import { useAppStore } from '../../store/appStore';
+import { fetchChanges, fetchBackupHistory as fetchHistoryApi } from '../../api/client';
 import type { CommitEntry, CommitFileChange, CommitFileContent } from '../../types';
 import RollbackConfirmModal from './RollbackConfirmModal';
 import RollbackResultModal from './RollbackResultModal';
@@ -51,6 +52,8 @@ dayjs.extend(relativeTime);
 
 interface BackupPanelProps {
   repoId: string;
+  /** 该面板是否为当前激活的 Tab —— 激活时刷新未提交变更数。 */
+  active?: boolean;
 }
 
 const statusTagConfig: Record<string, { color: string; icon: React.ReactNode }> = {
@@ -68,7 +71,7 @@ const statusTagConfig: Record<string, { color: string; icon: React.ReactNode }> 
   },
 };
 
-const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
+const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => {
   const backupProgress = useAppStore((s) => s.backupProgress);
   const backupHistory = useAppStore((s) => s.backupHistory);
   const commitFilesByHash = useAppStore((s) => s.commitFilesByHash);
@@ -99,6 +102,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
   const [commitMessage, setCommitMessage] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 10;
+  const [uncommitted, setUncommitted] = useState<string[]>([]);
+  const [totalCommits, setTotalCommits] = useState<number | null>(null);
 
   // Rollback modal state
   const [expandedCommitHash, setExpandedCommitHash] = useState<string | null>(null);
@@ -123,6 +128,35 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       fetchBackupHistory(repoId, pageSize, 0);
     }
   }, [repoId, fetchBackupHistory]);
+
+  // FR-30：data/ 下未提交的变更，作为「有新变更」的信号
+  const refreshChanges = useCallback(async () => {
+    try {
+      setUncommitted((await fetchChanges(repoId)).changes);
+    } catch {
+      setUncommitted([]);
+    }
+  }, [repoId]);
+
+  /** 历史总量：表格按页加载，这里用一次大 limit 的查询取总数。 */
+  const refreshTotal = useCallback(async () => {
+    try {
+      setTotalCommits((await fetchHistoryApi(repoId, 1000, 0)).length);
+    } catch {
+      setTotalCommits(null);
+    }
+  }, [repoId]);
+
+  useEffect(() => {
+    refreshTotal();
+  }, [refreshTotal]);
+
+  // 切到本 Tab 时刷新一次，避免在 Browse 里编辑后数字过期
+  useEffect(() => {
+    if (active) {
+      refreshChanges();
+    }
+  }, [active, refreshChanges]);
 
   useEffect(() => {
     if (rollbackResult) {
@@ -149,6 +183,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         message.success('Backup completed');
       }
       fetchBackupHistory(repoId, pageSize, 0);
+      refreshChanges();
+      refreshTotal();
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -276,6 +312,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       });
       message.success('Rollback completed');
       fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
+      refreshChanges();
+      refreshTotal();
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -321,10 +359,12 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
       content: (
         <div>
           <Typography.Paragraph>
-            Restore <Typography.Text code>{filePath}</Typography.Text> to the version from this commit?
+            Restore <Typography.Text code>{`data/${filePath}`}</Typography.Text> to the version from
+            this commit?
           </Typography.Paragraph>
           <Typography.Text type="warning">
-            This will overwrite the current source file with the version from the commit.
+            This overwrites the current content under data/ with the version from the commit; every
+            link points there, so all local paths reflect it immediately.
           </Typography.Text>
         </div>
       ),
@@ -338,6 +378,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           // 内容写回 data/，本机链接自动反映；只需刷新条目状态
           useAppStore.getState().fetchEntries(repoId);
           fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
+          refreshChanges();
+          refreshTotal();
         } catch (err) {
           if (err instanceof Error) {
             message.error(err.message);
@@ -346,7 +388,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
         }
       },
     });
-  }, [repoId, restoreCommitFile, fetchBackupHistory, page, pageSize]);
+  }, [repoId, restoreCommitFile, fetchBackupHistory, page, pageSize, refreshChanges, refreshTotal]);
 
   const renderFilePreview = (filePath: string) => {
     const content = fileContentCache[filePath];
@@ -525,7 +567,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                   <Tag>{group.files.length} files</Tag>
                 )}
               </Space>
-              <Tooltip title="Restore all files in this group to the version in this commit">
+              <Tooltip title="Restore this file to the version in this commit">
                 <Button
                   type="link"
                   size="small"
@@ -678,7 +720,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
           <Card size="small">
             <Statistic
               title="Total Backups"
-              value={backupHistory.length}
+              value={totalCommits === null ? '-' : totalCommits >= 1000 ? '1000+' : totalCommits}
               prefix={<HistoryOutlined />}
             />
           </Card>
@@ -697,6 +739,37 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId }) => {
                     : '#1890ff',
               }}
             />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Tooltip
+              title={
+                uncommitted.length > 0 ? (
+                  <div style={{ maxWidth: 380 }}>
+                    {uncommitted.slice(0, 10).map((line) => (
+                      <div key={line} style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                        {line.trim()}
+                      </div>
+                    ))}
+                    {uncommitted.length > 10 && <div>… and {uncommitted.length - 10} more</div>}
+                  </div>
+                ) : (
+                  'No uncommitted changes under data/'
+                )
+              }
+            >
+              <div>
+                <Statistic
+                  title="Uncommitted Changes"
+                  value={uncommitted.length}
+                  valueStyle={{
+                    color: uncommitted.length > 0 ? '#faad14' : '#52c41a',
+                  }}
+                  prefix={<ExclamationCircleOutlined />}
+                />
+              </div>
+            </Tooltip>
           </Card>
         </Col>
       </Row>

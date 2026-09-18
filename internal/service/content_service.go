@@ -51,7 +51,7 @@ type SaveRequest struct {
 // ContentService 负责浏览、预览与编辑仓库内容。
 //
 // 新模型下它只读写 data/ —— 内容就在那里，本机路径只是指向它的软链接，
-// 所以一次写入即可让该条目的所有链接同步反映，不存在双写与同步步骤。
+// 所以一次写入即可让该条目的所有链接立即反映，不存在双写与同步步骤。
 type ContentService struct {
 	store     *store.Store
 	gitEngine *git.GitEngine

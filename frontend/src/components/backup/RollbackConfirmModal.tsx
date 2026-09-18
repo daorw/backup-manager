@@ -60,11 +60,13 @@ const RollbackConfirmModal: React.FC<RollbackConfirmModalProps> = ({
         <div style={{ marginTop: 4 }}>
           {isFullRollback ? (
             <Typography.Text>
-              All <strong>{fileCount}</strong> changed file(s) will be rolled back
+              All <strong>{fileCount}</strong> file(s) under <code>data/</code> will be restored to
+              this commit's version
             </Typography.Text>
           ) : (
             <Typography.Text>
-              <strong>{fileCount}</strong> file(s) will be rolled back
+              <strong>{fileCount}</strong> file(s) under <code>data/</code> will be restored to this
+              commit's version
             </Typography.Text>
           )}
         </div>
@@ -74,13 +76,19 @@ const RollbackConfirmModal: React.FC<RollbackConfirmModalProps> = ({
         type="warning"
         icon={<WarningOutlined />}
         showIcon
-        message="This operation will OVERWRITE your source files with the version from the selected commit."
+        message="This operation will OVERWRITE the current content under data/ with the version from the selected commit."
         description={
           <ul style={{ margin: 0, paddingLeft: 20 }}>
-            <li>Source files at their original locations will be overwritten.</li>
-            <li>This action cannot be undone. Consider backing up important files first.</li>
-            <li>The <code>data/</code> backup directory will NOT be modified.</li>
-            <li>Run a backup after rollback to sync changes.</li>
+            <li>
+              Files under <code>data/</code> are rewritten in place. Every link points there, so all
+              local paths reflect the change immediately.
+            </li>
+            <li>
+              Uncommitted changes under <code>data/</code> are lost — run a backup first if you may
+              need them.
+            </li>
+            <li>Git history is not modified; the selected commit stays as it is.</li>
+            <li>Run a backup afterwards to record the rollback in a new commit.</li>
           </ul>
         }
       />

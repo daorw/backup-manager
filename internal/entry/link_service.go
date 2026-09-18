@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"backup-manager/internal/model"
 	"backup-manager/internal/util"
 )
 
-// AddLinkRequest 添加 out 链接的入参。
+// AddLinkRequest 添加链接的入参。
 type AddLinkRequest struct {
 	LocalPath string `json:"local_path"`
 	Device    string `json:"device,omitempty"` // 默认当前设备
 }
 
-// BulkLinkRequest 批量添加 out 链接的入参。
+// BulkLinkRequest 批量添加链接的入参。
 type BulkLinkRequest struct {
 	LocalRoot string   `json:"local_root"`
 	EntryIDs  []string `json:"entry_ids,omitempty"` // 为空表示全部条目
@@ -180,7 +181,7 @@ func (s *Service) Readopt(repoID, entryID, linkID string) (*EntryView, error) {
 	return s.Get(repoID, entryID)
 }
 
-// RemoveLink 移除一条链接（含 in 链接 —— 移除后条目变为未绑定，内容不受影响）。
+// RemoveLink 移除一条链接（移除后条目可能变为未绑定，内容不受影响）。
 func (s *Service) RemoveLink(repoID, entryID, linkID string) (*EntryView, error) {
 	defer s.lock(repoID)()
 	repo, m, err := s.load(repoID)
@@ -207,8 +208,16 @@ func (s *Service) RemoveLink(repoID, entryID, linkID string) (*EntryView, error)
 }
 
 // absPath 把用户给出的路径规范为绝对路径。
+// 开头的 `~` 展开为家目录（与文件浏览保持一致），避免 `~` 被当成字面目录名而建出垃圾路径。
 func absPath(p string) (string, error) {
-	cleaned := filepath.Clean(p)
+	cleaned := filepath.Clean(strings.TrimSpace(p))
+	if cleaned == "~" || strings.HasPrefix(cleaned, "~"+string(filepath.Separator)) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve the home directory: %w", err)
+		}
+		cleaned = filepath.Join(home, strings.TrimPrefix(cleaned, "~"))
+	}
 	if filepath.IsAbs(cleaned) {
 		return cleaned, nil
 	}

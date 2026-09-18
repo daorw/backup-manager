@@ -12,6 +12,10 @@ import {
   message,
   Tooltip,
   Badge,
+  Checkbox,
+  Input,
+  List,
+  Popconfirm,
 } from 'antd';
 import {
   PlusOutlined,
@@ -23,10 +27,13 @@ import {
   SafetyCertificateOutlined,
   ImportOutlined,
   DisconnectOutlined,
+  DesktopOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
 import type { Entry, Link, LinkState, ApplyResult, AdoptRequest, DetachMode } from '../../types';
 import AdoptModal from './AdoptModal';
+import DirectoryPickerModal from '../common/DirectoryPickerModal';
 
 const { Text, Paragraph } = Typography;
 
@@ -65,12 +72,16 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const fetchCurrentDevice = useAppStore((s) => s.fetchCurrentDevice);
   const adoptEntry = useAppStore((s) => s.adoptEntry);
   const addLink = useAppStore((s) => s.addLink);
+  const bulkLink = useAppStore((s) => s.bulkLink);
   const repairLink = useAppStore((s) => s.repairLink);
   const readoptLink = useAppStore((s) => s.readoptLink);
   const detachDevice = useAppStore((s) => s.detachDevice);
   const removeLink = useAppStore((s) => s.removeLink);
   const removeEntry = useAppStore((s) => s.removeEntry);
   const applyDevice = useAppStore((s) => s.applyDevice);
+  const registerDevice = useAppStore((s) => s.registerDevice);
+  const renameDevice = useAppStore((s) => s.renameDevice);
+  const deleteDevice = useAppStore((s) => s.deleteDevice);
   const audit = useAppStore((s) => s.audit);
   const auditLoading = useAppStore((s) => s.auditLoading);
   const runAudit = useAppStore((s) => s.runAudit);
@@ -87,12 +98,28 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const [auditOpen, setAuditOpen] = useState(false);
   const [detachOpen, setDetachOpen] = useState(false);
   const [detachMode, setDetachMode] = useState<DetachMode>('unlink');
+  const [devicesOpen, setDevicesOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRoot, setBulkRoot] = useState('');
+  const [bulkSelected, setBulkSelected] = useState<string[]>([]);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [rootPickerOpen, setRootPickerOpen] = useState(false);
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
 
   useEffect(() => {
-    fetchCurrentDevice();
-    fetchEntries(repoId);
-    fetchDevices(repoId);
-  }, [repoId, fetchCurrentDevice, fetchEntries, fetchDevices]);
+    let cancelled = false;
+    (async () => {
+      const info = await fetchCurrentDevice();
+      const [deviceList] = await Promise.all([fetchDevices(repoId), fetchEntries(repoId)]);
+      // FR-26：打开仓库时自动登记本机设备（幂等）
+      if (!cancelled && info && !deviceList.some((d) => d.fingerprint === info.fingerprint)) {
+        await registerDevice(repoId, info.hostname);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoId, fetchCurrentDevice, fetchEntries, fetchDevices, registerDevice]);
 
   const refresh = () => {
     fetchEntries(repoId);
@@ -187,10 +214,48 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       message.success('Entry removed');
       setRemoveEntryFor(null);
       setRemoveMode('unlink');
+      setPurgeConfirmText('');
     } catch (err) {
       message.error(err instanceof Error ? err.message : 'Failed to remove the entry');
     }
   };
+
+  // 打开设备列表时重新拉取一次，链接计数才是最新的
+  const openDevices = async () => {
+    setDevicesOpen(true);
+    await fetchDevices(repoId);
+  };
+
+  // FR-9：把一个本地根目录下的多个条目一次性链接到本机
+  const openBulkLink = () => {
+    setBulkSelected(entries.map((e) => e.id));
+    setBulkRoot('');
+    setBulkOpen(true);
+  };
+
+  const handleBulkLink = async () => {
+    if (!bulkRoot.trim() || bulkSelected.length === 0) return;
+    setBulkSubmitting(true);
+    try {
+      const created = await bulkLink(repoId, {
+        local_root: bulkRoot.trim(),
+        entry_ids: bulkSelected,
+      });
+      message.success(`Created ${created.length} link(s)`);
+      setBulkOpen(false);
+      setBulkRoot('');
+      setBulkSelected([]);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Failed to create the links');
+      // 批量创建可能部分成功，刷新真实状态
+      refresh();
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
+  const purgeTarget = removeEntryFor?.repo_path || '';
+  const otherDeviceLinks = (removeEntryFor?.links || []).filter((l) => !l.is_current).length;
 
   const renderLink = (entry: Entry, link: Link) => {
     const meta = STATE_META[link.state];
@@ -273,6 +338,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
         </Button>
         <Button icon={<PlusOutlined />} type="primary" onClick={() => setAdoptOpen(true)}>
           New Entry
+        </Button>
+        <Button icon={<LinkOutlined />} onClick={openBulkLink}>
+          Bulk Link
+        </Button>
+        <Button icon={<DesktopOutlined />} onClick={openDevices}>
+          Devices
         </Button>
         <Button
           icon={<CloudDownloadOutlined />}
@@ -369,7 +440,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
         onSubmit={handleAdopt}
       />
 
-      {/* 添加 out 链接：目标路径必须不存在，所以用自由输入 */}
+      {/* 添加链接：目标路径必须空闲（不存在或为空目录），所以用自由输入 */}
       <Modal
         title={`Add Link — ${addLinkFor?.repo_path || ''}`}
         open={!!addLinkFor}
@@ -381,7 +452,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="A symlink pointing at this entry's content will be created here. Nothing is copied."
+          message="A symlink pointing at this entry's content will be created here — nothing is copied. The path must be free (missing or an empty directory)."
         />
         <Text>Local path</Text>
         <input
@@ -397,12 +468,24 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       <Modal
         title={`Remove Entry — ${removeEntryFor?.repo_path || ''}`}
         open={!!removeEntryFor}
-        onCancel={() => setRemoveEntryFor(null)}
+        onCancel={() => {
+          setRemoveEntryFor(null);
+          setPurgeConfirmText('');
+        }}
         onOk={handleRemoveEntry}
         okText="Remove"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{
+          danger: true,
+          disabled: removeMode === 'purge' && purgeConfirmText.trim() !== purgeTarget,
+        }}
       >
-        <Radio.Group value={removeMode} onChange={(e) => setRemoveMode(e.target.value)}>
+        <Radio.Group
+          value={removeMode}
+          onChange={(e) => {
+            setRemoveMode(e.target.value);
+            setPurgeConfirmText('');
+          }}
+        >
           <Space direction="vertical">
             <Radio value="unlink">
               Remove this device's links only — the entry and repository content stay
@@ -415,6 +498,32 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             </Radio>
           </Space>
         </Radio.Group>
+
+        {/* NFR-4：删除内容必须键入 repo_path 二次确认 */}
+        {removeMode === 'purge' && (
+          <div style={{ marginTop: 16 }}>
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="This deletes the content under data/, not just the link."
+              description={
+                otherDeviceLinks > 0
+                  ? `${otherDeviceLinks} link(s) on other devices will dangle until those machines re-apply.`
+                  : undefined
+              }
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Type <Text code>{purgeTarget}</Text> to confirm.
+            </Text>
+            <Input
+              style={{ marginTop: 8 }}
+              placeholder={purgeTarget}
+              value={purgeConfirmText}
+              onChange={(e) => setPurgeConfirmText(e.target.value)}
+            />
+          </div>
+        )}
       </Modal>
 
       {/* 一致性巡检结论 */}
@@ -539,6 +648,181 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           </Space>
         )}
       </Modal>
+
+      {/* 设备管理（FR-26 / FR-29） */}
+      <Modal
+        title="Devices"
+        open={devicesOpen}
+        onCancel={() => setDevicesOpen(false)}
+        footer={<Button onClick={() => setDevicesOpen(false)}>Close</Button>}
+        width={620}
+      >
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Devices live in the repository manifest and travel with Git. Deleting a device only
+          removes its link definitions — entries and repository content stay.
+        </Text>
+        {!devices.some((d) => d.is_current) && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ margin: '12px 0' }}
+            message="This machine has no device entry on this repository yet."
+            action={
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => registerDevice(repoId, currentDevice?.hostname)}
+              >
+                Register
+              </Button>
+            }
+          />
+        )}
+        <List
+          size="small"
+          style={{ marginTop: 12 }}
+          dataSource={devices}
+          locale={{ emptyText: 'No device registered yet' }}
+          renderItem={(d) => (
+            <List.Item
+              actions={
+                d.is_current
+                  ? []
+                  : [
+                      <Popconfirm
+                        key="delete"
+                        title="Delete this device?"
+                        description="Its link definitions are removed. Entries and repository content stay."
+                        okText="Delete"
+                        cancelText="Cancel"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => deleteDevice(repoId, d.fingerprint)}
+                      >
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                      </Popconfirm>,
+                    ]
+              }
+            >
+              <List.Item.Meta
+                avatar={
+                  <DesktopOutlined
+                    style={{ fontSize: 18, color: d.is_current ? '#1677ff' : '#999' }}
+                  />
+                }
+                title={
+                  <Space wrap size={4}>
+                    <Text
+                      strong
+                      editable={{
+                        tooltip: 'Rename',
+                        onChange: (value) => {
+                          const name = value.trim();
+                          if (name && name !== d.name) {
+                            renameDevice(repoId, d.fingerprint, name);
+                          }
+                        },
+                      }}
+                    >
+                      {d.name || d.hostname || d.fingerprint.slice(0, 8)}
+                    </Text>
+                    {d.is_current && (
+                      <Tag color="blue" style={{ margin: 0 }}>
+                        this device
+                      </Tag>
+                    )}
+                  </Space>
+                }
+                description={
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {d.link_count} link(s)
+                    {d.hostname ? ` · ${d.hostname}` : ''}
+                    {d.os ? ` · ${d.os}` : ''}
+                  </Text>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      </Modal>
+
+      {/* 批量链接（FR-9）：把多个条目一次性挂到某个本地根目录下 */}
+      <Modal
+        title="Bulk Link"
+        open={bulkOpen}
+        onCancel={() => setBulkOpen(false)}
+        onOk={handleBulkLink}
+        okText="Create Links"
+        confirmLoading={bulkSubmitting}
+        okButtonProps={{ disabled: !bulkRoot.trim() || bulkSelected.length === 0 }}
+        width={640}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="One symlink is created per selected entry at <local root>/<repo_path>. Nothing is copied."
+        />
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div>
+            <Text strong>Local root</Text>
+            <Input
+              style={{ marginTop: 4 }}
+              placeholder="~/Restore"
+              value={bulkRoot}
+              onChange={(e) => setBulkRoot(e.target.value)}
+              addonAfter={
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => setRootPickerOpen(true)}
+                />
+              }
+            />
+          </div>
+          <div>
+            <Space style={{ marginBottom: 4 }}>
+              <Text strong>Entries</Text>
+              <Button
+                size="small"
+                type="link"
+                onClick={() => setBulkSelected(entries.map((e) => e.id))}
+              >
+                Select all
+              </Button>
+              <Button size="small" type="link" onClick={() => setBulkSelected([])}>
+                Clear
+              </Button>
+            </Space>
+            <Checkbox.Group
+              style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+              value={bulkSelected}
+              onChange={(values) => setBulkSelected(values as string[])}
+              options={entries.map((e) => ({
+                value: e.id,
+                label: (
+                  <Space size={4}>
+                    <Text code style={{ fontSize: 12 }}>
+                      {bulkRoot.trim()
+                        ? `${bulkRoot.replace(/\/+$/, '')}/${e.repo_path}`
+                        : e.repo_path}
+                    </Text>
+                    <Tag style={{ margin: 0 }}>{e.kind}</Tag>
+                  </Space>
+                ),
+              }))}
+            />
+          </div>
+        </Space>
+      </Modal>
+
+      <DirectoryPickerModal
+        open={rootPickerOpen}
+        mode="directory"
+        title="Select the local root directory"
+        onClose={() => setRootPickerOpen(false)}
+        onSelect={(path) => setBulkRoot(path)}
+      />
     </div>
   );
 };

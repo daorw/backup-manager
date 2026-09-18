@@ -1,0 +1,23 @@
+# 供 .cnb.yml 的 darwin 构建使用：在 Linux 构建节点上交叉编译 macOS 二进制。
+#
+# 为什么需要它：本项目的托盘（github.com/getlantern/systray）在 macOS 上是 cgo
+# （Objective-C / Cocoa）实现，CGO_ENABLED=0 编不出来，而 CNB 官方构建节点只有
+# Linux 容器。osxcross 提供「clang + macOS SDK」，因此可以在 Linux 上产出真正的
+# Mach-O 产物（otool -L 可见 Cocoa / CoreFoundation / libobjc 链接）。
+#
+# 注意：/osxcross 镜像本身没有 shell（只能作为多阶段来源），且使用 Apple 的
+# Xcode SDK，商用请自行评估 Xcode 许可条款。
+
+FROM crazymax/osxcross:26.1 AS osxcross
+
+FROM golang:1.26.2
+
+# osxcross 的编译器包装脚本会调用宿主的 clang / lld，必须自己装
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends clang lld \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=osxcross /osxcross /osxcross
+
+ENV PATH="/osxcross/bin:${PATH}" \
+    LD_LIBRARY_PATH="/osxcross/lib"

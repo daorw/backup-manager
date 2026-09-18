@@ -1,33 +1,65 @@
-# Tag 发版流水线 —— 对应 .github/workflows/release.yml 中的非 darwin 部分。
+# Tag 发版流水线 —— 对应 .github/workflows/release.yml，一次性产出全部 5 个产物：
+#   linux/amd64、linux/arm64、windows/amd64、darwin/arm64、darwin/amd64
 #
 # 触发：推送任意 Tag（等价于 GH 的 on.push.tags: ['*']）
-# 产物：linux/amd64、linux/arm64、windows/amd64 三个二进制，作为 Release 附件上传
 #
-# 说明：darwin（amd64/arm64）不在这里构建 —— github.com/getlantern/systray 在 macOS 上
-# 依赖 CGO，无法从 Linux 交叉编译，而 CNB 只有 Linux 构建节点（Mac 需根组织自托管）。
-# 两个 macOS 产物仍由 GitHub Actions 负责。
+# 两条 Pipeline 并发执行：
+#   ① release-linux-windows：官方 Linux 节点交叉编译，负责创建 Release，产出 3 个产物
+#   ② release-darwin：仍然是官方 Linux 节点，但用 image/Dockerfile.osxcross（osxcross）
+#      交叉编译出带 CGO 的 macOS 二进制，产出 2 个产物
+#   ② 通过 cnb:await 等 ① 建好 Release 再上传附件
+
+# ── 复用片段 ──────────────────────────────────────────────
+
+.golang-build: &golang-build
+  docker:
+    image: golang:1.26.2 # 与 go.mod 的 go 指令保持一致
+    volumes:
+      - /root/go/pkg/mod # module 缓存
+      - /root/.cache/go-build # 编译缓存
+  env:
+    GOPROXY: https://goproxy.cn,direct
+
+.build-frontend: &build-frontend
+  name: build-frontend
+  image: node:22 # 前端与 Go 用不同镜像，Stage 级覆盖 Pipeline 镜像
+  script: |
+    cd frontend
+    npm ci
+    npm run build   # 产出 frontend/dist，供 main.go 的 go:embed 打包进二进制
+
+.generate-release-notes: &generate-release-notes
+  name: generate-release-notes
+  script: |
+    set -euo pipefail
+    tag="$CNB_BRANCH"
+    {
+      echo "## Backup Manager $tag"
+      echo
+      echo "### Changes since last release"
+      echo
+      prev="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+      if [ -n "$prev" ]; then
+        git log --oneline --no-decorate "$prev..$tag"
+      else
+        git log --oneline --no-decorate -20
+      fi
+    } > release-notes.md
+    cat release-notes.md
+
+# ── 触发 ─────────────────────────────────────────────────
 
 "$":
   tag_push:
-    - name: release
-      docker:
-        image: golang:1.26.2 # 与 go.mod 的 go 指令保持一致
-        volumes:
-          - /root/go/pkg/mod # module 缓存
-          - /root/.cache/go-build # 编译缓存
-      env:
-        GOPROXY: https://goproxy.cn,direct
+    # ① linux + windows：不依赖 CGO，直接在官方 Linux 节点交叉编译
+    - name: release-linux-windows
+      <<: *golang-build
       lock:
         key: release-$CNB_BRANCH # 同一个 tag 被重复推送时只保留最新一次
         wait: true
         cancel-in-wait: true
       stages:
-        - name: build-frontend
-          image: node:22 # 前端与 Go 用不同镜像，Stage 级覆盖 Pipeline 镜像
-          script: |
-            cd frontend
-            npm ci
-            npm run build   # 产出 frontend/dist，供 main.go 的 go:embed 打包进二进制
+        - *build-frontend
 
         - name: build-binaries
           script: |
@@ -44,23 +76,7 @@
             done
             ls -lh dist
 
-        - name: generate-release-notes
-          script: |
-            set -euo pipefail
-            tag="$CNB_BRANCH"
-            {
-              echo "## Backup Manager $tag"
-              echo
-              echo "### Changes since last release"
-              echo
-              prev="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
-              if [ -n "$prev" ]; then
-                git log --oneline --no-decorate "$prev..$tag"
-              else
-                git log --oneline --no-decorate -20
-              fi
-            } > release-notes.md
-            cat release-notes.md
+        - *generate-release-notes
 
         - name: publish-release
           type: git:release
@@ -68,12 +84,55 @@
             tag: $CNB_BRANCH
             descriptionFromFile: release-notes.md
 
+        # 通知 ②：Release 已就绪，可以上传附件了
+        - name: resolve-release-ready
+          type: cnb:resolve
+          options:
+            key: release-ready-$CNB_BRANCH
+
         - name: upload-attachments
           image: cnbcool/attachments:latest
-          # tag_push 事件下插件自动用 $CNB_BRANCH 作为目标 release，
-          # 因此必须在 publish-release 之后执行
+          # tag_push 事件下插件自动用 $CNB_BRANCH 作为目标 release
           settings:
             attachments:
               - ./dist/backup-manager-linux-amd64
               - ./dist/backup-manager-linux-arm64
               - ./dist/backup-manager-windows-amd64.exe
+
+    # ② darwin：镜像内自带 osxcross（macOS SDK + clang），因此能在 Linux 节点上
+    #    用 CGO 交叉编译 systray 所需的 Objective-C / Cocoa 代码
+    - name: release-darwin
+      docker:
+        build:
+          dockerfile: image/Dockerfile.osxcross
+          by: [image/Dockerfile.osxcross] # 只在 Dockerfile 变动时重建，其余命中缓存
+        volumes:
+          - /root/go/pkg/mod
+          - /root/.cache/go-build
+      env:
+        GOPROXY: https://goproxy.cn,direct
+      stages:
+        - name: await-release-ready
+          type: cnb:await
+          options:
+            key: release-ready-$CNB_BRANCH
+
+        - *build-frontend
+
+        - name: build-binaries-darwin
+          script: |
+            set -euo pipefail
+            mkdir -p dist
+            # oa64-clang → arm64-apple-darwin，o64-clang → x86_64-apple-darwin
+            CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CC=oa64-clang \
+              go build -ldflags="-s -w" -o dist/backup-manager-darwin-arm64 .
+            CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 CC=o64-clang \
+              go build -ldflags="-s -w" -o dist/backup-manager-darwin-amd64 .
+            ls -lh dist
+
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - ./dist/backup-manager-darwin-arm64
+              - ./dist/backup-manager-darwin-amd64

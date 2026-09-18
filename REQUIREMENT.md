@@ -15,7 +15,7 @@
 
 **Reverse Tracking Model**: Contrary to `.gitignore`'s "exclusion mode", users proactively specify which files/directories need to be tracked and backed up; unspecified files are automatically ignored. Similar to a whitelist system.
 
-**Entry & Link Aggregation**: A backup repository (repo) holds the real content under `data/`. An **entry** is one backed-up file or directory at `data/<repo_path>`. An **`in` link** is the local path whose content was moved into that entry (it creates the entry); **`out` links** distribute the same entry to further local paths. Every link is a symlink to `data/<repo_path>`, so `in` is simply a special case of `out` — one mechanism, two roles.
+**Entry & Link Aggregation**: A backup repository (repo) holds the real content under `data/`. An **entry** is one backed-up file or directory at `data/<repo_path>` — it is the whitelist member. A **link** is a local path bound to that entry as a symlink into `data/`. All links are completely equivalent: editing through any of them is the same operation on the same content, so the model stores no in/out distinction.
 
 **Unified Frontend and Backend**: The system adopts a unified frontend-backend architecture, running as a single process with one-click startup, eliminating the need to deploy frontend and backend services separately.
 
@@ -43,24 +43,19 @@
 
 ### 3.2 Entry & Link Management (data/)
 
-An **entry** is one backed-up file/directory at `data/<repo_path>`. Links bind a local path to an entry: **at most one `in` link** (normally exactly one — it creates the entry by moving content in; zero is allowed while a new device is being initialised) and **0..N `out` links** (pure distribution). An `in` link is a special case of an `out` link.
-
-Any `out` link can be **designated as the new `in` link**. After that designation the entry tracks changes through the new link, and the previous `in` link becomes an ordinary `out` link.
+An **entry** is one backed-up file/directory at `data/<repo_path>`. A **link** binds a local path to an entry; an entry may have **0..N links**. Because every link is a symlink to the same `data/<repo_path>`, all links are equal — there is no primary link, no tracked link, and nothing to switch. An entry with no links is legal: the content is in the repository, there is just no local view of it.
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-5 | Create Entry (Adopt) | User selects a local file/directory via UI; its content is **moved** into `data/<repo_path>` and the original location is replaced by a symlink — the entry's `in` link | P0 |
-| FR-6 | View Entry & Link List | Display all entries grouped by `repo_path`, each expandable to show its `in`/`out` links, the owning device, and the link state. Entries with no `in` link are flagged as *unbound* | P0 |
-| FR-7 | Add Out Link | Distribute an entry to another local path by creating a symlink to `data/<repo_path>`; multiple `out` links per entry are allowed, and an entry that has no `in` link yet may still receive one (this is how a new device binds an entry) | P0 |
-| FR-8 | Designate the Tracked Link (`in`) | From any `out` link, designate it as the new `in` link. The entry then tracks changes through it and the previous `in` link becomes an ordinary `out` link. A metadata-only change: no symlink is created, moved or removed. The same action recovers an *unbound* entry (one that legally has no `in` link yet, e.g. on a freshly initialised device) — the UI flags such entries and offers to designate one of their links | P0 |
-| FR-9 | Bulk Link | Pick multiple entries plus one local root directory and create one `out` link per entry at `<local_root>/<repo_path>` | P1 |
-| FR-10 | Link State Diagnosis & Repair | Diagnose each link (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled`) and offer create / repair / re-adopt | P0 |
-| FR-11 | Consistency Audit | Verify the invariants (**at most one `in` per entry**, reporting an entry with none as `no_in_link` warning; links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`) and report unmanaged links; one-click repair for everything convergable | P1 |
-| FR-25 | Remove Link / Entry | Remove a single link (safe), or remove an entry via `release` (keep content in the repo, untracked) / `unlink` (this device only) / `move_back` (content returns to a chosen local path) / `purge` (delete the content) | P0 |
+| FR-5 | Create Entry (Adopt) | User selects a local file/directory via UI; its content is **moved** into `data/<repo_path>` and the original location is replaced by a symlink. Entry and link are created together | P0 |
+| FR-6 | View Entry & Link List | Display all entries grouped by `repo_path`, each expandable to show its links, the owning device, and each link's state | P0 |
+| FR-7 | Add Link | Distribute an entry to another local path by creating a symlink to `data/<repo_path>`; any number of links per entry is allowed, including for an entry that has none yet (this is how a new device binds content that already exists in the repository) | P0 |
+| FR-9 | Bulk Link | Pick multiple entries plus one local root directory and create one link per entry at `<local_root>/<repo_path>` | P1 |
+| FR-10 | Link State Diagnosis & Repair | Diagnose each link (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled`) and offer repair / re-adopt | P0 |
+| FR-11 | Consistency Audit | Verify the invariants (links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`, no link referencing an unregistered device) and report unmanaged links; one-click repair for everything convergable | P1 |
+| FR-25 | Remove Link / Entry | Remove a single link (safe; the entry and its content stay), or remove an entry via `unlink` (this device's links only) / `move_back` (content returns to a chosen local path) / `purge` (delete the content) | P0 |
 
-**Consistency rule (must hold)**: `in` and `out` links stay completely consistent with the backed-up file/directory. If an `in` link tracks a directory, no `out` link may be created for a single file inside that directory. Consequently entries never overlap, and a link is always bound to a whole entry.
-
-**Cardinality rule (must hold)**: an entry has **at most one** `in` link. Exactly one in normal operation; zero only while a new device is being initialised, where the entry is *unbound* until the user designates one. `out` links are unbounded (0..N).
+**Consistency rule (must hold)**: links stay completely consistent with the backed-up file/directory. If a directory is tracked, no link may point at a single file inside it. Consequently entries never overlap, and a link is always bound to a whole entry.
 
 ### 3.3 Multi-Device Management
 
@@ -70,8 +65,8 @@ A **device** is one machine referencing the repository, identified by a stable m
 |----|------|------|--------|
 | FR-26 | Device Registration | Detect the current machine's fingerprint, register it on the repo automatically (name defaults to the hostname, renameable); list all devices with their link counts | P0 |
 | FR-27 | Apply Device | Converge this machine: show a dry-run plan (create / repair / skip / conflict / orphan) and execute it after confirmation. Never overwrites an occupied path | P0 |
-| FR-28 | Detach Device | Remove this device's local symlinks (`unlink`) or just stop managing them (`keep`). `data/` is never touched | P1 |
-| FR-29 | Delete Device | Delete a device's link definitions; if it held an entry's `in` link, automatically promote the oldest enabled remaining `out` link so tracking continues. If no other link remains, the entry becomes *unbound* (legal per the cardinality rule) and is reported by the audit | P1 |
+| FR-28 | Detach Device | Remove this device's local symlinks (`unlink`) or just stop managing them (`keep`). `data/` is never touched. Definitions stay, so re-attaching is a single Apply | P1 |
+| FR-29 | Delete Device | Delete a device's link definitions. Entries keep existing; one left with no links is legal | P1 |
 
 ### 3.4 File Preview and Editing
 
@@ -117,7 +112,7 @@ A **device** is one machine referencing the repository, identified by a stable m
 | NFR-2 | **Cross-Platform Support** | Support at least macOS and Linux |
 | NFR-3 | **Responsive UI** | Interface adapts to different screen sizes |
 | NFR-4 | **Security** | Require confirmation before removing links/entries and repositories; path safety checks on every user-supplied path; deleting content requires typed confirmation |
-| NFR-5 | **Entry-Level Consistency** | Each entry has **at most one** `in` link (zero allowed during new-device initialisation) and 0..N `out` links; once an `in` link tracks a directory, no `out` link may bind a single file inside it — links always bind whole entries and entries never overlap |
+| NFR-5 | **Link Consistency** | All links of an entry point at the same content object and are completely equivalent; once a directory is tracked, no link may bind a single file inside it — links always bind whole entries and entries never overlap (R-1..R-3) |
 | NFR-6 | **Backup Atomicity** | Failed backups should have clear prompts and error status |
 | NFR-7 | **Usability** | Core features should be completable within 3 clicks |
 | NFR-8 | **Startup Behavior** | Auto-open browser after startup |
@@ -180,7 +175,6 @@ Entry                          # one backed-up file/directory
 Link                           # a local path bound to an entry
 ├── id: string
 ├── entryId: string
-├── type: 'in' | 'out'         # `in` is a special case of `out`
 ├── device: string             # device fingerprint
 ├── localPath: string          # absolute local path of the symlink
 ├── enabled: boolean
@@ -248,12 +242,12 @@ Entries, links and devices live inside the repository rather than in SQLite beca
 |------|------|
 | Git Remote Repository | `git push` is optional. When remote is not configured, only local commits are made without push |
 | **Content Ownership** | Content lives **only** in `data/<repo_path>`. A local path is never a second copy but a symlink view onto it |
-| **`in` / `out` Links** | An entry has **at most one** `in` link and 0..N `out` links. Zero `in` links is allowed while initialising a new device. `in` is a **special case of** `out` — the same mechanism, distinguished only by role |
-| **Entry-Level Consistency** | Links always bind a whole entry. An `in` link tracking a directory forbids any `out` link to a file inside it; entries never overlap |
-| **Tracked Link** | The `in` link is the entry's tracked link. Any `out` link can be designated as the new `in`; the entry then tracks that link's changes and the previous `in` becomes a plain `out`. A metadata-only switch that does not touch the filesystem |
+| **Link Equality** | An entry has 0..N links and all of them are equal — same target, same semantics. There is no `in`/`out` type, no tracked link, and nothing to switch |
+| **Link Consistency** | Links always bind a whole entry. A tracked directory forbids a link to a file inside it; entries never overlap |
+| **Entry = Whitelist Member** | An entry's existence in the manifest is what makes it backed up. An entry with no links is legal — the content is in the repository with no local view |
 | **Device Metadata Location** | Devices, entries and links are stored in `<repo>/.backup-manager/manifest.json` inside the repository (git-tracked), not in the per-machine SQLite database, so a new machine learns them with a plain `git clone` |
 | **Adopt Semantics** | Creating an entry **moves** the source into the repo and replaces the original location with a symlink. The original file is never left behind as a second copy |
-| Content Removal | Removing content requires a typed `repo_path` confirmation; `release` / `move_back` are offered as non-destructive alternatives; a commit precedes every removal so `git revert` always works |
+| Content Removal | Removing content requires a typed `repo_path` confirmation; `unlink` / `move_back` are offered as non-destructive alternatives; a commit precedes every removal so `git revert` always works |
 | Frontend Technology Stack | React 18 + TypeScript + Vite + Ant Design 5 |
 | Startup Behavior | Auto-open browser after startup |
 | Markdown Images | Support local image display in Markdown |
@@ -289,10 +283,10 @@ In the Browse tab of the repository detail page, users select a node in the `dat
 
 Editing does not automatically trigger a backup. The change sits in `data/` as an uncommitted working-tree modification and is captured by the next manual or scheduled backup. The Backup tab shows the uncommitted change count as the "there is an update" indicator. This is a reasonable design — editing is an independent action, and the backup timing stays under user control.
 
-Because the same file backs every link, editing through the entry's `in` link, through any `out` link, or through the Browse tab are all the same operation on the same content.
+Because the same file backs every link, editing through any link or through the Browse tab is the same operation on the same content.
 
 ---
 
-**Document Version**: v2.0  
+**Document Version**: v2.1  
 **Status**: Confirmed  
-**Date Prepared**: 2026-07-16 (v2.0 revised 2026-09-18 — entry/link model replaces the `.links/` symlink model; see §3.2, §3.3, §5)
+**Date Prepared**: 2026-07-16 (v2.1 revised 2026-09-18 — links carry no `in`/`out` type; the cardinality rule is dropped; see §3.2, §3.3, §5)

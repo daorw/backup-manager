@@ -62,7 +62,6 @@ func (s *Service) buildEntryViews(repoRoot string, m *model.Manifest, currentDev
 			RepoPath:  e.RepoPath,
 			Kind:      string(e.Kind),
 			CreatedAt: e.CreatedAt,
-			Unbound:   e.InLink() == nil,
 			Links:     make([]*LinkView, 0, len(e.Links)),
 		}
 		for _, l := range e.Links {
@@ -74,12 +73,10 @@ func (s *Service) buildEntryViews(repoRoot string, m *model.Manifest, currentDev
 			v.Links = append(v.Links, &LinkView{
 				ID:         l.ID,
 				EntryID:    e.ID,
-				Type:       string(l.Type),
 				Device:     l.Device,
 				DeviceName: name,
 				LocalPath:  l.LocalPath,
 				Enabled:    l.Enabled,
-				Tracked:    l.Type == model.LinkTypeIn,
 				IsCurrent:  l.Device == currentDevice,
 				State:      string(state),
 				StateNote:  note,

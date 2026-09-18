@@ -2,17 +2,6 @@ package model
 
 import "time"
 
-// LinkType 链接类型。
-//
-// in 是 out 的特例：两者物理形态完全相同（都是指向 <repo>/data/<repo_path> 的软链接），
-// 仅角色不同 —— in 负责把内容移入仓库并创建条目，每个条目至多一个；out 只做分发，0..N 个。
-type LinkType string
-
-const (
-	LinkTypeIn  LinkType = "in"  // 条目的跟踪链接
-	LinkTypeOut LinkType = "out" // 额外的分发链接
-)
-
 // EntryKind 条目类型。
 type EntryKind string
 
@@ -36,16 +25,22 @@ const (
 )
 
 // Link 一条链接：把一个本机路径绑定到一个条目。
+//
+// 所有链接**完全等价** —— 物理上都是指向 <repo>/data/<repo_path> 的软链接。
+// 不存在 in/out 类型之分：条目创建时产生的那条链接就是「入」，后续的是「出」，
+// 但两者语义与形态完全相同，因此不落库区分。
 type Link struct {
 	ID        string    `json:"id"`
-	Type      LinkType  `json:"type"`
 	Device    string    `json:"device"`     // 所属设备的指纹
 	LocalPath string    `json:"local_path"` // 本机绝对路径
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Entry 一个被备份的文件/目录：data/ 下的一个 repo_path，加上所有指向它的链接。
+// Entry 一个被备份的文件/目录：data/ 下的一个 repo_path，加上指向它的链接。
+//
+// 条目就是白名单里的一条：只要它存在于清单中，就是「被备份对象」。
+// 没有链接（0 条）完全合法 —— 内容在仓库里，但本机暂时没有视图。
 type Entry struct {
 	ID        string    `json:"id"`
 	RepoPath  string    `json:"repo_path"` // 相对 data/ 的路径，即内容的身份
@@ -54,20 +49,21 @@ type Entry struct {
 	Links     []*Link   `json:"links"`
 }
 
-// InLink 返回条目的 in 链接；条目未绑定时返回 nil。
-func (e *Entry) InLink() *Link {
+// FindLink 按 id 查找链接，未找到返回 nil。
+func (e *Entry) FindLink(id string) *Link {
 	for _, l := range e.Links {
-		if l.Type == LinkTypeIn {
+		if l.ID == id {
 			return l
 		}
 	}
 	return nil
 }
 
-// FindLink 按 id 查找链接，未找到返回 nil。
-func (e *Entry) FindLink(id string) *Link {
+// FirstLinkOn 返回指定设备上的一条链接（取列表中最早加入的那条）。
+// 用于需要「本机的某个落点」却未显式指定时的确定性回退。
+func (e *Entry) FirstLinkOn(device string) *Link {
 	for _, l := range e.Links {
-		if l.ID == id {
+		if l.Device == device {
 			return l
 		}
 	}

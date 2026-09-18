@@ -152,24 +152,21 @@ func TestAuditDetectsSymlinkInData(t *testing.T) {
 	}
 }
 
-// TestAuditDetectsUnboundEntry 验证没有 in 链接的条目按 warning 报告。
-func TestAuditDetectsUnboundEntry(t *testing.T) {
+// TestAuditLinklessEntryIsClean 验证没有链接的条目完全合法，巡检不报任何问题。
+func TestAuditLinklessEntryIsClean(t *testing.T) {
 	svc, repo := newTestService(t)
 	view := adoptOne(t, svc, repo, "notes.txt")
 
 	if _, err := svc.RemoveLink(repo.ID, view.ID, view.Links[0].ID); err != nil {
-		t.Fatalf("remove in link: %v", err)
+		t.Fatalf("remove link: %v", err)
 	}
 
 	res, err := svc.Audit(repo.ID)
 	if err != nil {
 		t.Fatalf("audit: %v", err)
 	}
-	if !hasCode(res, CodeNoInLink) {
-		t.Fatalf("expected %s, got %+v", CodeNoInLink, res.Findings)
-	}
-	if res.Errors != 0 {
-		t.Fatalf("an unbound entry is legal, must not be an error: %+v", res.Findings)
+	if !res.Clean {
+		t.Fatalf("an entry with no links is legal: %+v", res.Findings)
 	}
 }
 
@@ -194,70 +191,7 @@ func TestAuditDetectsUnmanagedLink(t *testing.T) {
 	}
 }
 
-// TestManifestWithTwoInLinksIsReportedAndRepairable 验证手工编辑出的
-// 「两个 in 链接」不再让仓库完全打不开，而是由巡检报告并可一键修复。
-func TestManifestWithTwoInLinksIsReportedAndRepairable(t *testing.T) {
-	svc, repo := newTestService(t)
-	fp := util.MachineFingerprint()
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// 内容存在，本测试只针对 R-1（两个 in 链接）
-	writeFile(t, filepath.Join(repo.Path, "data", "notes.txt"), "content")
-
-	dir := t.TempDir()
-	aPath := filepath.Join(dir, "a.txt")
-	bPath := filepath.Join(dir, "b.txt")
-
-	writeRawManifest(t, repo.Path, fmt.Sprintf(`{
-  "version": 1,
-  "updated_at": %q,
-  "devices": [{"fingerprint": %q, "name": "dev"}],
-  "entries": [{
-    "id": "e1", "repo_path": "notes.txt", "kind": "file", "created_at": %q,
-    "links": [
-      {"id": "l1", "type": "in",  "device": %q, "local_path": %q, "enabled": true, "created_at": %q},
-      {"id": "l2", "type": "in",  "device": %q, "local_path": %q, "enabled": true, "created_at": %q}
-    ]
-  }]
-}`, now, fp, now, fp, aPath, now, fp, bPath, now))
-
-	// 1) 仓库仍可打开、可巡检（不再因为校验失败而完全不可用）
-	res, err := svc.Audit(repo.ID)
-	if err != nil {
-		t.Fatalf("audit must work on an invalid manifest: %v", err)
-	}
-	if !hasCode(res, CodeMultipleIn) {
-		t.Fatalf("expected %s, got %+v", CodeMultipleIn, res.Findings)
-	}
-
-	// 2) 一键修复：保留最早的一条，其余降级为 out
-	repair, err := svc.RepairAll(repo.ID)
-	if err != nil {
-		t.Fatalf("repair: %v", err)
-	}
-	if repair.RemainingErrors != 0 {
-		t.Fatalf("expected no remaining errors, got %+v", repair)
-	}
-	demoted := false
-	for _, a := range repair.Repaired {
-		if a.Action == "demote_in" {
-			demoted = true
-		}
-	}
-	if !demoted {
-		t.Fatalf("expected the extra in link to be demoted: %+v", repair.Repaired)
-	}
-
-	after, err := svc.Audit(repo.ID)
-	if err != nil {
-		t.Fatalf("audit after repair: %v", err)
-	}
-	if hasCode(after, CodeMultipleIn) {
-		t.Fatalf("R-1 violation should be gone: %+v", after.Findings)
-	}
-}
-
-// TestOverlappingEntriesReportedAndWritesBlocked 验证 R-3 违规可被检出、
+// TestOverlappingEntriesReportedAndWritesBlocked 验证 R-2 违规可被检出、
 // 无法自动修复，且新的写入会被拒绝。
 func TestOverlappingEntriesAreReportedAndBlockWrites(t *testing.T) {
 	svc, repo := newTestService(t)
@@ -274,9 +208,9 @@ func TestOverlappingEntriesAreReportedAndBlockWrites(t *testing.T) {
   "devices": [{"fingerprint": %q, "name": "dev"}],
   "entries": [
     {"id": "e1", "repo_path": "docs", "kind": "dir", "created_at": %q,
-     "links": [{"id": "l1", "type": "in", "device": %q, "local_path": %q, "enabled": true, "created_at": %q}]},
+     "links": [{"id": "l1", "device": %q, "local_path": %q, "enabled": true, "created_at": %q}]},
     {"id": "e2", "repo_path": "docs/vendor", "kind": "dir", "created_at": %q,
-     "links": [{"id": "l2", "type": "in", "device": %q, "local_path": %q, "enabled": true, "created_at": %q}]}
+     "links": [{"id": "l2", "device": %q, "local_path": %q, "enabled": true, "created_at": %q}]}
   ]
 }`, now, fp, now, fp, docsPath, now, now, fp, vendorPath, now))
 

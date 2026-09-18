@@ -27,23 +27,23 @@
 
 ### 多设备
 
-设备、条目与链接存放在仓库清单中，而不是按机器独立的本地 SQLite 数据库中 —— 因此新机器仅凭 `git clone` 就能获知所有设备的链接。注册该机器、点击 **Apply** 重建它的软链接，再对任意 `out` 链接执行 **Set as tracked**，把它指定为条目的 `in` 链接 —— 此后条目通过它跟踪变更，原先的 `in` 链接转为普通 `out` 链接。
+设备、条目与链接存放在仓库清单中，而不是按机器独立的本地 SQLite 数据库中 —— 因此新机器仅凭 `git clone` 就能获知所有设备的链接。注册该机器、点击 **Apply** 重建它的软链接，在文件应当出现的位置添加一条链接即可 —— 不需要提升任何东西，因为所有链接完全等价。
 
-### 数量规则与一致性规则
+### 链接等价与一致性规则
 
-- 每个条目**至多一个 `in` 链接**。正常情况恰为一个；**初始化新设备时允许为 0**，此时条目处于**未绑定**状态，UI 会提示你指定一个。
-- 每个条目有 **0..N 个 `out` 链接**，其中任意一个都可以被指定为新的 `in` 链接。
-- 系统强制条目级一致性：一旦 `in` 链接跟踪的是目录，就不允许对该目录内的单个文件建 `out` 链接。条目之间永不重叠，链接永远绑定完整条目、绝不绑定子路径。
+- 每个条目有 **0..N 条链接**，且全部**完全等价** —— 同一目标、同一语义。没有 `in`/`out` 类型、没有跟踪链接、没有需要切换的东西。
+- **没有链接的条目合法**：内容在仓库里，本机暂时没有视图。
+- 系统强制一致性：一旦某个目录被跟踪，就不允许对该目录内的单个文件建链接。条目之间永不重叠，链接永远绑定完整条目、绝不绑定子路径。
 
 任何违反上述规则的创建请求都会被拒绝，已发生的漂移由一致性巡检报告。
 
 ## 功能特性
 
 - **仓库管理** — 创建/删除/查看备份仓库，可视化配置（远程仓库、分支、Git 用户）
-- **条目与链接管理** — 每个被备份的文件/目录是一个条目，含**至多一个 `in` 链接**（0..N 个 `out` 链接）；可查看、分发、指定跟踪 `in` 链接、批量链接，以及移除（release / move_back / purge）
+- **条目与链接管理** — 每个被备份的文件/目录是一个条目，含 **0..N 条完全等价的链接**；可查看、分发、添加链接、修复、重新纳入，以及移除（unlink / move_back / purge）
 - **链接状态诊断** — 逐链接状态（`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`），支持一键修复与重新纳入
-- **一致性巡检** — 校验各项不变量（每条目**至多一个** `in` 链接、链接只绑定完整条目、条目不重叠、`data/` 内无软链接），并报告未托管链接
-- **多设备** — 机器指纹识别、设备注册、dry-run `apply` 重建本机链接、detach，以及删除设备时自动提升 `in` 链接
+- **一致性巡检** — 校验各项不变量（链接只绑定完整条目、条目不重叠、`data/` 内无软链接、未引用未登记设备），并报告未托管链接
+- **多设备** — 机器指纹识别、设备注册、dry-run `apply` 重建本机链接、detach；删除设备只移除其链接定义
 - **文件预览与编辑** — 纯文本/代码语法高亮、Markdown 渲染、二进制文件标识；编辑直接写入 `data/`，所有链接立即反映
 - **备份执行** — 手动触发或定时自动备份（秒级 cron），Git push（可选）
 - **备份历史** — 查看 Git 提交历史，支持分页，并展示未提交变更数量
@@ -141,12 +141,11 @@ go build -o backup-manager .
 | 仓库 | `POST /repos/:id/git-init` | 初始化 Git 仓库 |
 | 条目 | `GET /repos/:id/entries?device=&state=` | 条目列表（含链接与状态） |
 | 条目 | `GET /repos/:id/entries/:entryId` | 条目详情 |
-| 条目 | `POST /repos/:id/entries/adopt` | 创建条目及其 `in` 链接（移入内容） |
+| 条目 | `POST /repos/:id/entries/adopt` | 创建条目及其第一条链接（移入内容） |
 | 条目 | `PATCH /repos/:id/entries/:entryId` | 重命名 `repo_path`（重新校验不重叠） |
-| 条目 | `POST /repos/:id/entries/:entryId/switch` | 把某个 `out` 链接提升为条目的 `in` 链接 |
-| 条目 | `DELETE /repos/:id/entries/:entryId?mode=` | `release` / `unlink` / `move_back` / `purge` |
-| 链接 | `GET/POST /repos/:id/entries/:entryId/links` | 列出 / 添加 `out` 链接 |
-| 链接 | `POST /repos/:id/links/bulk` | 在某个本机根目录下批量创建 `out` 链接 |
+| 条目 | `DELETE /repos/:id/entries/:entryId?mode=` | `unlink` / `move_back` / `purge` |
+| 链接 | `GET/POST /repos/:id/entries/:entryId/links` | 列出 / 添加链接 |
+| 链接 | `POST /repos/:id/links/bulk` | 在某个本机根目录下批量创建链接 |
 | 链接 | `PATCH /repos/:id/entries/:entryId/links/:linkId` | 修改 `local_path` / `enabled` |
 | 链接 | `POST .../links/:linkId/repair` | 重建软链接 |
 | 链接 | `POST .../links/:linkId/readopt` | `replaced` → 把新内容移入 `data/` 并重建链接 |
@@ -156,7 +155,7 @@ go build -o backup-manager .
 | 设备 | `GET /repos/:id/devices/:fp/links` | 该设备的链接及状态 |
 | 设备 | `POST /repos/:id/devices/:fp/apply` | 让本机收敛（支持 dry-run） |
 | 设备 | `POST /repos/:id/devices/:fp/detach` | 卸载本机 |
-| 一致性 | `GET /repos/:id/consistency` | 巡检结论 |
+| 一致性 | `GET /repos/:id/consistency` | 巡检结论（R-1..R-3、未托管链接） |
 | 一致性 | `POST /repos/:id/consistency/repair` | 修复所有可收敛项 |
 | 内容 | `GET /repos/:id/tree?path=` | 列出 `data/` 下的条目及徽标 |
 | 内容 | `GET /repos/:id/preview?path=...` | 预览文件内容 |
@@ -181,8 +180,8 @@ go build -o backup-manager .
 2. 点击托盘图标 → "Open UI" 打开浏览器
 3. 仪表盘显示仓库列表
 4. 点击"创建仓库" → 输入名称、选择路径
-5. 进入仓库详情 → Entries 标签页 → "+ New Entry"（内容移入仓库，原位置成为 `in` 链接）
-6. （可选）添加 `out` 链接，把同一条目分发到更多本机路径
+5. 进入仓库详情 → Entries 标签页 → "+ New Entry"（内容移入仓库，原位置成为它的第一条链接）
+6. （可选）添加更多链接，把同一条目分发到更多本机路径
 7. 在 Browse 标签页浏览、预览和编辑内容
 8. 切换到备份标签页 → 点击"触发备份"
 9. 配置远程仓库和认证信息（可选）
@@ -203,7 +202,7 @@ go build -o backup-manager .
 ## 安全设计
 
 - **路径安全**: 四层校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越；本机链接路径限定在允许根目录（`$HOME` + 仓库根目录）内，并拒绝指向仓库内部的自引用
-- **条目级一致性**: 加载时按 R-1..R-5 校验清单（每条目**至多一个** `in` 链接 —— 0 个按**未绑定**接受；链接只绑定完整条目；条目不重叠；链接不在目录条目内部）；文件无法解析时阻止写入，而不是静默重写
+- **链接一致性**: 每次写入前按 R-1..R-3 校验清单（链接只绑定完整条目；条目不重叠；链接不在目录条目内部）；文件无法解析时阻止写入，不合规时由巡检报告，而不是静默重写
 - **清单原子写**: `manifest.json.tmp` → `fsync` → `os.Rename`
 - **默认非破坏性**: 建链接拒绝已占用路径；`apply` 从不覆盖；删除内容需输入路径二次确认，且删除前先提交，因此 `git revert` 可恢复
 - **认证加密**: SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密存储
@@ -248,7 +247,7 @@ backup-manager/
 │   │       ├── system.go       # 健康检查
 │   │       └── errors.go       # 错误码映射
 │   ├── entry/                  # 条目与链接子系统
-│   │   ├── manifest.go         # 清单加载/保存/原子写 + R-1..R-5 校验
+│   │   ├── manifest.go         # 清单加载/保存/原子写 + R-1..R-3 校验
 │   │   ├── service.go          # Service 装配、仓库互斥锁、清单提交、公共辅助
 │   │   ├── entry_service.go    # adopt、list、remove（unlink/move_back/purge）
 │   │   ├── link_service.go     # 添加 out 链接、批量链接、switch、repair、remove

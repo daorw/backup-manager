@@ -50,12 +50,12 @@ func SetupRouter(
 		v1.PATCH("/repos/:id/devices/:fingerprint", deviceHandler.Rename)
 		v1.DELETE("/repos/:id/devices/:fingerprint", deviceHandler.Delete)
 		v1.POST("/repos/:id/devices/:fingerprint/apply", deviceHandler.Apply)
+		v1.POST("/repos/:id/devices/:fingerprint/detach", deviceHandler.Detach)
 
 		// 条目
 		v1.GET("/repos/:id/entries", entryHandler.List)
 		v1.POST("/repos/:id/entries/adopt", entryHandler.Adopt)
 		v1.GET("/repos/:id/entries/:entryId", entryHandler.Get)
-		v1.POST("/repos/:id/entries/:entryId/switch", entryHandler.Switch)
 		v1.DELETE("/repos/:id/entries/:entryId", entryHandler.Delete)
 
 		// 一致性巡检
@@ -66,6 +66,7 @@ func SetupRouter(
 		v1.POST("/repos/:id/links/bulk", linkHandler.Bulk)
 		v1.POST("/repos/:id/entries/:entryId/links", linkHandler.Create)
 		v1.POST("/repos/:id/entries/:entryId/links/:linkId/repair", linkHandler.Repair)
+		v1.POST("/repos/:id/entries/:entryId/links/:linkId/readopt", linkHandler.Readopt)
 		v1.POST("/repos/:id/entries/:entryId/links/:linkId/remove", linkHandler.Remove)
 
 		// 本机文件浏览

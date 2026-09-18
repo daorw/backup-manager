@@ -22,8 +22,8 @@ type BulkLinkRequest struct {
 	EntryIDs  []string `json:"entry_ids,omitempty"` // 为空表示全部条目
 }
 
-// AddLink 为条目添加一条 out 链接：在 local_path 创建指向 data/<repo_path> 的软链接，不复制内容。
-// 条目的 in 链接不是前置条件 —— 这正是新设备为「未绑定」条目建立链接的方式。
+// AddLink 为条目添加一条链接：在 local_path 创建指向 data/<repo_path> 的软链接，不复制内容。
+// 所有链接完全等价，不存在 in/out 之分。
 func (s *Service) AddLink(repoID, entryID string, req *AddLinkRequest) (*EntryView, error) {
 	defer s.lock(repoID)()
 	repo, m, err := s.load(repoID)
@@ -58,14 +58,13 @@ func (s *Service) AddLink(repoID, entryID string, req *AddLinkRequest) (*EntryVi
 	ensureDevice(m, device)
 	e.Links = append(e.Links, &model.Link{
 		ID:        newID(),
-		Type:      model.LinkTypeOut,
 		Device:    device,
 		LocalPath: local,
 		Enabled:   true,
 		CreatedAt: time.Now().UTC(),
 	})
 
-	if err := s.save(repo, m, "link: add out "+e.RepoPath); err != nil {
+	if err := s.save(repo, m, "link: add "+e.RepoPath); err != nil {
 		os.Remove(local)
 		return nil, err
 	}
@@ -109,39 +108,6 @@ func (s *Service) BulkLink(repoID string, req *BulkLinkRequest) ([]*EntryView, e
 	return results, nil
 }
 
-// Switch 把指定的 out 链接指定为新的 in 链接：条目此后跟踪该链接的变更，
-// 原 in 链接降级为普通 out 链接。
-//
-// 因为 in 与 out 物理形态完全相同，这是纯元数据操作 —— 不创建、不移动、不删除任何软链接。
-func (s *Service) Switch(repoID, entryID, linkID string) (*EntryView, error) {
-	defer s.lock(repoID)()
-	repo, m, err := s.load(repoID)
-	if err != nil {
-		return nil, err
-	}
-	e := m.FindEntry(entryID)
-	if e == nil {
-		return nil, fmt.Errorf("entry not found: %s", entryID)
-	}
-	target := e.FindLink(linkID)
-	if target == nil {
-		return nil, fmt.Errorf("link not found: %s", linkID)
-	}
-	if !target.Enabled {
-		return nil, fmt.Errorf("link %q is disabled", linkID)
-	}
-
-	if cur := e.InLink(); cur != nil && cur.ID != target.ID {
-		cur.Type = model.LinkTypeOut
-	}
-	target.Type = model.LinkTypeIn
-
-	if err := s.save(repo, m, "link: switch in -> "+e.RepoPath); err != nil {
-		return nil, err
-	}
-	return s.Get(repoID, entryID)
-}
-
 // RepairLink 重建一条链接的本机软链接。
 // 只在状态为 missing / wrong_target / dangling 时可用，占用路径不会被覆盖。
 func (s *Service) RepairLink(repoID, entryID, linkID string) (*EntryView, error) {
@@ -167,6 +133,49 @@ func (s *Service) RepairLink(repoID, entryID, linkID string) (*EntryView, error)
 	}
 	if err := createSymlink(l.LocalPath, repo.Path, e.RepoPath); err != nil {
 		return nil, err
+	}
+	return s.Get(repoID, entryID)
+}
+
+// Readopt 处理 replaced 状态：本机路径被真实文件/目录占用
+// （应用用「临时文件 + rename」原子写配置时会把软链接替换掉）。
+//
+// 处理办法是把这份新内容移入 data/<repo_path>，然后恢复软链接。
+// 被覆盖掉的旧版本仍可从 Git 历史恢复（§9.12：Git 就是回收站）。
+func (s *Service) Readopt(repoID, entryID, linkID string) (*EntryView, error) {
+	defer s.lock(repoID)()
+	repo, m, err := s.load(repoID)
+	if err != nil {
+		return nil, err
+	}
+	e := m.FindEntry(entryID)
+	if e == nil {
+		return nil, fmt.Errorf("entry not found: %s", entryID)
+	}
+	l := e.FindLink(linkID)
+	if l == nil {
+		return nil, fmt.Errorf("link not found: %s", linkID)
+	}
+
+	info, err := os.Lstat(l.LocalPath)
+	if err != nil {
+		return nil, fmt.Errorf("local path is not occupied, use repair instead: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("local path is still a symlink, use repair instead")
+	}
+
+	content := DataPath(repo.Path, e.RepoPath)
+	if err := os.RemoveAll(content); err != nil {
+		return nil, fmt.Errorf("failed to clear the old repository content: %w", err)
+	}
+	if err := movePath(l.LocalPath, content); err != nil {
+		return nil, fmt.Errorf("failed to move the new content into the repository: %w", err)
+	}
+	if err := os.Symlink(content, l.LocalPath); err != nil {
+		// 回滚：内容移回本机路径
+		_ = movePath(content, l.LocalPath)
+		return nil, fmt.Errorf("failed to recreate the link: %w", err)
 	}
 	return s.Get(repoID, entryID)
 }

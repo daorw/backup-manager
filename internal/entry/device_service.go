@@ -74,8 +74,7 @@ func (s *Service) RenameDevice(repoID, fingerprint, name string) error {
 	return s.save(repo, m, "device: rename "+name)
 }
 
-// DeleteDevice 删除设备及其链接定义。
-// 若某条目因此失去 in 链接但仍有其他链接，自动把最早的一条提升为 in，使跟踪得以延续。
+// DeleteDevice 删除设备及其链接定义。条目本身保留 —— 没有链接的条目依然是被备份对象。
 func (s *Service) DeleteDevice(repoID, fingerprint string) error {
 	if fingerprint == util.MachineFingerprint() {
 		return fmt.Errorf("cannot delete the current device")
@@ -105,12 +104,76 @@ func (s *Service) DeleteDevice(repoID, fingerprint string) error {
 			}
 		}
 		e.Links = kept
-		// 失去 in 链接时自动兜底提升一条，保持跟踪不中断
-		if len(e.Links) > 0 && e.InLink() == nil {
-			e.Links[0].Type = model.LinkTypeIn
-		}
 	}
 	return s.save(repo, m, "device: delete "+fingerprint[:8])
+}
+
+// 设备卸载模式。
+const (
+	DetachModeUnlink = "unlink" // 删除本机软链接，data/ 完全不动
+	DetachModeKeep   = "keep"   // 不动文件系统，只是不再管理（用于把机器交出去）
+)
+
+// DetachResult 设备卸载结果。
+type DetachResult struct {
+	Device      string        `json:"device"`
+	Mode        string        `json:"mode"`
+	Removed     []ApplyAction `json:"removed"`
+	CompletedAt time.Time     `json:"completed_at"`
+}
+
+// Detach 卸载本机：unlink 删除本机的软链接，keep 只停止管理。
+//
+// 不删除设备条目，链接定义也保持启用，因此重新挂载只需一次 Apply。
+// 代价是卸载后这些链接会以 link_missing 出现在巡检结论里，直到重新 Apply。
+func (s *Service) Detach(repoID, deviceID, mode string) (*DetachResult, error) {
+	fingerprint := util.MachineFingerprint()
+	if deviceID == "" {
+		deviceID = fingerprint
+	}
+	if deviceID != fingerprint {
+		return nil, fmt.Errorf("detach is only allowed for the current device")
+	}
+	if mode == "" {
+		mode = DetachModeUnlink
+	}
+	if mode != DetachModeUnlink && mode != DetachModeKeep {
+		return nil, fmt.Errorf("invalid detach mode: %s", mode)
+	}
+
+	defer s.lock(repoID)()
+	_, m, err := s.load(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &DetachResult{
+		Device:      fingerprint,
+		Mode:        mode,
+		Removed:     []ApplyAction{},
+		CompletedAt: time.Now().UTC(),
+	}
+
+	// keep：不动文件系统，也不改清单 —— 只是「不再管理」
+	if mode == DetachModeKeep {
+		return result, nil
+	}
+
+	for _, e := range m.Entries {
+		for _, l := range e.Links {
+			if l.Device != fingerprint {
+				continue
+			}
+			if err := os.Remove(l.LocalPath); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to remove %s: %w", l.LocalPath, err)
+			}
+			result.Removed = append(result.Removed, ApplyAction{
+				EntryID: e.ID, LinkID: l.ID, RepoPath: e.RepoPath,
+				LocalPath: l.LocalPath, Action: "unlink",
+			})
+		}
+	}
+	return result, nil
 }
 
 // Apply 让本机与清单收敛：按需创建/修复本机软链接，从不覆盖已占用的路径。

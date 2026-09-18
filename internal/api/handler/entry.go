@@ -54,24 +54,6 @@ func (h *EntryHandler) Adopt(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": view})
 }
 
-// Switch 处理 POST /api/v1/repos/:id/entries/:entryId/switch
-// 把指定的 out 链接指定为新的 in 链接（纯元数据变更，不动文件系统）。
-func (h *EntryHandler) Switch(c *gin.Context) {
-	var req struct {
-		LinkID string `json:"link_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
-		return
-	}
-	view, err := h.svc.Switch(c.Param("id"), c.Param("entryId"), req.LinkID)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": view})
-}
-
 // Delete 处理 DELETE /api/v1/repos/:id/entries/:entryId?mode=&link_id=
 func (h *EntryHandler) Delete(c *gin.Context) {
 	mode := c.DefaultQuery("mode", entry.RemoveModeUnlink)

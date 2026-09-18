@@ -50,8 +50,8 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// TestAdoptMovesContentAndCreatesInLink 验证 adopt 把内容移入仓库、原位置变成软链接。
-func TestAdoptMovesContentAndCreatesInLink(t *testing.T) {
+// TestAdoptMovesContentAndCreatesLink 验证 adopt 把内容移入仓库、原位置变成软链接。
+func TestAdoptMovesContentAndCreatesLink(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	local := filepath.Join(t.TempDir(), "notes.txt")
@@ -61,11 +61,11 @@ func TestAdoptMovesContentAndCreatesInLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
-	if view.Unbound {
-		t.Fatal("entry should be bound after adopt")
+	if len(view.Links) != 1 {
+		t.Fatalf("adopt should create exactly one link, got %+v", view.Links)
 	}
-	if len(view.Links) != 1 || view.Links[0].Type != string(model.LinkTypeIn) {
-		t.Fatalf("expected exactly one in link, got %+v", view.Links)
+	if view.Links[0].LocalPath != local || !view.Links[0].IsCurrent {
+		t.Fatalf("unexpected link: %+v", view.Links[0])
 	}
 
 	// 内容已移入 data/
@@ -88,7 +88,7 @@ func TestAdoptMovesContentAndCreatesInLink(t *testing.T) {
 	}
 }
 
-// TestAdoptRejectsOverlappingRepoPath 验证 R-3：条目之间不得重叠。
+// TestAdoptRejectsOverlappingRepoPath 验证 R-2：条目之间不得重叠。
 func TestAdoptRejectsOverlappingRepoPath(t *testing.T) {
 	svc, repo := newTestService(t)
 
@@ -105,8 +105,8 @@ func TestAdoptRejectsOverlappingRepoPath(t *testing.T) {
 	}
 }
 
-// TestAddOutLinkAndSwitch 验证 out 链接与「指定新的 in」。
-func TestAddOutLinkAndSwitch(t *testing.T) {
+// TestAddLink 验证为条目添加链接（所有链接完全等价）。
+func TestAddLink(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	local := filepath.Join(t.TempDir(), "notes.txt")
@@ -125,37 +125,20 @@ func TestAddOutLinkAndSwitch(t *testing.T) {
 		t.Fatalf("expected 2 links, got %d", len(view.Links))
 	}
 
-	// 指定新的 in：纯元数据变更，文件系统不动
-	var outID, oldInID string
+	// 两条链接等价：都指向同一份内容，通过任一条读到的东西相同
 	for _, l := range view.Links {
-		if l.Type == string(model.LinkTypeOut) {
-			outID = l.ID
-		} else {
-			oldInID = l.ID
+		if got, err := os.ReadFile(l.LocalPath); err != nil || string(got) != "hello" {
+			t.Fatalf("link %s should resolve to the content: %v", l.LocalPath, err)
 		}
 	}
-	inBefore, _ := os.Lstat(local)
-
-	view, err = svc.Switch(repo.ID, view.ID, outID)
-	if err != nil {
-		t.Fatalf("switch: %v", err)
-	}
-	for _, l := range view.Links {
-		if l.ID == outID && l.Type != string(model.LinkTypeIn) {
-			t.Fatal("designated link should now be the in link")
-		}
-		if l.ID == oldInID && l.Type != string(model.LinkTypeOut) {
-			t.Fatal("previous in link should have been demoted to out")
-		}
-	}
-	inAfter, _ := os.Lstat(local)
-	if !inBefore.ModTime().Equal(inAfter.ModTime()) {
-		t.Fatal("switch should not touch the filesystem")
+	// 内容只有一份，且就在 data/ 下
+	if _, err := os.Stat(filepath.Join(repo.Path, "data", "notes.txt")); err != nil {
+		t.Fatalf("content must live in data/: %v", err)
 	}
 }
 
-// TestRemoveInLinkLeavesEntryUnbound 验证移除 in 链接后条目变为未绑定，内容不受影响。
-func TestRemoveInLinkLeavesEntryUnbound(t *testing.T) {
+// TestRemoveLastLinkKeepsEntryAndContent 验证移除最后一条链接后条目与内容都保留。
+func TestRemoveLastLinkKeepsEntryAndContent(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	local := filepath.Join(t.TempDir(), "notes.txt")
@@ -167,18 +150,23 @@ func TestRemoveInLinkLeavesEntryUnbound(t *testing.T) {
 
 	view, err = svc.RemoveLink(repo.ID, view.ID, view.Links[0].ID)
 	if err != nil {
-		t.Fatalf("remove in link: %v", err)
+		t.Fatalf("remove link: %v", err)
 	}
-	if !view.Unbound {
-		t.Fatal("entry should be unbound after removing its in link")
+	if len(view.Links) != 0 {
+		t.Fatalf("expected no links left, got %+v", view.Links)
 	}
+	// 没有链接的条目依然是被备份对象，内容也还在
 	if _, err := os.Stat(filepath.Join(repo.Path, "data", "notes.txt")); err != nil {
 		t.Fatalf("content must survive: %v", err)
+	}
+	entries, err := svc.List(repo.ID)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("the entry must stay: %v %+v", err, entries)
 	}
 }
 
 // linkManifest 构造一份带一个设备与一条链接的清单，用于校验测试。
-func linkManifest(linkType model.LinkType, repoPath, localPath string) *model.Manifest {
+func linkManifest(repoPath, localPath string) *model.Manifest {
 	return &model.Manifest{
 		Version: manifestVersion,
 		Devices: []*model.Device{{Fingerprint: "fp1", Name: "dev1"}},
@@ -188,7 +176,7 @@ func linkManifest(linkType model.LinkType, repoPath, localPath string) *model.Ma
 			Kind:      model.EntryKindFile,
 			CreatedAt: time.Now(),
 			Links: []*model.Link{{
-				ID: "l1", Type: linkType, Device: "fp1", LocalPath: localPath, Enabled: true,
+				ID: "l1", Device: "fp1", LocalPath: localPath, Enabled: true,
 			}},
 		}},
 	}
@@ -200,8 +188,7 @@ func TestApplyRecreatesMissingLink(t *testing.T) {
 
 	local := filepath.Join(t.TempDir(), "notes.txt")
 	writeFile(t, local, "hello")
-	view, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "notes.txt"})
-	if err != nil {
+	if _, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "notes.txt"}); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
 
@@ -240,53 +227,141 @@ func TestApplyRecreatesMissingLink(t *testing.T) {
 	if got, err := os.ReadFile(local); err != nil || string(got) != "hello" {
 		t.Fatalf("link should be recreated and readable: %v", err)
 	}
-	if view.Unbound {
-		t.Fatal("entry should stay bound")
+}
+
+// TestReadoptMovesReplacedContentIntoRepository 验证 replaced 状态下
+// 把本机真实文件重新纳入仓库并恢复软链接。
+func TestReadoptMovesReplacedContentIntoRepository(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	local := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, local, "old")
+	view, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "notes.txt"})
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	linkID := view.Links[0].ID
+
+	// 模拟应用的原子写：软链接被替换为真实文件
+	if err := os.Remove(local); err != nil {
+		t.Fatalf("remove link: %v", err)
+	}
+	writeFile(t, local, "new")
+
+	views, err := svc.List(repo.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if got := views[0].Links[0].State; got != string(model.LinkStateReplaced) {
+		t.Fatalf("expected replaced state, got %s", got)
+	}
+
+	if _, err := svc.Readopt(repo.ID, view.ID, linkID); err != nil {
+		t.Fatalf("readopt: %v", err)
+	}
+
+	// 新内容已进入仓库
+	content, err := os.ReadFile(filepath.Join(repo.Path, "data", "notes.txt"))
+	if err != nil || string(content) != "new" {
+		t.Fatalf("repository content should hold the new content: %v", err)
+	}
+	// 本机路径恢复为软链接
+	if fi, err := os.Lstat(local); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("local path should be a symlink again: %v", err)
+	}
+
+	after, err := svc.List(repo.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if got := after[0].Links[0].State; got != string(model.LinkStateOK) {
+		t.Fatalf("expected ok state after readopt, got %s", got)
 	}
 }
 
-// TestValidateManifestEnforcesCardinality 验证 R-1：至多一个 in 链接。
-func TestValidateManifestEnforcesCardinality(t *testing.T) {
-	// 一个 in 链接：合法
-	if err := validateManifest(linkManifest(model.LinkTypeIn, "a.txt", "/tmp/a")); err != nil {
-		t.Fatalf("single in link should be valid: %v", err)
+// TestDetachUnlinkThenApplyRestores 验证卸载本机后可以一键重新挂载。
+func TestDetachUnlinkThenApplyRestores(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	local := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, local, "hello")
+	view, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "notes.txt"})
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "copy.txt")
+	if _, err := svc.AddLink(repo.ID, view.ID, &AddLinkRequest{LocalPath: out}); err != nil {
+		t.Fatalf("add link: %v", err)
 	}
 
-	// 零个 in 链接（未绑定）：合法
-	if err := validateManifest(linkManifest(model.LinkTypeOut, "a.txt", "/tmp/a")); err != nil {
-		t.Fatalf("zero in links should be valid (unbound): %v", err)
+	result, err := svc.Detach(repo.ID, "", DetachModeUnlink)
+	if err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	if len(result.Removed) != 2 {
+		t.Fatalf("expected 2 removed links, got %+v", result.Removed)
+	}
+	for _, p := range []string{local, out} {
+		if _, err := os.Lstat(p); err == nil {
+			t.Fatalf("local symlink should be gone: %s", p)
+		}
+	}
+	// 内容与定义都保留
+	if _, err := os.Stat(filepath.Join(repo.Path, "data", "notes.txt")); err != nil {
+		t.Fatalf("repository content must survive a detach: %v", err)
 	}
 
-	// 两个 in 链接：非法
-	m := linkManifest(model.LinkTypeIn, "a.txt", "/tmp/a")
-	m.Entries[0].Links = append(m.Entries[0].Links, &model.Link{
-		ID: "l2", Type: model.LinkTypeIn, Device: "fp1", LocalPath: "/tmp/b", Enabled: true,
-	})
-	if err := validateManifest(m); err == nil {
-		t.Fatal("two in links should be rejected")
+	// 定义仍然启用，因此一次 Apply 即可重新挂载
+	if _, err := svc.Apply(repo.ID, "", false); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got, err := os.ReadFile(local); err != nil || string(got) != "hello" {
+		t.Fatalf("apply should recreate the in link: %v", err)
 	}
 }
 
-// TestValidateManifestEnforcesNoOverlap 验证 R-3。
+// TestDetachKeepLeavesFilesystemAlone 验证 keep 模式不动文件系统。
+func TestDetachKeepLeavesFilesystemAlone(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	local := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, local, "hello")
+	if _, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "notes.txt"}); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+
+	result, err := svc.Detach(repo.ID, "", DetachModeKeep)
+	if err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	if len(result.Removed) != 0 {
+		t.Fatalf("keep mode must not remove anything: %+v", result.Removed)
+	}
+	if got, err := os.ReadFile(local); err != nil || string(got) != "hello" {
+		t.Fatalf("local path must be untouched: %v", err)
+	}
+}
+
+// TestValidateManifestEnforcesNoOverlap 验证 R-2。
 func TestValidateManifestEnforcesNoOverlap(t *testing.T) {
-	m := linkManifest(model.LinkTypeIn, "docs", "/tmp/docs")
+	m := linkManifest("docs", "/tmp/docs")
 	m.Entries[0].Kind = model.EntryKindDir
 	m.Entries = append(m.Entries, &model.Entry{
 		ID: "e2", RepoPath: "docs/vendor", Kind: model.EntryKindDir, CreatedAt: time.Now(),
-		Links: []*model.Link{{ID: "l2", Type: model.LinkTypeIn, Device: "fp1", LocalPath: "/tmp/vendor", Enabled: true}},
+		Links: []*model.Link{{ID: "l2", Device: "fp1", LocalPath: "/tmp/vendor", Enabled: true}},
 	})
 	if err := validateManifest(m); err == nil {
 		t.Fatal("nested entries should be rejected")
 	}
 }
 
-// TestValidateManifestEnforcesNoLinkInsideDirectoryEntry 验证 R-4。
+// TestValidateManifestEnforcesNoLinkInsideDirectoryEntry 验证 R-3。
 func TestValidateManifestEnforcesNoLinkInsideDirectoryEntry(t *testing.T) {
-	m := linkManifest(model.LinkTypeIn, "docs", "/tmp/docs")
+	m := linkManifest("docs", "/tmp/docs")
 	m.Entries[0].Kind = model.EntryKindDir
 	m.Entries = append(m.Entries, &model.Entry{
 		ID: "e2", RepoPath: "other", Kind: model.EntryKindFile, CreatedAt: time.Now(),
-		Links: []*model.Link{{ID: "l2", Type: model.LinkTypeOut, Device: "fp1",
+		Links: []*model.Link{{ID: "l2", Device: "fp1",
 			LocalPath: "/tmp/docs/inner", Enabled: true}},
 	})
 	if err := validateManifest(m); err == nil {
@@ -294,12 +369,22 @@ func TestValidateManifestEnforcesNoLinkInsideDirectoryEntry(t *testing.T) {
 	}
 }
 
-// TestManifestRoundTripPreservesUnbound 验证未绑定条目经保存/加载后保持不变。
-func TestManifestRoundTripPreservesUnbound(t *testing.T) {
+// TestValidateManifestAllowsLinklessEntry 验证没有链接的条目是合法的。
+func TestValidateManifestAllowsLinklessEntry(t *testing.T) {
+	m := linkManifest("a.txt", "/tmp/a")
+	m.Entries[0].Links = []*model.Link{}
+	if err := validateManifest(m); err != nil {
+		t.Fatalf("an entry with no links should be valid: %v", err)
+	}
+}
+
+// TestManifestRoundTripKeepsLinklessEntry 验证无链接条目的清单经保存/加载后保持不变。
+func TestManifestRoundTripKeepsLinklessEntry(t *testing.T) {
 	repoRoot := t.TempDir()
 	ms := newManifestStore()
 
-	m := linkManifest(model.LinkTypeOut, "a.txt", "/tmp/a")
+	m := linkManifest("a.txt", "/tmp/a")
+	m.Entries[0].Links = []*model.Link{} // 无链接条目也合法
 	if err := ms.Save(repoRoot, m); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -308,10 +393,7 @@ func TestManifestRoundTripPreservesUnbound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(loaded.Entries) != 1 || len(loaded.Entries[0].Links) != 1 {
+	if len(loaded.Entries) != 1 || len(loaded.Entries[0].Links) != 0 {
 		t.Fatalf("round trip lost data: %+v", loaded)
-	}
-	if loaded.Entries[0].InLink() != nil {
-		t.Fatal("entry should still be unbound after round trip")
 	}
 }

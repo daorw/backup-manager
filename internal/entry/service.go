@@ -38,18 +38,16 @@ func NewService(s *store.Store, g *git.GitEngine, repoMu *util.RepoMutexManager)
 
 // LinkView 链接视图，含按需计算的派生字段。
 type LinkView struct {
-	ID         string          `json:"id"`
-	EntryID    string          `json:"entry_id"`
-	Type       string          `json:"type"`
-	Device     string          `json:"device"`
-	DeviceName string          `json:"device_name,omitempty"`
-	LocalPath  string          `json:"local_path"`
-	Enabled    bool            `json:"enabled"`
-	Tracked    bool            `json:"tracked"`    // 派生：type == in
-	IsCurrent  bool            `json:"is_current"` // 派生：属于当前设备
-	State      string          `json:"state"`
-	StateNote  string          `json:"state_note,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
+	ID         string    `json:"id"`
+	EntryID    string    `json:"entry_id"`
+	Device     string    `json:"device"`
+	DeviceName string    `json:"device_name,omitempty"`
+	LocalPath  string    `json:"local_path"`
+	Enabled    bool      `json:"enabled"`
+	IsCurrent  bool      `json:"is_current"` // 派生：属于当前设备
+	State      string    `json:"state"`
+	StateNote  string    `json:"state_note,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // EntryView 条目视图，含其全部链接。
@@ -58,7 +56,6 @@ type EntryView struct {
 	RepoPath  string      `json:"repo_path"`
 	Kind      string      `json:"kind"`
 	CreatedAt time.Time   `json:"created_at"`
-	Unbound   bool        `json:"unbound"` // 没有任何 in 链接（新设备初始化期间合法）
 	Links     []*LinkView `json:"links"`
 }
 

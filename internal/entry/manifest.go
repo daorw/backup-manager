@@ -1,12 +1,12 @@
 // Package entry 实现「条目 + 链接」模型：条目持有内容，链接是它的 in/out 视图。
 //
-// 核心不变量（R-1..R-5），加载与写入时强制校验：
+// 核心不变量（R-1..R-3），加载与写入时强制校验：
 //
-//	R-1 每个条目至多一个 in 链接（0 个仅允许出现在新设备初始化阶段）
-//	R-2 链接只绑定完整条目，绝不绑定条目的子路径
-//	R-3 条目之间永不重叠（repo_path 无祖先/后代关系）
-//	R-4 链接的 local_path 不得位于某个目录条目的 local_path 之内
-//	R-5 同一条目的所有链接指向同一目标、kind 一致（由构造保证）
+//	R-1 链接只绑定完整条目，绝不绑定条目的子路径
+//	R-2 条目之间永不重叠（repo_path 无祖先/后代关系）
+//	R-3 链接的 local_path 不得位于某个目录条目的 local_path 之内
+//
+// 同一条目的所有链接指向同一目标，这是构造特性而非需要校验的不变量。
 package entry
 
 import (
@@ -197,7 +197,7 @@ func assignMissingIDs(m *model.Manifest) {
 	}
 }
 
-// checkManifest 校验清单的结构、引用完整性与 R-1/R-3/R-4 不变量，
+// checkManifest 校验清单的结构、引用完整性与 R-1..R-3 不变量，
 // 返回**全部**问题（不短路），供写入校验与巡检共用。
 func checkManifest(m *model.Manifest) []Finding {
 	var findings []Finding
@@ -225,26 +225,18 @@ func checkManifest(m *model.Manifest) []Finding {
 		}
 		entryIDs[e.ID] = true
 
-		// R-2：repo_path 必须是干净的非空相对路径
+		// R-1：链接只能绑定完整条目，repo_path 必须是干净的非空相对路径
 		if e.RepoPath != filepath.ToSlash(filepath.Clean(e.RepoPath)) ||
 			strings.HasPrefix(e.RepoPath, "../") || e.RepoPath == "." {
 			add(CodeInvalidEntry, e.RepoPath, "", "", "repo_path 非法")
 		}
 
-		inCount := 0
 		for _, l := range e.Links {
 			if linkIDs[l.ID] {
 				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "链接 id 重复：%q", l.ID)
 			}
 			linkIDs[l.ID] = true
 
-			switch l.Type {
-			case model.LinkTypeIn:
-				inCount++
-			case model.LinkTypeOut:
-			default:
-				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "未知的链接类型：%q", l.Type)
-			}
 			if l.LocalPath == "" || l.Device == "" {
 				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "链接缺少 local_path 或 device")
 			}
@@ -253,32 +245,20 @@ func checkManifest(m *model.Manifest) []Finding {
 				add(CodeUnknownDevice, e.RepoPath, l.ID, l.LocalPath, "链接引用了未登记的设备：%q", l.Device)
 			}
 		}
-
-		// R-1：至多一个 in 链接。0 个合法（新设备初始化期间未绑定），按 warning 报告。
-		switch {
-		case inCount > 1:
-			add(CodeMultipleIn, e.RepoPath, "", "",
-				"有 %d 个 in 链接（R-1 只允许至多一个）", inCount)
-		case inCount == 0:
-			findings = append(findings, Finding{
-				Code: CodeNoInLink, Severity: SeverityWarning, RepoPath: e.RepoPath,
-				Message: "条目没有 in 链接（未绑定）；新设备初始化期间属正常，指定一条即可",
-			})
-		}
 	}
 
-	// R-3：条目之间不得互为祖先/后代
+	// R-2：条目之间不得互为祖先/后代
 	for i := 0; i < len(m.Entries); i++ {
 		for j := i + 1; j < len(m.Entries); j++ {
 			if repoPathsOverlap(m.Entries[i].RepoPath, m.Entries[j].RepoPath) {
 				add(CodeOverlappingEntries, m.Entries[i].RepoPath, "", "",
-					"与条目 %q 重叠（R-3 禁止嵌套条目）", m.Entries[j].RepoPath)
+					"与条目 %q 重叠（R-2 禁止嵌套条目）", m.Entries[j].RepoPath)
 			}
 		}
 	}
 
-	// R-4：链接的 local_path 不得位于某个目录条目的 local_path 之内。
-	// 已禁用的链接不参与判定 —— 禁用正是巡检修复 R-4 违规的收敛手段。
+	// R-3：链接的 local_path 不得位于某个目录条目的 local_path 之内。
+	// 已禁用的链接不参与判定 —— 禁用正是巡检修复 R-3 违规的收敛手段。
 	for _, dir := range m.Entries {
 		if dir.Kind != model.EntryKindDir {
 			continue

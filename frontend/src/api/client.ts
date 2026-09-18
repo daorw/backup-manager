@@ -10,6 +10,8 @@ import type {
   AddLinkRequest,
   BulkLinkRequest,
   ApplyResult,
+  DetachMode,
+  DetachResult,
   AuditResult,
   RepairResult,
   ContentEntry,
@@ -93,18 +95,6 @@ export async function adoptEntry(repoId: string, req: AdoptRequest): Promise<Ent
   return data;
 }
 
-/** 指定新的 in 链接（纯元数据变更）。 */
-export async function switchTrackedLink(
-  repoId: string,
-  entryId: string,
-  linkId: string
-): Promise<Entry> {
-  const { data } = await api.post<Entry>(`/repos/${repoId}/entries/${entryId}/switch`, {
-    link_id: linkId,
-  });
-  return data;
-}
-
 export type EntryRemoveMode = 'unlink' | 'move_back' | 'purge';
 
 export async function removeEntry(
@@ -142,6 +132,18 @@ export async function repairLink(
 ): Promise<Entry> {
   const { data } = await api.post<Entry>(
     `/repos/${repoId}/entries/${entryId}/links/${linkId}/repair`
+  );
+  return data;
+}
+
+/** replaced 状态：把本机的真实文件/目录移入仓库，并恢复软链接。 */
+export async function readoptLink(
+  repoId: string,
+  entryId: string,
+  linkId: string
+): Promise<Entry> {
+  const { data } = await api.post<Entry>(
+    `/repos/${repoId}/entries/${entryId}/links/${linkId}/readopt`
   );
   return data;
 }
@@ -198,6 +200,19 @@ export async function renameDevice(
 
 export async function deleteDevice(repoId: string, fingerprint: string): Promise<void> {
   await api.delete(`/repos/${repoId}/devices/${fingerprint}`);
+}
+
+/** 卸载本机：unlink 删除本机软链接，keep 只停止管理。 */
+export async function detachDevice(
+  repoId: string,
+  fingerprint: string,
+  mode: DetachMode
+): Promise<DetachResult> {
+  const { data } = await api.post<DetachResult>(
+    `/repos/${repoId}/devices/${fingerprint}/detach`,
+    { mode }
+  );
+  return data;
 }
 
 /** 让本机与清单收敛。dry_run 时只返回计划。 */

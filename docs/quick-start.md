@@ -50,9 +50,9 @@ The Browse tab shows the repository's real content under `data/`, and lets you p
 
 ## Entries Tab
 
-Every backed-up file or directory is an **entry**. An entry has **at most one `in` link** — the local path whose content was moved into the repository, which created the entry — and any number of **`out`** links that distribute the same entry to further local paths. `in` is simply a special case of `out`; both are symlinks to `data/<repo_path>`.
+Every backed-up file or directory is an **entry**. An **entry** is a whitelist member: its existence in the manifest is what makes it backed up. A **link** binds a local path to that entry as a symlink into `data/<repo_path>`. An entry may have **0..N links**, and all of them are **completely equal** — same target, same semantics.
 
-Zero `in` links is allowed when initialising a new device: the entry is then *unbound* and the UI prompts you to designate one of its links as the `in` link.
+An entry with no links is perfectly valid: the content is in the repository, there is just no local view of it yet.
 
 ```
    ● in   ~/.config/opencode/opencode.json   MacBook Pro   [tracked]
@@ -61,7 +61,7 @@ Zero `in` links is allowed when initialising a new device: the entry is then *un
 ```
 
 ### Features:
-- Entries grouped by `repo_path`, expandable to show every `in`/`out` link
+- Entries grouped by `repo_path`, expandable to show every link
 - Per-link state: `ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`
 - Link status per device, with which link is currently tracked
 - Consistency audit with one-click repair
@@ -75,22 +75,22 @@ Click "+ New Entry" in the Entries tab:
 1. **Source Path**: Enter or browse to the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`)
 2. **Repo Path**: the logical path inside the repository (e.g. `opencode/opencode.json`). It defaults to the file name and must not overlap another entry's path.
 3. Read the warning: **the content will be moved into the repository and this location replaced by a symlink.**
-4. Click **Create**. The original location now holds the entry's `in` link.
+4. Click **Create**. The original location now holds the entry's first link.
 
 ### Distributing an Entry (add an out link):
 
-Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several `out` links, on this machine or on others.
+Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none.
 
-### Designating the Tracked Link (`in`):
+### All Links Are Equal:
 
-Pick any `out` link and click **Set as tracked** to designate it as the new `in` link. The entry then tracks changes through that link, and the previous `in` link becomes an ordinary `out` link. This is a pure metadata change — no symlink is created, moved or removed — which makes it the natural way to hand an entry over to a new machine, and the way to bind an entry that has no `in` link yet.
+There is no "tracked" link and nothing to switch: every link points at the same `data/<repo_path>`, so editing through one is the same as editing through another. The UI simply opens the first link that lives on the current device.
 
 ### Removing:
 
 | Action | Effect |
 |------|------|
 | Remove a link | Deletes just that local symlink. `data/` keeps the content |
-| `release` the entry | Removes the entry and its links but keeps the content in the repository as untracked data |
+| `unlink` | Removes only this device's symlinks; the entry and its content stay |
 | `move_back` | Moves the content back to a chosen local path, then removes the entry |
 | `purge` | Deletes the content as well. Requires typing the `repo_path`; the previous commit can restore it |
 
@@ -108,15 +108,14 @@ Devices, entries and links are stored inside the repository in `.backup-manager/
 5. To put the files somewhere else, use **Bulk Link**: pick entries plus a local root directory
 
 ### Handing an Entry Over:
-1. On the new machine, create an `out` link where you want the files
-2. Designate it with **Set as tracked** — it becomes the entry's `in` link and the entry now tracks changes through it
-3. Delete or detach the old device
+1. On the new machine, add a link wherever you want the files
+2. Delete or detach the old device — nothing needs to be promoted: the new link is already the only local view
 
 ### Consistency Rules
 
 The system refuses anything that would break entry-level consistency:
 
-- An `in` link tracking a directory forbids an `out` link to a single file inside it
+- A tracked directory forbids a link to a single file inside it
 - Entries never overlap — `docs` and `docs/vendor` cannot both be entries
 - A link's local path may not sit inside a directory entry's local path
 
@@ -192,8 +191,8 @@ Configure Git authentication information, and the danger zone.
 1. **Install & Run**: Download and start Backup Manager — a system tray icon appears
 2. **Open UI**: Click the tray icon and select "Open UI" to open the web interface
 3. **Create Repository**: Set up your first backup repository
-4. **Create Entries**: Specify the files/directories to back up — their content moves into the repository and the original locations become `in` links
-5. **Distribute (optional)**: Add `out` links to make the same content available at further local paths
+4. **Create Entries**: Specify the files/directories to back up — their content moves into the repository and the original locations become their first links
+5. **Distribute (optional)**: Add more links to make the same content available at further local paths
 6. **Configure Git**: Set up remote repository and authentication information
 7. **Run Backup**: Execute the first backup
 8. **Monitor Status**: View backup status and history
@@ -204,7 +203,7 @@ Configure Git authentication information, and the danger zone.
 - Start with a few important files
 - Prefer tracking a **directory** rather than an individual file when an application manages that file itself: apps that write config atomically (temp file + rename) replace the symlink with a real file. The UI flags this as `replaced` and offers one-click **Re-adopt**
 - Keep repository paths non-overlapping so entries stay unambiguous
-- Use `release` instead of `purge` when you only want to stop tracking
+- Use `unlink` instead of `purge` when you only want to stop tracking on this machine
 - Use meaningful commit messages
 - Configure automatic backup for critical data
 - Regularly verify backup integrity
@@ -218,10 +217,9 @@ Configure Git authentication information, and the danger zone.
 - **A Link Shows `replaced`**: Something replaced the symlink with a real file. Use **Re-adopt** to move the new content into the repository and restore the link
 - **A Link Shows `dangling`**: The content is missing from the repository. Restore it from Git history via the Backup tab, or remove the link
 - **"Entry overlaps another entry"**: Two entries cannot nest. Pick a non-overlapping repo path (e.g. `projects/vendor` instead of `docs/vendor`)
-- **"Local path is inside a directory entry"**: An `out` link may not point inside a tracked directory. Move the target outside it, or track it as its own entry
-- **An entry shows "no `in` link"**: This is legal right after initialising a new device. Click **Set as tracked** on one of its `out` links to designate it, or add a new link
-- **You removed the `in` link**: The entry becomes *unbound* — no content is lost, and every other link keeps working. Designate another link, or use an entry-level action (`release` / `move_back` / `purge`)
-- **An entry has two `in` links**: Not allowed — only one entry owns the "tracked" role. Remove or re-designate one of them
+- **"Local path is inside a directory entry"**: A link may not point inside a tracked directory. Move the target outside it, or track it as its own entry
+- **An entry shows 0 links**: Legal — the content is in the repository with no local view. Click **Add Link** to bind it to a local path
+- **You removed the last link**: No content is lost. Add a link again, or use an entry-level action (`unlink` / `move_back` / `purge`) to stop tracking the content itself
 - **Remote Push Failed**: Ensure the remote repository exists and credentials are correct
 
 ### Getting Help:

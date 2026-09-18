@@ -29,20 +29,20 @@ Specify what to back up → content moves into the repository → local paths be
 
 ### Multi-Device
 
-Devices, entries and links live in the repository manifest rather than in the local SQLite database — which is per machine — so a new machine discovers every device's links with a plain `git clone`. Register the machine, click **Apply** to recreate its symlinks, and use **Set as tracked** on any `out` link to designate it as the entry's `in` link — the entry then tracks changes through it and the previous `in` link becomes an ordinary `out` link.
+Devices, entries and links live in the repository manifest rather than in the local SQLite database — which is per machine — so a new machine discovers every device's links with a plain `git clone`. Register the machine, click **Apply** to recreate its symlinks, and add a link wherever the files should live — nothing needs to be promoted, since all links are equal.
 
-### Cardinality and Consistency Rules
+### Link Equality and Consistency Rules
 
-- An entry has **at most one `in` link**. Exactly one in normal operation; **zero** is allowed while initialising a new device, where the entry is *unbound* and the UI prompts you to designate one.
-- An entry has **0..N `out` links**, and any of them can be designated as the new `in` link.
-- Entry-level consistency is enforced: once an `in` link tracks a directory, no `out` link may bind a single file inside it. Entries never overlap, and a link always binds a whole entry — never a sub-path.
+- An entry has **0..N links** and all of them are **completely equal** — same target, same semantics. There is no `in`/`out` type, no tracked link, and nothing to switch.
+- An entry with **no links** is legal: the content is in the repository with no local view.
+- Consistency is enforced: once a directory is tracked, no link may bind a single file inside it. Entries never overlap, and a link always binds a whole entry — never a sub-path.
 
 The system refuses anything else at creation time and reports drift in the consistency audit.
 
 ## Features
 
 - **Repo Management** — Create/delete/view backup repos, visual config (remote URL, branch, Git user)
-- **Entry & Link Management** — Each backed-up file/directory is an entry with **at most one `in` link** (0..N `out` links); view, distribute, designate the tracked `in` link, bulk link, and remove (release / move_back / purge)
+- **Entry & Link Management** — Each backed-up file/directory is an entry with **0..N links, all equal**; view, distribute, add links, repair, re-adopt, and remove (unlink / move_back / purge)
 - **Link State Diagnosis** — Per-link states (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`) with one-click repair and re-adopt
 - **Consistency Audit** — Verifies the invariants (**at most one `in` per entry** — an entry with none is reported as a warning, since that is legal during new-device initialisation, links bind whole entries, entries never overlap, no symlink inside `data/`) and reports unmanaged links
 - **Multi-Device** — Machine fingerprint detection, device registration, dry-run `apply` to recreate a machine's links, detach, and automatic `in`-link promotion when a device is deleted
@@ -143,12 +143,11 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 | Repos | `POST /repos/:id/git-init` | Initialize Git repository |
 | Entries | `GET /repos/:id/entries?device=&state=` | List entries with their links and states |
 | Entries | `GET /repos/:id/entries/:entryId` | Entry detail |
-| Entries | `POST /repos/:id/entries/adopt` | Create an entry + its `in` link (moves content in) |
+| Entries | `POST /repos/:id/entries/adopt` | Create an entry + its first link (moves content in) |
 | Entries | `PATCH /repos/:id/entries/:entryId` | Rename `repo_path` (re-validates non-overlap) |
-| Entries | `POST /repos/:id/entries/:entryId/switch` | Promote an `out` link to become the entry's `in` link |
-| Entries | `DELETE /repos/:id/entries/:entryId?mode=` | `release` / `unlink` / `move_back` / `purge` |
-| Links | `GET/POST /repos/:id/entries/:entryId/links` | List / add an `out` link |
-| Links | `POST /repos/:id/links/bulk` | Bulk `out` links for many entries at a local root |
+| Entries | `DELETE /repos/:id/entries/:entryId?mode=` | `unlink` / `move_back` / `purge` |
+| Links | `GET/POST /repos/:id/entries/:entryId/links` | List / add a link |
+| Links | `POST /repos/:id/links/bulk` | Bulk links for many entries at a local root |
 | Links | `PATCH /repos/:id/entries/:entryId/links/:linkId` | Update `local_path` / `enabled` |
 | Links | `POST .../links/:linkId/repair` | Recreate the symlink |
 | Links | `POST .../links/:linkId/readopt` | `replaced` → move new content into `data/`, recreate the link |
@@ -183,8 +182,8 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 2. Click tray icon → "Open UI" to open browser
 3. Dashboard shows repo list
 4. Click "Create Repo" → Enter name, select path
-5. Enter repo detail → Entries tab → "+ New Entry" (the content moves into the repo; the original location becomes the `in` link)
-6. Optionally add `out` links to distribute the same entry to further local paths
+5. Enter repo detail → Entries tab → "+ New Entry" (the content moves into the repo; the original location becomes its first link)
+6. Optionally add more links to distribute the same entry to further local paths
 7. Browse, preview and edit content in the Browse tab
 8. Switch to Backup tab → Click "Trigger Backup"
 9. Configure remote repo and auth (optional)
@@ -205,7 +204,7 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 ## Security Design
 
 - **Path Safety**: Four-layer validation (Clean→Abs→EvalSymlinks→Prefix) prevents path traversal; local link paths are confined to the allowed roots (`$HOME` + repo roots), and self-reference into the repository is rejected
-- **Entry-Level Consistency**: the manifest is validated against R-1..R-5 on load (at most one `in` link per entry — zero accepted as *unbound*; links bind whole entries; no overlapping entries; no link inside a directory entry) and an unparsable file blocks writes instead of being silently rewritten
+- **Link Consistency**: the manifest is validated before every write against R-1..R-3 (links bind whole entries; no overlapping entries; no link inside a directory entry); an unparsable file blocks writes, and an invalid one is reported by the audit instead of being silently rewritten
 - **Atomic Manifest Writes**: `manifest.json.tmp` → `fsync` → `os.Rename`
 - **Non-Destructive by Default**: linking refuses an occupied path; `apply` never overwrites; deleting content requires typed confirmation and is preceded by a commit so `git revert` restores it
 - **Auth Encryption**: SSH private keys and HTTPS passwords encrypted with AES-256-GCM
@@ -250,7 +249,7 @@ backup-manager/
 │   │       ├── system.go       # Health check
 │   │       └── errors.go       # Error code mapping
 │   ├── entry/                  # Entry & link subsystem
-│   │   ├── manifest.go         # Manifest load / save / atomic write / R-1..R-5 validation
+│   │   ├── manifest.go         # Manifest load / save / atomic write / R-1..R-3 validation
 │   │   ├── service.go          # Service wiring, repo mutex, manifest commit, helpers
 │   │   ├── entry_service.go    # adopt, list, remove (unlink / move_back / purge)
 │   │   ├── link_service.go     # add out link, bulk link, switch, repair, remove

@@ -76,6 +76,21 @@ func (h *DeviceHandler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": "deleted"})
 }
 
+// Detach 处理 POST /api/v1/repos/:id/devices/:fingerprint/detach
+// 卸载本机：unlink 删除本机软链接，keep 只停止管理。
+func (h *DeviceHandler) Detach(c *gin.Context) {
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	result, err := h.svc.Detach(c.Param("id"), c.Param("fingerprint"), req.Mode)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": result})
+}
+
 // Apply 处理 POST /api/v1/repos/:id/devices/:fingerprint/apply
 // 让本机与清单收敛：按需创建/修复本机软链接，从不覆盖已占用路径。
 func (h *DeviceHandler) Apply(c *gin.Context) {

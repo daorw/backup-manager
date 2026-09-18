@@ -51,8 +51,8 @@ func (s *Service) Get(repoID, entryID string) (*EntryView, error) {
 	return nil, fmt.Errorf("entry not found: %s", entryID)
 }
 
-// Adopt 创建条目：把本机内容「移动」进 data/<repo_path>，并在原位置创建软链接，
-// 该软链接即条目的 in 链接。任一环节失败都会回滚，不会丢内容。
+// Adopt 创建条目：把本机内容「移动」进 data/<repo_path>，并在原位置创建软链接。
+// 这是条目的第一条链接。任一环节失败都会回滚，不会丢内容。
 func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 	defer s.lock(repoID)()
 	repo, m, err := s.load(repoID)
@@ -145,7 +145,6 @@ func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 		CreatedAt: now,
 		Links: []*model.Link{{
 			ID:        newID(),
-			Type:      model.LinkTypeIn,
 			Device:    fingerprint,
 			LocalPath: local,
 			Enabled:   true,
@@ -181,7 +180,7 @@ func (s *Service) Remove(repoID, entryID, mode, linkID string) error {
 
 	switch mode {
 	case RemoveModeUnlink:
-		// 只删除本机链接。若本机持有 in 链接，条目会变为未绑定（R-1 允许 0 个）
+		// 只删除本机链接；条目与内容都保留
 		kept := e.Links[:0]
 		for _, l := range e.Links {
 			if l.Device == fingerprint {
@@ -196,10 +195,11 @@ func (s *Service) Remove(repoID, entryID, mode, linkID string) error {
 		}
 
 	case RemoveModeMoveBack:
-		// 把内容移回指定链接的本机路径，再移除条目
+		// 把内容移回指定链接的本机路径，再移除条目。
+		// 未显式指定时回退到本机上的一条链接，再回退到第一条 —— 都是确定的。
 		target := e.FindLink(linkID)
 		if target == nil {
-			target = e.InLink()
+			target = e.FirstLinkOn(fingerprint)
 		}
 		if target == nil && len(e.Links) > 0 {
 			target = e.Links[0]

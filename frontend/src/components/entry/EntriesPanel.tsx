@@ -19,12 +19,13 @@ import {
   LinkOutlined,
   DeleteOutlined,
   ToolOutlined,
-  SwapOutlined,
   CloudDownloadOutlined,
   SafetyCertificateOutlined,
+  ImportOutlined,
+  DisconnectOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
-import type { Entry, Link, LinkState, ApplyResult, AdoptRequest } from '../../types';
+import type { Entry, Link, LinkState, ApplyResult, AdoptRequest, DetachMode } from '../../types';
 import AdoptModal from './AdoptModal';
 
 const { Text, Paragraph } = Typography;
@@ -51,8 +52,9 @@ interface EntriesPanelProps {
 /**
  * 条目与链接面板。
  *
- * 每个被备份的文件/目录是一个条目：恰好一条 in 链接（跟踪链接）+ 0..N 条 out 链接。
- * in 是 out 的特例，两者物理形态相同，所以「指定新的 in」是纯元数据变更。
+ * 每个被备份的文件/目录是一个条目，可以有 0..N 条链接。
+ * 所有链接完全等价 —— 都是指向 data/<repo_path> 的软链接，
+ * 因此通过任何一条编辑都等于编辑被备份对象本身。
  */
 const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const entries = useAppStore((s) => s.entries);
@@ -63,8 +65,9 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const fetchCurrentDevice = useAppStore((s) => s.fetchCurrentDevice);
   const adoptEntry = useAppStore((s) => s.adoptEntry);
   const addLink = useAppStore((s) => s.addLink);
-  const switchTrackedLink = useAppStore((s) => s.switchTrackedLink);
   const repairLink = useAppStore((s) => s.repairLink);
+  const readoptLink = useAppStore((s) => s.readoptLink);
+  const detachDevice = useAppStore((s) => s.detachDevice);
   const removeLink = useAppStore((s) => s.removeLink);
   const removeEntry = useAppStore((s) => s.removeEntry);
   const applyDevice = useAppStore((s) => s.applyDevice);
@@ -82,6 +85,8 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const [plan, setPlan] = useState<ApplyResult | null>(null);
   const [applying, setApplying] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
+  const [detachOpen, setDetachOpen] = useState(false);
+  const [detachMode, setDetachMode] = useState<DetachMode>('unlink');
 
   useEffect(() => {
     fetchCurrentDevice();
@@ -160,6 +165,21 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
     }
   };
 
+  // 卸载本机：unlink 删除本机软链接，keep 只停止管理
+  const handleDetach = async () => {
+    try {
+      const res = await detachDevice(repoId, fingerprint, detachMode);
+      message.success(
+        detachMode === 'keep'
+          ? 'Stopped managing the links on this device'
+          : `Detached: ${res.removed.length} link(s) removed. Use Apply to bring them back`
+      );
+      setDetachOpen(false);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Detach failed');
+    }
+  };
+
   const handleRemoveEntry = async () => {
     if (!removeEntryFor) return;
     try {
@@ -174,7 +194,6 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
   const renderLink = (entry: Entry, link: Link) => {
     const meta = STATE_META[link.state];
-    const isIn = link.type === 'in';
     return (
       <div
         key={link.id}
@@ -186,9 +205,6 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           borderTop: '1px solid #f0f0f0',
         }}
       >
-        <Tag color={isIn ? 'blue' : 'default'} style={{ margin: 0, width: 46, textAlign: 'center' }}>
-          {link.type}
-        </Tag>
         <Tag color={meta.color} style={{ margin: 0 }}>
           {meta.label}
         </Tag>
@@ -206,18 +222,6 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           </Tooltip>
         )}
         <Space size={4}>
-          {!isIn && link.is_current && (
-            <Tooltip title="Designate as the tracked (in) link. Metadata-only — the filesystem is not touched.">
-              <Button
-                size="small"
-                type="text"
-                icon={<SwapOutlined />}
-                onClick={() => switchTrackedLink(repoId, entry.id, link.id)}
-              >
-                Set as tracked
-              </Button>
-            </Tooltip>
-          )}
           {REPAIRABLE.includes(link.state) && link.is_current && (
             <Tooltip title="Recreate the local symlink">
               <Button
@@ -226,6 +230,18 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                 icon={<ToolOutlined />}
                 onClick={() => repairLink(repoId, entry.id, link.id)}
               />
+            </Tooltip>
+          )}
+          {link.state === 'replaced' && link.is_current && (
+            <Tooltip title="The app wrote this path atomically, replacing the symlink with a real file. Move that content into the repository and restore the link.">
+              <Button
+                size="small"
+                type="text"
+                icon={<ImportOutlined />}
+                onClick={() => readoptLink(repoId, entry.id, link.id)}
+              >
+                Re-adopt
+              </Button>
             </Tooltip>
           )}
           {link.is_current && (
@@ -243,8 +259,6 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       </div>
     );
   };
-
-  const unboundCount = entries.filter((e) => e.unbound).length;
 
   return (
     <div>
@@ -283,17 +297,14 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             </Tag>
           )}
         </Button>
+        <Button
+          icon={<DisconnectOutlined />}
+          onClick={() => setDetachOpen(true)}
+          disabled={!fingerprint}
+        >
+          Detach
+        </Button>
       </Space>
-
-      {unboundCount > 0 && (
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 12 }}
-          message={`${unboundCount} entry(ies) have no in link`}
-          description="This is normal on a freshly initialised device. Designate one of their links with “Set as tracked” to bind them."
-        />
-      )}
 
       {entries.length === 0 ? (
         <Empty description="No entries yet. Create one to move content into the repository." />
@@ -309,7 +320,6 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {entry.links.length} link(s)
                 </Text>
-                {entry.unbound && <Tag color="warning">no in link</Tag>}
               </Space>
             ),
             extra: (
@@ -472,6 +482,29 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             ))}
           </Space>
         )}
+      </Modal>
+
+      {/* 卸载本机 */}
+      <Modal
+        title={`Detach ${currentDevice?.name || 'this device'}`}
+        open={detachOpen}
+        onCancel={() => setDetachOpen(false)}
+        onOk={handleDetach}
+        okText="Detach"
+        okButtonProps={{ danger: detachMode === 'unlink' }}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="The repository content is never touched. Link definitions stay in the manifest, so Apply brings everything back."
+        />
+        <Radio.Group value={detachMode} onChange={(e) => setDetachMode(e.target.value)}>
+          <Space direction="vertical">
+            <Radio value="unlink">Remove this device's local symlinks</Radio>
+            <Radio value="keep">Leave the filesystem alone, just stop managing</Radio>
+          </Space>
+        </Radio.Group>
       </Modal>
 
       {/* apply 计划确认 */}

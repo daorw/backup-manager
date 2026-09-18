@@ -21,12 +21,10 @@ const (
 // 巡检结论码。
 const (
 	CodeInvalidEntry       = "invalid_entry"       // 条目结构非法（缺字段、id 重复、repo_path 非法）
-	CodeInvalidLink        = "invalid_link"        // 链接结构非法（缺字段、id 重复、类型未知）
+	CodeInvalidLink        = "invalid_link"        // 链接结构非法（缺字段、id 重复）
 	CodeUnknownDevice      = "unknown_device"      // 链接引用了未登记的设备
-	CodeMultipleIn         = "multiple_in"         // 条目有多于一个 in 链接（违反 R-1）
-	CodeNoInLink           = "no_in_link"          // 条目没有 in 链接（未绑定，合法状态）
-	CodeOverlappingEntries = "overlapping_entries" // 条目互相重叠（违反 R-3）
-	CodeNestedLink         = "nested_link"         // 链接落在目录条目之内（违反 R-4）
+	CodeOverlappingEntries = "overlapping_entries" // 条目互相重叠（违反 R-2）
+	CodeNestedLink         = "nested_link"         // 链接落在目录条目之内（违反 R-3）
 	CodeLinkMissing        = "link_missing"        // 本机软链接不存在
 	CodeLinkWrongTarget    = "link_wrong_target"   // 本机软链接指向别处
 	CodeLinkReplaced       = "link_replaced"       // 本机路径被真实文件/目录替换
@@ -107,11 +105,10 @@ func (s *Service) Audit(repoID string) (*AuditResult, error) {
 
 // RepairAll 收敛所有可自动修复的问题，其余只报告：
 //
-//	多个 in 链接   → 保留最早的一条，其余降级为 out（R-1）
-//	链接落在目录条目之内 → 禁用该链接（R-4）
+//	链接落在目录条目之内 → 禁用该链接（R-3）
 //	本机链接缺失/指向错误 → 重建软链接
 //
-// 条目重叠（R-3）、内容缺失、data/ 内的软链接等无法安全自动处理，一律只报告。
+// 条目重叠（R-2）、内容缺失、data/ 内的软链接等无法安全自动处理，一律只报告。
 func (s *Service) RepairAll(repoID string) (*RepairResult, error) {
 	defer s.lock(repoID)()
 	repo, m, err := s.load(repoID)
@@ -133,25 +130,7 @@ func (s *Service) RepairAll(repoID string) (*RepairResult, error) {
 		}
 	}
 
-	// 1) R-1：保留最早的 in 链接
-	for _, e := range m.Entries {
-		var ins []*model.Link
-		for _, l := range e.Links {
-			if l.Type == model.LinkTypeIn {
-				ins = append(ins, l)
-			}
-		}
-		if len(ins) < 2 {
-			continue
-		}
-		sort.SliceStable(ins, func(i, j int) bool { return ins[i].CreatedAt.Before(ins[j].CreatedAt) })
-		for _, l := range ins[1:] {
-			l.Type = model.LinkTypeOut
-			result.Repaired = append(result.Repaired, action(e, l, "demote_in", "R-1: kept the oldest in link"))
-		}
-	}
-
-	// 2) R-4：禁用落在目录条目之内的链接
+	// 1) R-3：禁用落在目录条目之内的链接
 	for _, dir := range m.Entries {
 		if dir.Kind != model.EntryKindDir {
 			continue
@@ -175,7 +154,7 @@ func (s *Service) RepairAll(repoID string) (*RepairResult, error) {
 		}
 	}
 
-	// 3) 本机链接状态：重建缺失或指向错误的软链接
+	// 2) 本机链接状态：重建缺失或指向错误的软链接
 	for _, e := range m.Entries {
 		for _, l := range e.Links {
 			if l.Device != fingerprint {

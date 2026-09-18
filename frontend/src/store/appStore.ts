@@ -9,6 +9,8 @@ import type {
   AddLinkRequest,
   BulkLinkRequest,
   ApplyResult,
+  DetachMode,
+  DetachResult,
   AuditResult,
   RepairResult,
   GitAuth,
@@ -62,8 +64,9 @@ interface AppState {
   adoptEntry: (repoId: string, req: AdoptRequest) => Promise<void>;
   addLink: (repoId: string, entryId: string, req: AddLinkRequest) => Promise<void>;
   bulkLink: (repoId: string, req: BulkLinkRequest) => Promise<void>;
-  switchTrackedLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
+
   repairLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
+  readoptLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
   removeLink: (repoId: string, entryId: string, linkId: string) => Promise<void>;
   removeEntry: (
     repoId: string,
@@ -85,6 +88,7 @@ interface AppState {
   renameDevice: (repoId: string, fingerprint: string, name: string) => Promise<void>;
   deleteDevice: (repoId: string, fingerprint: string) => Promise<void>;
   applyDevice: (repoId: string, fingerprint: string, dryRun?: boolean) => Promise<ApplyResult>;
+  detachDevice: (repoId: string, fingerprint: string, mode: DetachMode) => Promise<DetachResult>;
 
   triggerBackup: (repoId: string, commitMessage?: string) => Promise<BackupResult | void>;
   pushRepo: (repoId: string, force?: boolean) => Promise<void>;
@@ -230,17 +234,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  switchTrackedLink: async (repoId, entryId, linkId) => {
-    set({ error: null });
-    try {
-      await api.switchTrackedLink(repoId, entryId, linkId);
-      await get().fetchEntries(repoId);
-    } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to switch the tracked link') });
-      throw err;
-    }
-  },
-
   repairLink: async (repoId, entryId, linkId) => {
     set({ error: null });
     try {
@@ -248,6 +241,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
       set({ error: errMsg(err, 'Failed to repair the link') });
+      throw err;
+    }
+  },
+
+  readoptLink: async (repoId, entryId, linkId) => {
+    set({ error: null });
+    try {
+      await api.readoptLink(repoId, entryId, linkId);
+      await get().fetchEntries(repoId);
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to re-adopt') });
       throw err;
     }
   },
@@ -369,6 +373,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       return result;
     } catch (err: unknown) {
       set({ error: errMsg(err, 'Failed to apply the device') });
+      throw err;
+    }
+  },
+
+  detachDevice: async (repoId, fingerprint, mode) => {
+    set({ error: null });
+    try {
+      const result = await api.detachDevice(repoId, fingerprint, mode);
+      await get().fetchEntries(repoId);
+      return result;
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to detach the device') });
       throw err;
     }
   },

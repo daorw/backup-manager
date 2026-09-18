@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-文件/目录聚合备份可视化管理工具。基于 Git 的反向追踪模式（白名单机制），用户主动指定哪些文件/目录需要备份；内容移入仓库 `data/`，本机路径以 `in`/`out` 软链接作为视图，并提供可视化界面与多设备分发能力。
+文件/目录聚合备份可视化管理工具。基于 Git 的反向追踪模式（白名单机制），用户主动指定哪些文件/目录需要备份；内容移入仓库 `data/`，本机路径以指向它的软链接作为视图，并提供可视化界面与多设备分发能力。
 
 **核心价值**：让用户以"指定要备份什么"而非"排除什么"的直观方式管理备份。
 
@@ -32,7 +32,7 @@
 执行备份 → 落盘 manifest.json → git add -A → git commit → git push(可选)
 ```
 
-**`in` 是 `out` 的特例**：两者都是指向 `data/<repo_path>` 的软链接，只有角色不同（`in` 负责把内容移入仓库并创建条目，**每个条目至多一个**，初始化新设备时可为 0；`out` 只做分发，0..N 个）。可在任意 `out` 上「指定为 `in`」，条目随即改为跟踪它。
+**所有链接完全等价**：每条链接都是指向 `data/<repo_path>` 的软链接，没有 in/out 类型、没有跟踪链接。`adopt` 创建条目时一并创建它的第一条链接（即 Issue 所说的「入方向」），后续链接只是分发（「出方向」）—— 但这只是「链接怎么来的」，不是存储的状态。
 内容只存在于 `data/`，本机路径只是视图，因此**不存在增量同步步骤**。`apply` 负责让本机链接与清单收敛。
 
 ## 技术栈
@@ -70,7 +70,7 @@ backup-manager/
 │   │   ├── middleware.go            # CORS + 错误恢复中间件
 │   │   └── handler/                 # HTTP 处理器
 │   │       ├── repo.go              # Repo CRUD + Config Update + Git Init
-│   │       ├── entry.go             # 条目：list / adopt / switch（指定新 in）/ delete
+│   │       ├── entry.go             # 条目：list / adopt / delete
 │   │       ├── link.go              # 链接：add / bulk / repair / remove
 │   │       ├── device.go            # 设备：current / register / rename / delete / apply
 │   │       ├── consistency.go       # 一致性巡检 + 修复
@@ -83,10 +83,10 @@ backup-manager/
 │   │       └── errors.go            # 错误码映射（respondError）
 │   │
 │   ├── entry/                       # 条目与链接子系统
-│   │   ├── manifest.go              # 清单加载/保存/原子写 + R-1..R-5 校验
+│   │   ├── manifest.go              # 清单加载/保存/原子写 + R-1..R-3 校验
 │   │   ├── service.go               # Service 装配、仓库互斥锁、清单提交、公共辅助
 │   │   ├── entry_service.go         # adopt、list、remove（unlink/move_back/purge）
-│   │   ├── link_service.go          # 添加 out 链接、批量链接、switch、repair、remove
+│   │   ├── link_service.go          # 添加链接、批量链接、repair、readopt、remove
 │   │   ├── device_service.go        # register、rename、delete、apply
 │   │   ├── entry_state.go           # 逐链接状态诊断与视图构建
 │   │   └── consistency.go           # 一致性巡检 + 修复
@@ -200,7 +200,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
   "version": 1, "updated_at": "...",
   "devices": [ {"fingerprint","name","hostname","os","last_seen_at"} ],
   "entries": [ {"id","repo_path","kind","created_at",
-                "links": [ {"id","type":"in|out","device","local_path","enabled","created_at"} ]} ]
+                "links": [ {"id","device","local_path","enabled","created_at"} ]} ]
 }
 ```
 
@@ -225,12 +225,11 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 |------|------|------|
 | GET | /repos/:id/entries?device=&state= | 条目列表（含链接与状态） |
 | GET | /repos/:id/entries/:entryId | 条目详情 |
-| POST | /repos/:id/entries/adopt | 创建条目及其 `in` 链接（内容 mv 进 data/） |
+| POST | /repos/:id/entries/adopt | 创建条目及其第一条链接（内容 mv 进 data/） |
 | PATCH | /repos/:id/entries/:entryId | 重命名 `repo_path`（重新校验不重叠） |
-| POST | /repos/:id/entries/:entryId/switch | 把某个 `out` 链接提升为条目的 `in` 链接 |
-| DELETE | /repos/:id/entries/:entryId?mode= | release / unlink / move_back / purge |
-| GET/POST | /repos/:id/entries/:entryId/links | 列出 / 添加 `out` 链接 |
-| POST | /repos/:id/links/bulk | 在某个本机根目录下批量创建 `out` 链接 |
+| DELETE | /repos/:id/entries/:entryId?mode= | unlink / move_back / purge |
+| GET/POST | /repos/:id/entries/:entryId/links | 列出 / 添加链接 |
+| POST | /repos/:id/links/bulk | 在某个本机根目录下批量创建链接 |
 | PATCH | /repos/:id/entries/:entryId/links/:linkId | 修改 local_path / enabled |
 | POST | .../links/:linkId/repair | 重建软链接 |
 | POST | .../links/:linkId/readopt | `replaced` → 把新内容移入 data/ 并重建链接 |
@@ -248,7 +247,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 ### 一致性
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | /repos/:id/consistency | 巡检结论（R-1..R-5、未托管链接） |
+| GET | /repos/:id/consistency | 巡检结论（R-1..R-3、未托管链接） |
 | POST | /repos/:id/consistency/repair | 修复所有可收敛项 |
 
 ### 文件操作
@@ -292,16 +291,13 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 
 ### 1. 内容单一归属与条目级一致性
 - 内容只存在于 `data/<repo_path>`；本机路径是指向它的软链接视图，不存在镜像目录、副本或同步步骤
-- **`in` 是 `out` 的特例**：两者物理形态完全相同（都是指向 `data/<repo_path>` 的软链接），区别仅在角色
-- 强制不变量 R-1..R-5：
-  - R-1 每个条目**至多一个** `in` 链接（正常恰为 1；**初始化新设备时允许为 0**，此时为「未绑定」状态）；`out` 链接 0..N 个
-  - R-2 链接只绑定完整条目，绝不绑定子路径
-  - R-3 条目之间永不重叠（`repo_path` 无祖先/后代关系）
-  - R-4 链接的 `local_path` 不得位于某个目录条目的 `local_path` 之内
-  - R-5 同一条目的所有链接指向同一目标、`kind` 一致
-- **指定跟踪链接**：可在任意 `out` 链接上执行「指定为 `in`」。此后条目跟踪该链接的变更，原 `in` 转为普通 `out`。纯元数据变更，不动文件系统；也用于把未绑定条目绑定起来
-- 移除 `in` 链接是允许的，条目变为未绑定（不删除内容）；`apply` 绝不自动决定哪个链接应成为 `in`
-- **禁止**：`in` 跟踪一个目录、却对该目录内的单个文件建 `out` 链接；条目嵌套（取代了旧的嵌套软链接功能）
+- **所有链接完全等价**：物理形态完全相同（都是指向 `data/<repo_path>` 的软链接），语义也完全相同，因此不落库区分类型
+- **条目即白名单成员**：条目存在于清单中就是「被备份」的定义；**0 条链接的条目合法**（内容在仓库里，本机暂无视图）
+- 强制不变量 R-1..R-3：
+  - R-1 链接只绑定完整条目，绝不绑定子路径
+  - R-2 条目之间永不重叠（`repo_path` 无祖先/后代关系）
+  - R-3 链接的 `local_path` 不得位于某个目录条目的 `local_path` 之内
+- **禁止**：跟踪一个目录、却对该目录内的单个文件建链接；条目嵌套（取代了旧的嵌套软链接功能）
 - 破坏性操作前先 git 提交，`git revert` 即回收站
 
 ### 2. 路径安全（SafeResolve）
@@ -325,7 +321,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 
 ### 4. 并发控制
 - 每个仓库独立互斥锁（map[string]*sync.Mutex）
-- 备份、回滚、以及所有会改文件系统的链接操作（adopt / add / repair / readopt / remove / switch / apply）都持同一把锁
+- 备份、回滚、以及所有会改文件系统的链接操作（adopt / add / repair / readopt / remove / detach / apply）都持同一把锁
 - 预览接口限流（channel semaphore，最大 5）
 - 定时备份跳过 backing_up 状态的仓库
 
@@ -357,14 +353,14 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - 逐链接状态：`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled` / `not_current`
 - `apply` 幂等收敛：先出 dry-run 计划（create / repair / skip / conflict / orphan）再执行，从不覆盖已占用路径
 - `replaced`（应用原子写把软链接换成真实文件）→「重新纳入」把新内容移入 `data/` 后重建链接
-- 一致性巡检覆盖 R-1..R-5，并探测 `data/` 内的软链接与未托管链接
+- 一致性巡检覆盖 R-1..R-3，并探测 `data/` 内的软链接与未托管链接
 
 ### 10. 多设备分发
 - 设备以稳定机器指纹标识（Linux `/etc/machine-id`、macOS `IOPlatformUUID`、Windows `MachineGuid`，兜底 `sha256(hostname+user)`）
 - 设备/条目/链接存放于仓库内 `manifest.json`，随 Git 传输
 - 换机流程：注册设备 → `apply` 重建链接 → `bulk` 批量分发
-- 移交条目：把新机器上的 `out` 链接 `switch` 提升为 `in`（纯元数据变更，不动文件系统）
-- 删除设备时，若它持有某条目唯一的 `in` 链接，自动提升剩下最早的启用 `out` 链接
+- 移交条目：在新机器上添加链接即可，无需提升任何东西（所有链接等价）
+- 删除设备只移除其链接定义；一条链接都不剩的条目依然合法
 - `manifest.json` 原子写：`.tmp` → `fsync` → `os.Rename`；无法解析时阻止写入而非静默重写
 
 ### 11. 系统托盘

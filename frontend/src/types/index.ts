@@ -35,9 +35,6 @@ export interface UpdateConfigRequest {
 
 // ── 条目 / 链接 / 设备 ─────────────────────────────────────────────────
 
-/** 链接类型。in 是 out 的特例：两者物理形态相同，只是角色不同。 */
-export type LinkType = 'in' | 'out';
-
 /** 条目类型。 */
 export type EntryKind = 'file' | 'dir';
 
@@ -52,16 +49,14 @@ export type LinkState =
   | 'disabled'
   | 'not_current';
 
+/** 一条链接：把本机路径绑定到条目。所有链接完全等价，不区分 in/out。 */
 export interface Link {
   id: string;
   entry_id: string;
-  type: LinkType;
   device: string;
   device_name?: string;
   local_path: string;
   enabled: boolean;
-  /** 派生字段：是否是该条目的跟踪链接（type === 'in'）。 */
-  tracked: boolean;
   /** 派生字段：是否属于当前设备。 */
   is_current: boolean;
   state: LinkState;
@@ -74,8 +69,6 @@ export interface Entry {
   repo_path: string;
   kind: EntryKind;
   created_at: string;
-  /** 没有任何 in 链接（新设备初始化期间合法）。 */
-  unbound: boolean;
   links: Link[];
 }
 
@@ -110,6 +103,16 @@ export interface AddLinkRequest {
 export interface BulkLinkRequest {
   local_root: string;
   entry_ids?: string[];
+}
+
+/** 设备卸载模式。 */
+export type DetachMode = 'unlink' | 'keep';
+
+export interface DetachResult {
+  device: string;
+  mode: DetachMode;
+  removed: ApplyAction[];
+  completed_at: string;
 }
 
 export type ApplyActionName = 'create' | 'repair' | 'skip' | 'conflict' | 'orphan';

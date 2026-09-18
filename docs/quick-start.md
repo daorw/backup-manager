@@ -55,15 +55,15 @@ Every backed-up file or directory is an **entry**. An **entry** is a whitelist m
 An entry with no links is perfectly valid: the content is in the repository, there is just no local view of it yet.
 
 ```
-   ● in   ~/.config/opencode/opencode.json   MacBook Pro   [tracked]
-   ● out  ~/Desktop/opencode.json            MacBook Pro   [track]  [remove]
-   ○ out  ~/work/opencode/opencode.json      MacBook-Pro-2  other device
+   ● ~/.config/opencode/opencode.json        MacBook Pro     [remove]
+   ● ~/Desktop/opencode.json                 MacBook Pro     [remove]
+   ○ ~/work/opencode/opencode.json           MacBook-Pro-2   other device
 ```
 
 ### Features:
 - Entries grouped by `repo_path`, expandable to show every link
 - Per-link state: `ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`
-- Link status per device, with which link is currently tracked
+- Link status per device, marking the links that belong to the current machine
 - Consistency audit with one-click repair
 
 ### Creating an Entry (adopt):
@@ -77,7 +77,7 @@ Click "+ New Entry" in the Entries tab:
 3. Read the warning: **the content will be moved into the repository and this location replaced by a symlink.**
 4. Click **Create**. The original location now holds the entry's first link.
 
-### Distributing an Entry (add an out link):
+### Distributing an Entry (add a link):
 
 Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none.
 

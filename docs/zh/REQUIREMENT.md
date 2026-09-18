@@ -137,9 +137,9 @@
 └── .git/                # Git 版本库
 
 本机侧 —— 每个链接都是指向仓库的软链接：
-  ~/Documents/report.docx  ->  <repo>/data/documents/report.docx   （in 链接）
-  ~/Desktop/notes.txt      ->  <repo>/data/documents/notes.txt     （out 链接）
-  ~/Desktop/report.docx    ->  <repo>/data/documents/report.docx   （out 链接）
+  ~/Documents/report.docx  ->  <repo>/data/documents/report.docx
+  ~/Desktop/notes.txt      ->  <repo>/data/documents/notes.txt
+  ~/Desktop/report.docx    ->  <repo>/data/documents/report.docx
 ```
 
 ### 5.2 核心实体
@@ -168,7 +168,7 @@ Entry                          # 一个被备份的文件/目录
 ├── repoPath: string           # 在 data/ 下的路径 —— 内容的身份
 ├── kind: 'file' | 'dir'
 ├── createdAt: timestamp
-└── links: Link[]              # 0..1 个 `in`（仅新设备初始化时为 0），0..N 个 `out`
+└── links: Link[]              # 0..N 条链接，全部完全等价（无 in/out 类型）
 
 Link                           # 绑定到条目的一个本机路径
 ├── id: string
@@ -219,10 +219,10 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
     { "id": "e1a2…", "repo_path": "documents/notes.txt", "kind": "file",
       "created_at": "2026-09-01T08:12:00Z",
       "links": [
-        { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+        { "id": "l1a2…", "device": "9f2c…",
           "local_path": "/Users/x/Documents/notes.txt", "enabled": true,
           "created_at": "2026-09-01T08:12:00Z" },
-        { "id": "l2b3…", "type": "out", "device": "9f2c…",
+        { "id": "l2b3…", "device": "9f2c…",
           "local_path": "/Users/x/Desktop/notes.txt", "enabled": true,
           "created_at": "2026-09-10T12:00:00Z" }
       ] }

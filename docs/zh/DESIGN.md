@@ -180,7 +180,7 @@ func SafeResolve(allowedRoot, userPath string) (string, error) {
 
 ### 3.4 条目与链接模型（取代 P0-5 镜像一致性设计）
 
-最初的 P0-5 修复靠「复制」维持 `.links/`、`data/` 与源文件三者一致。条目/链接模型（§9）取消了这份重复：**条目**持有内容，而每个**链接**（无论 `in` 还是 `out`）都是同一种东西 —— 指向 `data/<repo_path>` 的软链接。
+最初的 P0-5 修复靠「复制」维持 `.links/`、`data/` 与源文件三者一致。条目/链接模型（§9）取消了这份重复：**条目**持有内容，而每个**链接**都是同一种东西 —— 指向 `data/<repo_path>` 的软链接。
 
 ```
 ADOPT（创建条目及其第一条链接）:
@@ -190,7 +190,7 @@ ADOPT（创建条目及其第一条链接）:
   4. os.Symlink(data/<repo_path> → local_path)
   5. 把 {条目, 链接} 写入 .backup-manager/manifest.json 并提交
 
-添加 OUT 链接（分发；`in` 是它的特例）:
+添加链接（分发；文件系统效果完全相同）:
   1. 校验条目存在且 data/<repo_path> 存在
   2. os.Symlink(data/<repo_path> → local_path)   （不复制内容）
   3. 向该条目追加链接，提交
@@ -310,7 +310,7 @@ CREATE TABLE repo_auths (
                  "os": "darwin", "last_seen_at": "2026-09-18T10:00:00Z" } ],
   "entries": [ { "id": "e1a2…", "repo_path": "opencode/opencode.json", "kind": "file",
                  "created_at": "2026-09-01T08:12:00Z",
-                 "links": [ { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+                 "links": [ { "id": "l1a2…", "device": "9f2c…",
                               "local_path": "/Users/x/.config/opencode/opencode.json",
                               "enabled": true, "created_at": "2026-09-01T08:12:00Z" } ] } ]
 }
@@ -349,8 +349,8 @@ backup-manager/
 │   │   ├── middleware.go
 │   │   └── handler/
 │   │       ├── repo.go
-│   │       ├── entry.go         # 条目：list / adopt / switch（指定新 in）/ delete
-│   │       ├── link.go          # 链接：add / bulk / repair / remove
+│   │       ├── entry.go         # 条目：list / adopt / delete
+│   │       ├── link.go          # 链接：add / bulk / repair / readopt / remove
 │   │       ├── device.go        # 设备：current / register / rename / delete / apply
 │   │       ├── consistency.go   # 一致性巡检 + 修复
 │   │       ├── browse.go
@@ -368,7 +368,7 @@ backup-manager/
 │   │   ├── manifest.go          # 加载 / 保存 / 原子写 / R-1..R-3 校验
 │   │   ├── service.go           # Service 装配、仓库互斥锁、清单提交、公共辅助
 │   │   ├── entry_service.go     # adopt、list、remove（unlink/move_back/purge）
-│   │   ├── link_service.go      # 添加 out 链接、批量链接、switch、repair、remove
+│   │   ├── link_service.go      # 添加链接、批量链接、repair、readopt、remove
 │   │   ├── device_service.go    # register、rename、delete、apply
 │   │   ├── entry_state.go       # 逐链接状态诊断与视图构建
 │   │   └── consistency.go       # 一致性巡检 + 修复（§9.8）
@@ -693,7 +693,7 @@ R-3 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 
 | 规则 | 说明 |
 |------|------|
 | 事实来源 | 清单是权威。SQLite 只保存 `repos`、`repo_configs`、`repo_auths` 这类天生属于单机的数据 |
-| 写入 | 任何变更都重写文件并立即提交（`link: add /Users/x/Desktop/opencode.json`）。写入是原子的：`manifest.json.tmp` → `fsync` → `os.Rename` |
+| 写入 | 任何变更都重写文件并立即提交（提交信息形如 `link: add opencode/opencode.json`）。写入是原子的：`manifest.json.tmp` → `fsync` → `os.Rename` |
 | 读取 | 打开仓库时加载，按 `repoID` + 文件 mtime 缓存于内存 |
 | 传输 | 它位于仓库内，随 `git clone` / `git push` 一起走。新机器一次即可获知所有设备的链接 |
 | 手工编辑 | 支持。缺少 `id` 的条目在加载时补全；未知字段原样保留；无法解析的文件会阻止所有写入，而不是被静默重写 |
@@ -861,13 +861,16 @@ POST /api/v1/repos/:id/consistency/repair     # 收敛所有可收敛项
 
 | 检查项 | 结论码 | 级别 |
 |------|------|------|
+| 条目缺少 `id` / `repo_path`、id 重复、`repo_path` 非法 | `invalid_entry` | error |
+| 链接缺少 `local_path` / `device`、id 重复 | `invalid_link` | error |
+| 链接引用了未登记的设备 | `unknown_device` | error |
 | 两个条目重叠（手工编辑清单造成） | `overlapping_entries` | error |
 | 链接的 `local_path` 位于某目录条目的 `local_path` 之内 | `nested_link` | error |
-| 链接未解析到其条目的 `data/<repo_path>` | `link_drift`（附带 §9.7 的状态） | warning |
-| 活跃条目对应的 `data/<repo_path>` 在仓库中缺失 | `content_missing` | error |
+| 本机软链接缺失、指向别处、或被真实文件替换 | `link_missing` / `link_wrong_target` / `link_replaced`（§9.7 的状态） | warning |
+| 本机路径被无关对象占用 | `link_occupied` | error |
+| 活跃条目的内容在 `data/` 中缺失 | `content_missing` | error |
 | `data/` **内部**存在软链接 | `symlink_in_data` | error —— 破坏「内容只存在于 `data/`」 |
-| 扫描已注册链接的父目录时，发现指向 `data/` 的未托管软链接 | `unmanaged_link` | warning（可选扫描） |
-| 条目/链接结构非法、链接引用了未登记的设备 | `invalid_entry` / `invalid_link` / `unknown_device` | error |
+| 扫描已注册链接的父目录时，发现指向 `data/` 的未托管软链接 | `unmanaged_link` | warning |
 
 `unmanaged_link` 正是 Issue 所禁止形态的直接探测手段：一个绕过应用创建的、指向子路径的链接。它无法扫描整个文件系统，因此范围限定在已注册链接的父目录，并作为 warning 而非 error 报告。
 
@@ -878,7 +881,7 @@ POST /api/v1/repos/:id/consistency/repair     # 收敛所有可收敛项
 | `nested_link` | 禁用违规链接 —— 已禁用的链接不再活跃，因此不再违反 R-3 |
 | `link_missing` / `link_wrong_target` | 重建本机软链接 |
 | `link_replaced` | 只报告 —— 恢复内容需要用户显式做出「重新纳入」的决定 |
-| `content_missing`、`symlink_in_data`、`overlapping_entries`、结构性错误 | 只报告 —— 没有安全的自动处理手段 |
+| `link_occupied`、`content_missing`、`symlink_in_data`、`overlapping_entries`、`invalid_entry`、`invalid_link`、`unknown_device`、`unmanaged_link` | 只报告 —— 没有安全的自动处理手段 |
 
 #### 9.8.2 校验发生在哪一步
 
@@ -886,7 +889,7 @@ POST /api/v1/repos/:id/consistency/repair     # 收敛所有可收敛项
 |------|------|------|
 | `Load` | 解析并补全缺失 id；**不做**校验 | 手工编辑过的清单必须保持可读。若加载失败，仓库会完全不可用，用户连问题是什么都看不到 |
 | `Save` | 校验；拒绝任何会引入 error 级违规的写入 | 应用绝不把不合规状态固化下来 |
-| `SaveUnchecked` | 跳过校验 | 仅供修复与移除使用，这两类操作只会减少违规数量。没有它，被手工编辑成不合规的清单就再也无法通过应用修正 |
+| `saveConverging` | 跳过校验 | 仅供修复与移除使用，这两类操作只会减少违规数量。没有它，被手工编辑成不合规的清单就再也无法通过应用修正 |
 
 注意 R-3 只对**启用中**的链接判定。这正是「禁用违规链接」能成为合法收敛手段、而不是制造新违规的原因。
 
@@ -951,23 +954,23 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | `/api/v1/repos/:id/entries?device=&state=` | 条目列表（含链接与状态） |
-| GET | `/api/v1/repos/:id/entries/:entryId` | 条目详情 |
+| GET | `/api/v1/repos/:id/entries` | 条目列表；每条链接都带按需计算的状态，设备/状态分组由前端完成（服务端过滤推迟，§9.19） |
+| GET | `/api/v1/repos/:id/entries/:entryId` | 条目详情（含其链接及状态） |
 | POST | `/api/v1/repos/:id/entries/adopt` | 创建条目及其第一条链接：`{local_path, repo_path?, follow_symlinks?}` |
+| DELETE | `/api/v1/repos/:id/entries/:entryId?mode=&link_id=` | `unlink`（可带 `link_id` 只删一条链接）/ `move_back` / `purge` |
 | PATCH | `/api/v1/repos/:id/entries/:entryId` | `{repo_path?}` —— 重命名；重新校验 R-2（推迟，§9.19） |
-| DELETE | `/api/v1/repos/:id/entries/:entryId?mode=` | `unlink` / `move_back` / `purge` |
 
 **链接**
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | `/api/v1/repos/:id/entries/:entryId/links` | 条目的链接及状态 |
 | POST | `/api/v1/repos/:id/entries/:entryId/links` | 添加一条链接：`{local_path, device?}` |
 | POST | `/api/v1/repos/:id/links/bulk` | 批量链接：`{local_root, entry_ids?}` |
-| PATCH | `/api/v1/repos/:id/entries/:entryId/links/:linkId` | `{local_path?, enabled?}` |
 | POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/repair` | 重建软链接 |
 | POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/readopt` | `replaced` → 把新内容移入 `data/` 并重建链接 |
 | POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/remove` | 移除单个链接 |
+| GET | `/api/v1/repos/:id/entries/:entryId/links` | 条目的链接及状态 —— 条目详情已包含（推迟，§9.19） |
+| PATCH | `/api/v1/repos/:id/entries/:entryId/links/:linkId` | `{local_path?, enabled?}`（推迟，§9.19） |
 
 **设备**
 
@@ -978,9 +981,9 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 | POST | `/api/v1/repos/:id/devices` | 注册 / 认领设备（`name`、可选 `fingerprint`） |
 | PATCH | `/api/v1/repos/:id/devices/:fingerprint` | 重命名设备 |
 | DELETE | `/api/v1/repos/:id/devices/:fingerprint` | 删除设备及其链接定义 |
-| GET | `/api/v1/repos/:id/devices/:fingerprint/links` | 该设备的链接及状态 |
 | POST | `/api/v1/repos/:id/devices/:fingerprint/apply` | 收敛本机（支持 `dry_run`） |
-| POST | `/api/v1/repos/:id/devices/:fingerprint/detach` | 卸载本机 |
+| POST | `/api/v1/repos/:id/devices/:fingerprint/detach` | 卸载本机（`mode`：`unlink` / `keep`） |
+| GET | `/api/v1/repos/:id/devices/:fingerprint/links` | 该设备的链接及状态 —— 可由条目列表推导（推迟，§9.19） |
 
 **一致性**
 
@@ -1001,43 +1004,49 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 载荷：
 
 ```go
-type Entry struct {
-    ID        string `json:"id"`
-    RepoID    string `json:"repo_id"`
-    RepoPath  string `json:"repo_path"`
-    Kind      string `json:"kind"` // file | dir
-    CreatedAt string `json:"created_at"`
-    Links     []Link `json:"links"`
+type EntryView struct {
+    ID        string      `json:"id"`
+    RepoPath  string      `json:"repo_path"`
+    Kind      string      `json:"kind"` // file | dir
+    CreatedAt time.Time   `json:"created_at"`
+    Links     []*LinkView `json:"links"`
 }
 
-type Link struct {
-    ID         string `json:"id"`
-    EntryID    string `json:"entry_id"`
-    Device     string `json:"device"` // 设备指纹
-    DeviceName string `json:"device_name,omitempty"`
-    LocalPath  string `json:"local_path"`
-    Enabled    bool   `json:"enabled"`
-    IsCurrent  bool   `json:"is_current"` // 派生：device == 当前指纹
-    CreatedAt  string `json:"created_at"`
-    State      string `json:"state"`
-    StateNote  string `json:"state_note,omitempty"`
+type LinkView struct {
+    ID         string    `json:"id"`
+    EntryID    string    `json:"entry_id"`
+    Device     string    `json:"device"` // 设备指纹
+    DeviceName string    `json:"device_name,omitempty"`
+    LocalPath  string    `json:"local_path"`
+    Enabled    bool      `json:"enabled"`
+    IsCurrent  bool      `json:"is_current"` // 派生：device == 当前指纹
+    State      string    `json:"state"`
+    StateNote  string    `json:"state_note,omitempty"`
+    CreatedAt  time.Time `json:"created_at"`
 }
 
 type ApplyRequest struct {
-    DryRun  bool     `json:"dry_run"`
-    LinkIDs []string `json:"link_ids,omitempty"` // 为空表示该设备全部链接
+    DryRun bool `json:"dry_run"`
+}
+
+type ApplyAction struct {
+    EntryID   string `json:"entry_id"`
+    LinkID    string `json:"link_id"`
+    RepoPath  string `json:"repo_path"`
+    LocalPath string `json:"local_path"`
+    Action    string `json:"action"` // create / repair / skip / conflict / orphan
+    Reason    string `json:"reason,omitempty"`
 }
 
 type ApplyResult struct {
-    Device      string       `json:"device"`
-    Created     []LinkAction `json:"created"`
-    Repaired    []LinkAction `json:"repaired"`
-    Skipped     []LinkAction `json:"skipped"`
-    Conflicts   []LinkAction `json:"conflicts"`
-    Orphans     []LinkAction `json:"orphans"`
-    Failed      []LinkAction `json:"failed"`
-    DryRun      bool         `json:"dry_run"`
-    CompletedAt string       `json:"completed_at"`
+    Device      string        `json:"device"`
+    Created     []ApplyAction `json:"created"`
+    Repaired    []ApplyAction `json:"repaired"`
+    Skipped     []ApplyAction `json:"skipped"`
+    Conflicts   []ApplyAction `json:"conflicts"`
+    Orphans     []ApplyAction `json:"orphans"`
+    DryRun      bool          `json:"dry_run"`
+    CompletedAt time.Time     `json:"completed_at"`
 }
 ```
 
@@ -1104,7 +1113,6 @@ export interface Link {
 
 export interface Entry {
   id: string;
-  repo_id: string;
   repo_path: string;
   kind: EntryKind;
   created_at: string;
@@ -1249,7 +1257,10 @@ export interface Entry {
 
 | 项目 | 推迟原因 |
 |------|------|
-| **条目重命名**（`PATCH /entries/:id`） | 需要重指该条目的每一个既有软链接，不只是元数据变更 |
-| 批量链接 UI、逐链接启用/禁用、设备重命名 UI | 前端便利项；相关 API 已经具备 |
+| **条目重命名**（`PATCH /entries/:entryId`） | 需要重指该条目的每一个既有软链接，不只是元数据变更 |
+| **逐链接编辑**（`PATCH /entries/:entryId/links/:linkId`，`{local_path?, enabled?}`） | `enabled` 已被 `apply` 与 R-3 校验遵循，缺的只是端点 |
+| **`GET /entries/:entryId/links`、`GET /devices/:fingerprint/links`** | 便利性投影 —— 条目列表已经返回每条链接及其状态 |
+| **服务端条目过滤**（`?device=&state=`） | 条目列表规模很小，前端直接分组过滤 |
+| 批量链接 UI、设备重命名 UI | 前端便利项；相关 API（`POST /links/bulk`、`PATCH /devices/:fingerprint`）已经具备 |
 | 批量「重新纳入」 | `readopt` 已按链接可用（§9.7）；批量版本未实现 |
 

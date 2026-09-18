@@ -235,7 +235,7 @@ backup-manager/
 │   │   ├── middleware.go       # CORS + 错误恢复
 │   │   └── handler/            # HTTP 处理器
 │   │       ├── repo.go         # 仓库 CRUD + Git Init
-│   │       ├── entry.go        # 条目 list / adopt / switch / delete
+│   │       ├── entry.go        # 条目 list / adopt / delete
 │   │       ├── link.go         # 链接 add / bulk / repair / remove
 │   │       ├── device.go       # 设备 current / register / rename / delete / apply
 │   │       ├── consistency.go  # 一致性巡检 + 修复
@@ -250,7 +250,7 @@ backup-manager/
 │   │   ├── manifest.go         # 清单加载/保存/原子写 + R-1..R-3 校验
 │   │   ├── service.go          # Service 装配、仓库互斥锁、清单提交、公共辅助
 │   │   ├── entry_service.go    # adopt、list、remove（unlink/move_back/purge）
-│   │   ├── link_service.go     # 添加 out 链接、批量链接、switch、repair、remove
+│   │   ├── link_service.go     # 添加链接、批量链接、repair、readopt、remove
 │   │   ├── device_service.go   # register、rename、delete、apply
 │   │   ├── entry_state.go      # 逐链接状态诊断与视图构建
 │   │   └── consistency.go      # 一致性巡检 + 修复

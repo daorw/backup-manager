@@ -274,7 +274,7 @@ func checkManifest(m *model.Manifest) []Finding {
 					}
 					if localPathsOverlap(l.LocalPath, owner.LocalPath) {
 						add(CodeNestedLink, e.RepoPath, l.ID, l.LocalPath,
-							"位于目录条目 %q 的本机路径之内（R-4）", dir.RepoPath)
+							"位于目录条目 %q 的本机路径之内（R-3）", dir.RepoPath)
 					}
 				}
 			}

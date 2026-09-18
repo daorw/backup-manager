@@ -147,7 +147,7 @@ func (s *Service) RepairAll(repoID string) (*RepairResult, error) {
 					if localPathsOverlap(l.LocalPath, owner.LocalPath) {
 						l.Enabled = false
 						result.Repaired = append(result.Repaired,
-							action(e, l, "disable", fmt.Sprintf("R-4: inside directory entry %q", dir.RepoPath)))
+							action(e, l, "disable", fmt.Sprintf("R-3: inside directory entry %q", dir.RepoPath)))
 					}
 				}
 			}

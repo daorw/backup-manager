@@ -44,8 +44,8 @@ The system refuses anything else at creation time and reports drift in the consi
 - **Repo Management** — Create/delete/view backup repos, visual config (remote URL, branch, Git user)
 - **Entry & Link Management** — Each backed-up file/directory is an entry with **0..N links, all equal**; view, distribute, add links, repair, re-adopt, and remove (unlink / move_back / purge)
 - **Link State Diagnosis** — Per-link states (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`) with one-click repair and re-adopt
-- **Consistency Audit** — Verifies the invariants (**at most one `in` per entry** — an entry with none is reported as a warning, since that is legal during new-device initialisation, links bind whole entries, entries never overlap, no symlink inside `data/`) and reports unmanaged links
-- **Multi-Device** — Machine fingerprint detection, device registration, dry-run `apply` to recreate a machine's links, detach, and automatic `in`-link promotion when a device is deleted
+- **Consistency Audit** — Verifies the invariants (links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`; no link referencing an unregistered device) and reports unmanaged links
+- **Multi-Device** — Machine fingerprint detection, device registration, dry-run `apply` to recreate a machine's links, detach; deleting a device removes only its link definitions, and entries left with no links stay legal
 - **File Preview & Edit** — Plain text/code syntax highlighting, Markdown rendering, binary file identification; edits write straight into `data/` and every link reflects them immediately
 - **Backup Execution** — Manual trigger or scheduled auto-backup (second-precision cron), optional Git push
 - **Backup History** — View Git commit history with pagination, plus the uncommitted change count
@@ -237,7 +237,7 @@ backup-manager/
 │   │   ├── middleware.go       # CORS + error recovery
 │   │   └── handler/            # HTTP handlers
 │   │       ├── repo.go         # Repo CRUD + Git Init
-│   │       ├── entry.go        # Entry list / adopt / switch / delete
+│   │       ├── entry.go        # Entry list / adopt / delete
 │   │       ├── link.go         # Link add / bulk / repair / remove
 │   │       ├── device.go       # Device current / register / rename / delete / apply
 │   │       ├── consistency.go  # Consistency audit + repair
@@ -252,7 +252,7 @@ backup-manager/
 │   │   ├── manifest.go         # Manifest load / save / atomic write / R-1..R-3 validation
 │   │   ├── service.go          # Service wiring, repo mutex, manifest commit, helpers
 │   │   ├── entry_service.go    # adopt, list, remove (unlink / move_back / purge)
-│   │   ├── link_service.go     # add out link, bulk link, switch, repair, remove
+│   │   ├── link_service.go     # add link, bulk link, repair, readopt, remove
 │   │   ├── device_service.go   # register, rename, delete, apply
 │   │   ├── entry_state.go      # Per-link state diagnosis + views
 │   │   └── consistency.go      # Consistency audit + repair

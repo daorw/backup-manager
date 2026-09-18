@@ -139,9 +139,9 @@ A **device** is one machine referencing the repository, identified by a stable m
 └── .git/                # Git repository
 
 Local machine — every link is a symlink into the repo:
-  ~/Documents/report.docx  ->  <repo>/data/documents/report.docx   (in link)
-  ~/Desktop/notes.txt      ->  <repo>/data/documents/notes.txt     (out link)
-  ~/Desktop/report.docx    ->  <repo>/data/documents/report.docx   (out link)
+  ~/Documents/report.docx  ->  <repo>/data/documents/report.docx
+  ~/Desktop/notes.txt      ->  <repo>/data/documents/notes.txt
+  ~/Desktop/report.docx    ->  <repo>/data/documents/report.docx
 ```
 
 ### 5.2 Core Entities
@@ -170,7 +170,7 @@ Entry                          # one backed-up file/directory
 ├── repoPath: string           # path under data/ — the identity of the content
 ├── kind: 'file' | 'dir'
 ├── createdAt: timestamp
-└── links: Link[]              # 0..1 `in` (0 only during new-device init), 0..N `out`
+└── links: Link[]              # 0..N links, all completely equal (no in/out type)
 
 Link                           # a local path bound to an entry
 ├── id: string
@@ -221,10 +221,10 @@ The old `symlinks` table is removed and no table replaces it — entries, links 
     { "id": "e1a2…", "repo_path": "documents/notes.txt", "kind": "file",
       "created_at": "2026-09-01T08:12:00Z",
       "links": [
-        { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+        { "id": "l1a2…", "device": "9f2c…",
           "local_path": "/Users/x/Documents/notes.txt", "enabled": true,
           "created_at": "2026-09-01T08:12:00Z" },
-        { "id": "l2b3…", "type": "out", "device": "9f2c…",
+        { "id": "l2b3…", "device": "9f2c…",
           "local_path": "/Users/x/Desktop/notes.txt", "enabled": true,
           "created_at": "2026-09-10T12:00:00Z" }
       ] }

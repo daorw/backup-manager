@@ -181,7 +181,7 @@ func SafeResolve(allowedRoot, userPath string) (string, error) {
 
 ### 3.4 Entry & Link Model (supersedes the P0-5 mirror-consistency design)
 
-The original P0-5 fix kept `.links/`, `data/`, and the source file consistent by copying. That duplication is removed by the entry/link model (§9): an **entry** owns the content, and every **link** (whether `in` or `out`) is the same thing — a symlink to `data/<repo_path>`.
+The original P0-5 fix kept `.links/`, `data/`, and the source file consistent by copying. That duplication is removed by the entry/link model (§9): an **entry** owns the content, and every **link** is the same thing — a symlink to `data/<repo_path>`.
 
 ```
 ADOPT (creates the entry + its first link):
@@ -189,12 +189,12 @@ ADOPT (creates the entry + its first link):
   2. Compute repo_path
   3. MOVE local_path → data/<repo_path>          (os.Rename, cross-fs degrade)
   4. os.Symlink(data/<repo_path> → local_path)
-  5. Append {entry, link(type=in)} to .backup-manager/manifest.json, commit
+  5. Append {entry, link} to .backup-manager/manifest.json, commit
 
-ADD OUT LINK (distribute; `in` is a special case of this):
+ADD LINK (distribute; identical filesystem effect):
   1. Validate that the entry exists and data/<repo_path> exists
   2. os.Symlink(data/<repo_path> → local_path)   (no content copied)
-  3. Append link(type=out) to the entry, commit
+  3. Append the link to the entry, commit
 ```
 
 There is no mirror directory and no copy step, so the backup operation reduces to: `git add -A → git commit → git push`.
@@ -311,7 +311,7 @@ That is the complete schema — three tables. There is **no** table for entries,
                  "os": "darwin", "last_seen_at": "2026-09-18T10:00:00Z" } ],
   "entries": [ { "id": "e1a2…", "repo_path": "opencode/opencode.json", "kind": "file",
                  "created_at": "2026-09-01T08:12:00Z",
-                 "links": [ { "id": "l1a2…", "type": "in",  "device": "9f2c…",
+                 "links": [ { "id": "l1a2…", "device": "9f2c…",
                               "local_path": "/Users/x/.config/opencode/opencode.json",
                               "enabled": true, "created_at": "2026-09-01T08:12:00Z" } ] } ]
 }
@@ -665,11 +665,11 @@ The manifest is grouped **by entry**, which is what makes R-2 and R-3 structural
       "kind": "file",
       "created_at": "2026-09-01T08:12:00Z",
       "links": [
-        { "id": "l1a2b3c4d5e6f708", "type": "in",
+        { "id": "l1a2b3c4d5e6f708",
           "device": "9f2c1a4b7d8e0f31",
           "local_path": "/Users/x/.config/opencode/opencode.json",
           "enabled": true, "created_at": "2026-09-01T08:12:00Z" },
-        { "id": "l2b3c4d5e6f70819", "type": "out",
+        { "id": "l2b3c4d5e6f70819",
           "device": "9f2c1a4b7d8e0f31",
           "local_path": "/Users/x/Desktop/opencode.json",
           "enabled": true, "created_at": "2026-09-10T12:00:00Z" }
@@ -681,7 +681,7 @@ The manifest is grouped **by entry**, which is what makes R-2 and R-3 structural
       "kind": "dir",
       "created_at": "2026-09-02T09:00:00Z",
       "links": [
-        { "id": "l3c4d5e6f7081920", "type": "in",
+        { "id": "l3c4d5e6f7081920",
           "device": "9f2c1a4b7d8e0f31",
           "local_path": "/Users/x/Documents/notes",
           "enabled": true, "created_at": "2026-09-02T09:00:00Z" }
@@ -694,7 +694,7 @@ The manifest is grouped **by entry**, which is what makes R-2 and R-3 structural
 | Rule | Detail |
 |------|------|
 | Source of truth | The manifest is authoritative. SQLite holds only `repos`, `repo_configs`, `repo_auths` — things inherently local to one machine |
-| Write | Every change rewrites the file and commits it immediately (`link: add out /Users/x/Desktop/opencode.json`). Writes are atomic: `manifest.json.tmp` → `fsync` → `os.Rename` |
+| Write | Every change rewrites the file and commits it immediately (`link: add opencode/opencode.json`). Writes are atomic: `manifest.json.tmp` → `fsync` → `os.Rename` |
 | Read | Loaded on repo open, cached in memory keyed by `repoID` + file mtime |
 | Transport | Living inside the repo, it travels with `git clone` / `git push`. A new machine learns every device's links at once |
 | Hand editing | Supported. Missing `id`s are assigned on load; unknown fields are preserved; an unparsable file blocks all writes instead of being silently rewritten |
@@ -863,12 +863,16 @@ POST /api/v1/repos/:id/consistency/repair     # converge everything that can be 
 
 | Check | Finding code | Severity |
 |------|------|------|
+| An entry lacks `id` / `repo_path`, has a duplicate id, or an illegal `repo_path` | `invalid_entry` | error |
+| A link lacks `local_path` / `device`, or has a duplicate id | `invalid_link` | error |
+| A link references a device that is not registered | `unknown_device` | error |
 | Two entries overlap (hand-edited manifest) | `overlapping_entries` | error |
 | A link's `local_path` sits inside a directory entry's `local_path` | `nested_link` | error |
-| A link does not resolve to its entry's `data/<repo_path>` | `link_drift` (+ the state from §9.7) | warning |
-| `data/<repo_path>` is missing from the repo for a live entry | `content_missing` | error |
+| A local symlink is missing, points elsewhere, or was replaced by a real file | `link_missing` / `link_wrong_target` / `link_replaced` (the §9.7 state) | warning |
+| A local path is taken by an unrelated object | `link_occupied` | error |
+| The content of a live entry is missing from `data/` | `content_missing` | error |
 | A symlink exists **inside** `data/` | `symlink_in_data` | error — breaks "content lives only in `data/`" |
-| An unmanaged symlink pointing into `data/` is found while scanning the parent directories of registered links | `unmanaged_link` | warning (opt-in scan) |
+| An unmanaged symlink pointing into `data/` is found while scanning the parent directories of registered links | `unmanaged_link` | warning |
 
 `unmanaged_link` is the direct detector for the Issue's forbidden shape: a link to a sub-path that was created outside the application. It cannot scan the whole filesystem, so it is scoped to the parent directories of registered links and reported as a warning rather than an error.
 
@@ -879,7 +883,7 @@ POST /api/v1/repos/:id/consistency/repair     # converge everything that can be 
 | `nested_link` | Disable the offending link — a disabled link is not active, so it no longer violates R-3 |
 | `link_missing` / `link_wrong_target` | Recreate the local symlink |
 | `link_replaced` | Report only — recovering the content requires an explicit re-adopt decision |
-| `content_missing`, `symlink_in_data`, `overlapping_entries`, structural problems | Report only — there is no safe automatic action |
+| `link_occupied`, `content_missing`, `symlink_in_data`, `overlapping_entries`, `invalid_entry`, `invalid_link`, `unknown_device`, `unmanaged_link` | Report only — there is no safe automatic action |
 
 #### 9.8.2 Where validation happens
 
@@ -887,7 +891,7 @@ POST /api/v1/repos/:id/consistency/repair     # converge everything that can be 
 |------|------|------|
 | `Load` | Parses and assigns missing ids; does **not** validate | A hand-edited manifest must stay readable. If loading failed, the repository would become completely unusable and the user could not even see what is wrong |
 | `Save` | Validates; refuses any write that would introduce an error-level violation | The application never persists an invalid state |
-| `SaveUnchecked` | Skips validation | Used only by repair and removal, which can only reduce the number of violations. Without it, a manifest that was hand-edited into an invalid state could never be corrected through the app |
+| `saveConverging` | Skips validation | Used only by repair and removal, which can only reduce the number of violations. Without it, a manifest that was hand-edited into an invalid state could never be corrected through the app |
 
 Note that R-3 is evaluated over **enabled** links only. That is what makes "disable the offending link" a legal convergence step rather than another violation.
 
@@ -952,23 +956,23 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 
 | Method | Path | Purpose |
 |------|------|------|
-| GET | `/api/v1/repos/:id/entries?device=&state=` | Entry list with links and states (`?group=device` for a per-device view) |
-| GET | `/api/v1/repos/:id/entries/:entryId` | Entry detail |
+| GET | `/api/v1/repos/:id/entries` | Entry list; every link carries its computed state, so device/state grouping is done client-side (server-side filters deferred, §9.19) |
+| GET | `/api/v1/repos/:id/entries/:entryId` | Entry detail (includes its links and their states) |
 | POST | `/api/v1/repos/:id/entries/adopt` | Create an entry together with its first link: `{local_path, repo_path?, follow_symlinks?}` |
+| DELETE | `/api/v1/repos/:id/entries/:entryId?mode=&link_id=` | `unlink` (with an optional `link_id` to remove a single link) / `move_back` / `purge` |
 | PATCH | `/api/v1/repos/:id/entries/:entryId` | `{repo_path?}` — rename; R-2 re-validated (deferred, §9.19) |
-| DELETE | `/api/v1/repos/:id/entries/:entryId?mode=` | `unlink` / `move_back` / `purge` |
 
 **Links**
 
 | Method | Path | Purpose |
 |------|------|------|
-| GET | `/api/v1/repos/:id/entries/:entryId/links` | Links of an entry with states |
 | POST | `/api/v1/repos/:id/entries/:entryId/links` | Add a link: `{local_path, device?}` |
 | POST | `/api/v1/repos/:id/links/bulk` | Bulk links: `{local_root, entry_ids?}` |
-| PATCH | `/api/v1/repos/:id/entries/:entryId/links/:linkId` | `{local_path?, enabled?}` |
 | POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/repair` | Recreate the symlink |
 | POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/readopt` | `replaced` → move the new content into `data/`, recreate the link |
 | POST | `/api/v1/repos/:id/entries/:entryId/links/:linkId/remove` | Remove one link |
+| GET | `/api/v1/repos/:id/entries/:entryId/links` | Links of an entry with states — already returned by the entry detail (deferred, §9.19) |
+| PATCH | `/api/v1/repos/:id/entries/:entryId/links/:linkId` | `{local_path?, enabled?}` (deferred, §9.19) |
 
 **Devices**
 
@@ -979,9 +983,9 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 | POST | `/api/v1/repos/:id/devices` | Register / claim a device (`name`, optional `fingerprint`) |
 | PATCH | `/api/v1/repos/:id/devices/:fingerprint` | Rename a device |
 | DELETE | `/api/v1/repos/:id/devices/:fingerprint` | Delete a device and its link definitions |
-| GET | `/api/v1/repos/:id/devices/:fingerprint/links` | This device's links with states |
 | POST | `/api/v1/repos/:id/devices/:fingerprint/apply` | Converge the machine (`dry_run` supported) |
-| POST | `/api/v1/repos/:id/devices/:fingerprint/detach` | Detach the machine |
+| POST | `/api/v1/repos/:id/devices/:fingerprint/detach` | Detach the machine (`mode`: `unlink` / `keep`) |
+| GET | `/api/v1/repos/:id/devices/:fingerprint/links` | This device's links with states — derivable from the entry list (deferred, §9.19) |
 
 **Consistency**
 
@@ -1002,43 +1006,49 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 Payloads:
 
 ```go
-type Entry struct {
-    ID        string `json:"id"`
-    RepoID    string `json:"repo_id"`
-    RepoPath  string `json:"repo_path"`
-    Kind      string `json:"kind"` // file | dir
-    CreatedAt string `json:"created_at"`
-    Links     []Link `json:"links"`
+type EntryView struct {
+    ID        string      `json:"id"`
+    RepoPath  string      `json:"repo_path"`
+    Kind      string      `json:"kind"` // file | dir
+    CreatedAt time.Time   `json:"created_at"`
+    Links     []*LinkView `json:"links"`
 }
 
-type Link struct {
-    ID         string `json:"id"`
-    EntryID    string `json:"entry_id"`
-    Device     string `json:"device"` // device fingerprint
-    DeviceName string `json:"device_name,omitempty"`
-    LocalPath  string `json:"local_path"`
-    Enabled    bool   `json:"enabled"`
-    IsCurrent  bool   `json:"is_current"` // derived: device == current fingerprint
-    CreatedAt  string `json:"created_at"`
-    State      string `json:"state"`
-    StateNote  string `json:"state_note,omitempty"`
+type LinkView struct {
+    ID         string    `json:"id"`
+    EntryID    string    `json:"entry_id"`
+    Device     string    `json:"device"` // device fingerprint
+    DeviceName string    `json:"device_name,omitempty"`
+    LocalPath  string    `json:"local_path"`
+    Enabled    bool      `json:"enabled"`
+    IsCurrent  bool      `json:"is_current"` // derived: device == current fingerprint
+    State      string    `json:"state"`
+    StateNote  string    `json:"state_note,omitempty"`
+    CreatedAt  time.Time `json:"created_at"`
 }
 
 type ApplyRequest struct {
-    DryRun  bool     `json:"dry_run"`
-    LinkIDs []string `json:"link_ids,omitempty"` // empty = all links of the device
+    DryRun bool `json:"dry_run"`
+}
+
+type ApplyAction struct {
+    EntryID   string `json:"entry_id"`
+    LinkID    string `json:"link_id"`
+    RepoPath  string `json:"repo_path"`
+    LocalPath string `json:"local_path"`
+    Action    string `json:"action"` // create / repair / skip / conflict / orphan
+    Reason    string `json:"reason,omitempty"`
 }
 
 type ApplyResult struct {
     Device      string        `json:"device"`
-    Created     []LinkAction  `json:"created"`
-    Repaired    []LinkAction  `json:"repaired"`
-    Skipped     []LinkAction  `json:"skipped"`
-    Conflicts   []LinkAction  `json:"conflicts"`
-    Orphans     []LinkAction  `json:"orphans"`
-    Failed      []LinkAction  `json:"failed"`
+    Created     []ApplyAction `json:"created"`
+    Repaired    []ApplyAction `json:"repaired"`
+    Skipped     []ApplyAction `json:"skipped"`
+    Conflicts   []ApplyAction `json:"conflicts"`
+    Orphans     []ApplyAction `json:"orphans"`
     DryRun      bool          `json:"dry_run"`
-    CompletedAt string        `json:"completed_at"`
+    CompletedAt time.Time     `json:"completed_at"`
 }
 ```
 
@@ -1105,7 +1115,6 @@ export interface Link {
 
 export interface Entry {
   id: string;
-  repo_id: string;
   repo_path: string;
   kind: EntryKind;
   created_at: string;
@@ -1233,8 +1242,8 @@ Because backward compatibility is explicitly out of scope:
 | Milestone | Scope |
 |------|------|
 | M1 | `model/link.go`, `entry/manifest.go`, atomic write, R-1..R-3 validation, id assignment |
-| M2 | `util/device.go` (fingerprint) + device register/list/rename/delete (incl. `in`-link auto-promotion) |
-| M3 | Entry creation: adopt (mv, R-3 check, symlink scan, cross-filesystem degrade, rollback) |
+| M2 | `util/device.go` (fingerprint) + device register/list/rename/delete |
+| M3 | Entry creation: adopt (mv, R-2 check, symlink scan, cross-filesystem degrade, rollback) |
 | M4 | Link creation: add link, R-3 check, bulk link, path safety |
 | M5 | State diagnosis + `apply` (dry run + execution) + repair + re-adopt |
 | M6 | Removal: link-level, entry-level `unlink` / `move_back` / `purge`, guards; device `detach` |
@@ -1246,11 +1255,14 @@ Because backward compatibility is explicitly out of scope:
 
 ### 9.19 Deferred Items (not yet implemented)
 
-The main line above is implemented and verified. The following are deliberately postponed — they are additive and none of them changes the model:
+The main line above is implemented and verified. The following are deliberately postponed — all of them are additive and none of them changes the model:
 
 | Item | Why deferred |
 |------|------|
-| **Entry rename** (`PATCH /entries/:id`) | Requires re-pointing every existing symlink of the entry, so it is more than a metadata change |
-| Bulk-link UI, per-link enable/disable, device rename UI | Front-end conveniences; the APIs already exist |
+| **Entry rename** (`PATCH /entries/:entryId`) | Requires re-pointing every existing symlink of the entry, so it is more than a metadata change |
+| **Per-link edit** (`PATCH /entries/:entryId/links/:linkId`, `{local_path?, enabled?}`) | `enabled` is already honoured by `apply` and by the R-3 check; only the endpoint is missing |
+| **`GET /entries/:entryId/links`, `GET /devices/:fingerprint/links`** | Convenience projections — the entry list already returns every link with its computed state |
+| **Server-side entry filters** (`?device=&state=`) | The entry list is small; the front end groups and filters client-side |
+| Bulk-link UI, device rename UI | Front-end conveniences; the APIs (`POST /links/bulk`, `PATCH /devices/:fingerprint`) already exist |
 | Recovering a `replaced` link in bulk | `readopt` works per link (§9.7); a batch variant is not written |
 

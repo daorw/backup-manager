@@ -220,13 +220,13 @@ func absPath(p string) (string, error) {
 }
 
 // checkLinkPlacement 校验链接落点：不得指向仓库内部，不得占用已有内容，
-// 且不得位于某个目录条目的本机路径之内（R-4）。
+// 且不得位于某个目录条目的本机路径之内（R-3）。
 func checkLinkPlacement(repoRoot string, m *model.Manifest, e *model.Entry, local string) error {
 	if insidePath(local, repoRoot) {
 		return fmt.Errorf("invalid local_path: it is inside the repository")
 	}
 
-	// R-4：不能在已跟踪的目录内部再挂东西
+	// R-3：不能在已跟踪的目录内部再挂东西
 	for _, dir := range m.Entries {
 		if dir.Kind != model.EntryKindDir {
 			continue

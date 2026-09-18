@@ -25,14 +25,14 @@
 ### 核心数据流
 
 ```
-创建条目(adopt) → 内容 mv 进 data/<repo_path> → 原位置替换为软链接 = 该条目的 in 链接
+创建条目(adopt) → 内容 mv 进 data/<repo_path> → 原位置替换为软链接（该条目的第一条链接）
                     ↓
-添加 out 链接 → 同一条目再分发到其它本机路径（纯软链接，不复制内容）
+添加链接 → 同一条目再分发到其它本机路径（纯软链接，不复制内容）
                     ↓
 执行备份 → 落盘 manifest.json → git add -A → git commit → git push(可选)
 ```
 
-**所有链接完全等价**：每条链接都是指向 `data/<repo_path>` 的软链接，没有 in/out 类型、没有跟踪链接。`adopt` 创建条目时一并创建它的第一条链接（即 Issue 所说的「入方向」），后续链接只是分发（「出方向」）—— 但这只是「链接怎么来的」，不是存储的状态。
+**所有链接完全等价**：每条链接都是指向 `data/<repo_path>` 的软链接，没有 in/out 类型、没有跟踪链接。`adopt` 创建条目时一并创建它的第一条链接，后续链接只是分发 —— 但这只是「链接怎么来的」，不是存储的状态。
 内容只存在于 `data/`，本机路径只是视图，因此**不存在增量同步步骤**。`apply` 负责让本机链接与清单收敛。
 
 ## 技术栈
@@ -71,7 +71,7 @@ backup-manager/
 │   │   └── handler/                 # HTTP 处理器
 │   │       ├── repo.go              # Repo CRUD + Config Update + Git Init
 │   │       ├── entry.go             # 条目：list / adopt / delete
-│   │       ├── link.go              # 链接：add / bulk / repair / remove
+│   │       ├── link.go              # 链接：add / bulk / repair / readopt / remove
 │   │       ├── device.go            # 设备：current / register / rename / delete / apply
 │   │       ├── consistency.go       # 一致性巡检 + 修复
 │   │       ├── browse.go            # 本地文件浏览（安全限定 AllowedRoots）
@@ -151,8 +151,8 @@ backup-manager/
             │   ├── RepoCard.tsx
             │   └── CreateRepoModal.tsx
             ├── entry/
-            │   ├── EntriesPanel.tsx  # 条目与链接：列表、指定跟踪、修复、移除、apply
-            │   └── AdoptModal.tsx    # 创建条目（内容移入仓库，原位置建 in 链接）
+            │   ├── EntriesPanel.tsx  # 条目与链接：列表、添加链接、修复、重新纳入、移除、apply
+            │   └── AdoptModal.tsx    # 创建条目（内容移入仓库，原位置建第一条链接）
             ├── files/
             │   └── FilesPanel.tsx    # 浏览 data/ 树 + 预览编辑
             ├── preview/
@@ -223,26 +223,26 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 ### 条目与链接
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | /repos/:id/entries?device=&state= | 条目列表（含链接与状态） |
-| GET | /repos/:id/entries/:entryId | 条目详情 |
+| GET | /repos/:id/entries | 条目列表（含链接与状态；分组/过滤由前端完成） |
+| GET | /repos/:id/entries/:entryId | 条目详情（含其链接与状态） |
 | POST | /repos/:id/entries/adopt | 创建条目及其第一条链接（内容 mv 进 data/） |
-| PATCH | /repos/:id/entries/:entryId | 重命名 `repo_path`（重新校验不重叠） |
-| DELETE | /repos/:id/entries/:entryId?mode= | unlink / move_back / purge |
-| GET/POST | /repos/:id/entries/:entryId/links | 列出 / 添加链接 |
+| DELETE | /repos/:id/entries/:entryId?mode=&link_id= | unlink / move_back / purge |
+| POST | /repos/:id/entries/:entryId/links | 添加链接 |
 | POST | /repos/:id/links/bulk | 在某个本机根目录下批量创建链接 |
-| PATCH | /repos/:id/entries/:entryId/links/:linkId | 修改 local_path / enabled |
 | POST | .../links/:linkId/repair | 重建软链接 |
 | POST | .../links/:linkId/readopt | `replaced` → 把新内容移入 data/ 并重建链接 |
 | POST | .../links/:linkId/remove | 移除单个链接 |
+| PATCH | /repos/:id/entries/:entryId | 重命名 `repo_path`（待办，未实现） |
+| PATCH | .../links/:linkId | 修改 local_path / enabled（待办，未实现） |
 
 ### 设备
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET | /devices/current | 当前机器的指纹 / 主机名 |
 | GET/POST/PATCH/DELETE | /repos/:id/devices[/:fp] | 设备注册 / 重命名 / 删除 |
-| GET | /repos/:id/devices/:fp/links | 该设备的链接及状态 |
 | POST | /repos/:id/devices/:fp/apply | 让本机收敛（支持 dry_run） |
-| POST | /repos/:id/devices/:fp/detach | 卸载本机 |
+| POST | /repos/:id/devices/:fp/detach | 卸载本机（mode：unlink / keep） |
+| GET | /repos/:id/devices/:fp/links | 该设备的链接及状态（待办，未实现） |
 
 ### 一致性
 | 方法 | 路径 | 功能 |
@@ -439,6 +439,6 @@ cd frontend && npx tsc --noEmit
 本机侧（每个链接都是指向仓库的软链接）：
 
 ```
-~/Documents/notes.txt   ->  <repo>/data/documents/notes.txt   （in 链接，创建该条目）
-~/Desktop/notes.txt     ->  <repo>/data/documents/notes.txt   （out 链接，分发）
+~/Documents/notes.txt   ->  <repo>/data/documents/notes.txt   （创建该条目时产生）
+~/Desktop/notes.txt     ->  <repo>/data/documents/notes.txt   （分发时添加）
 ```

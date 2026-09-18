@@ -142,9 +142,9 @@ func (s *Service) Switch(repoID, entryID, linkID string) (*EntryView, error) {
 	return s.Get(repoID, entryID)
 }
 
-// Repair 重建一条链接的本机软链接。
+// RepairLink 重建一条链接的本机软链接。
 // 只在状态为 missing / wrong_target / dangling 时可用，占用路径不会被覆盖。
-func (s *Service) Repair(repoID, entryID, linkID string) (*EntryView, error) {
+func (s *Service) RepairLink(repoID, entryID, linkID string) (*EntryView, error) {
 	defer s.lock(repoID)()
 	repo, m, err := s.load(repoID)
 	if err != nil {
@@ -190,7 +190,8 @@ func (s *Service) RemoveLink(repoID, entryID, linkID string) (*EntryView, error)
 	os.Remove(l.LocalPath)
 	e.RemoveLink(linkID)
 
-	if err := s.save(repo, m, "link: remove "+l.LocalPath); err != nil {
+	// 移除只会减少违规，因此跳过校验，避免清单已不合规时无法清理
+	if err := s.saveConverging(repo, m, "link: remove "+l.LocalPath); err != nil {
 		return nil, err
 	}
 	return s.Get(repoID, entryID)

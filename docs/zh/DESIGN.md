@@ -350,10 +350,10 @@ backup-manager/
 │   │   ├── middleware.go
 │   │   └── handler/
 │   │       ├── repo.go
-│   │       ├── entry.go         # 条目：adopt / switch / delete
-│   │       ├── link.go          # 链接：add / repair / readopt / remove / bulk
-│   │       ├── device.go        # 设备：register / apply / detach
-│   │       ├── consistency.go   # 巡检 + 修复
+│   │       ├── entry.go         # 条目：list / adopt / switch（指定新 in）/ delete
+│   │       ├── link.go          # 链接：add / bulk / repair / remove
+│   │       ├── device.go        # 设备：current / register / rename / delete / apply
+│   │       ├── consistency.go   # 一致性巡检 + 修复
 │   │       ├── browse.go
 │   │       ├── content.go       # tree / preview / save / changes
 │   │       ├── backup.go
@@ -367,19 +367,19 @@ backup-manager/
 │   │   └── auth.go
 │   ├── entry/                   # 条目与链接子系统（§9）
 │   │   ├── manifest.go          # 加载 / 保存 / 原子写 / R-1..R-5 校验
-│   │   ├── entry_service.go     # adopt、rename、release/unlink/move_back/purge
-│   │   ├── link_service.go      # 添加 / 修复 / 重新纳入 / 移除链接、批量链接
-│   │   ├── device_service.go    # register、rename、apply、detach
-│   │   ├── entry_state.go       # 文件系统状态诊断
-│   │   └── consistency.go       # 巡检
+│   │   ├── service.go           # Service 装配、仓库互斥锁、清单提交、公共辅助
+│   │   ├── entry_service.go     # adopt、list、remove（unlink/move_back/purge）
+│   │   ├── link_service.go      # 添加 out 链接、批量链接、switch、repair、remove
+│   │   ├── device_service.go    # register、rename、delete、apply
+│   │   ├── entry_state.go       # 逐链接状态诊断与视图构建
+│   │   └── consistency.go       # 一致性巡检 + 修复（§9.8）
 │   ├── service/
 │   │   ├── repo_service.go
 │   │   ├── backup_service.go
 │   │   ├── auth_service.go
 │   │   ├── browser_service.go
 │   │   ├── content_service.go
-│   │   ├── rollback_service.go
-│   │   └── repo_mutex.go
+│   │   └── rollback_service.go
 │   ├── store/
 │   │   ├── db.go
 │   │   ├── store.go
@@ -397,6 +397,7 @@ backup-manager/
 │       ├── path.go          # SafeResolve 安全函数
 │       ├── crypto.go        # AES-GCM 加密
 │       ├── device.go        # MachineFingerprint()
+│       ├── repo_mutex.go    # 仓库级互斥锁（备份/回滚/链接操作共享）
 │       └── file.go          # 文件操作工具
 ├── frontend/
 │   ├── package.json
@@ -898,6 +899,26 @@ POST /api/v1/repos/:id/consistency/repair     # 收敛所有可收敛项
 
 `unmanaged_link` 正是 Issue 所禁止形态的直接探测手段：一个绕过应用创建的、指向子路径的链接。它无法扫描整个文件系统，因此范围限定在已注册链接的父目录，并作为 warning 而非 error 报告。
 
+#### 9.8.1 修复能做什么、不能做什么
+
+| 结论 | 修复动作 |
+|------|------|
+| `multiple_in` | 保留最早的 `in` 链接，其余降级为 `out`（R-1） |
+| `nested_link` | 禁用违规链接 —— 已禁用的链接不再活跃，因此不再违反 R-4 |
+| `link_missing` / `link_wrong_target` | 重建本机软链接 |
+| `link_replaced` | 只报告 —— 恢复内容需要用户显式做出「重新纳入」的决定 |
+| `content_missing`、`symlink_in_data`、`overlapping_entries`、结构性错误 | 只报告 —— 没有安全的自动处理手段 |
+
+#### 9.8.2 校验发生在哪一步
+
+| 阶段 | 行为 | 原因 |
+|------|------|------|
+| `Load` | 解析并补全缺失 id；**不做**校验 | 手工编辑过的清单必须保持可读。若加载失败，仓库会完全不可用，用户连问题是什么都看不到 |
+| `Save` | 校验；拒绝任何会引入 error 级违规的写入 | 应用绝不把不合规状态固化下来 |
+| `SaveUnchecked` | 跳过校验 | 仅供修复与移除使用，这两类操作只会减少违规数量。没有它，被手工编辑成不合规的清单就再也无法通过应用修正 |
+
+注意 R-4 只对**启用中**的链接判定。这正是「禁用违规链接」能成为合法收敛手段、而不是制造新违规的原因。
+
 ### 9.9 移除
 
 **链接级** —— 永远安全：
@@ -936,6 +957,7 @@ internal/
 │   ├── link_service.go           # 添加 out 链接、批量链接、switch、repair、remove
 │   ├── device_service.go         # register、rename、delete、apply
 │   ├── entry_state.go            # 逐链接状态诊断与视图构建（§9.7）
+│   ├── consistency.go            # 一致性巡检 + 修复（§9.8）
 │   └── entry_service_test.go
 ├── model/
 │   ├── repo.go                   # 不变
@@ -1278,7 +1300,6 @@ export interface Entry {
 
 | 项目 | 推迟原因 |
 |------|------|
-| **一致性巡检**（`GET /repos/:id/consistency` + 修复，§9.8） | 各项不变量在写入时已由 `validateManifest` 强制（R-1/R-3/R-4），巡检只是额外发现「手工编辑或外部造成的不一致」。暂未新增 `consistency.go` |
 | **`readopt`**（`replaced` 链接的恢复） | `apply` 已把 `replaced` 作为冲突报告而不覆盖，这是安全的一半；自动恢复是独立动作 |
 | **`detach`**（设备卸载，§9.6.3） | 删除设备已可用；detach 是更温和的变体 |
 | **条目重命名**（`PATCH /entries/:id`） | 需要重指该条目的每一个既有软链接，不只是元数据变更 |

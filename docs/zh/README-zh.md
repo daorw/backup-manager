@@ -239,6 +239,7 @@ backup-manager/
 │   │       ├── entry.go        # 条目 list / adopt / switch / delete
 │   │       ├── link.go         # 链接 add / bulk / repair / remove
 │   │       ├── device.go       # 设备 current / register / rename / delete / apply
+│   │       ├── consistency.go  # 一致性巡检 + 修复
 │   │       ├── browse.go       # 本地文件浏览 + 允许根目录
 │   │       ├── content.go      # tree / preview / save / changes
 │   │       ├── backup.go       # 备份触发 + 历史查询 + Push
@@ -252,7 +253,8 @@ backup-manager/
 │   │   ├── entry_service.go    # adopt、list、remove（unlink/move_back/purge）
 │   │   ├── link_service.go     # 添加 out 链接、批量链接、switch、repair、remove
 │   │   ├── device_service.go   # register、rename、delete、apply
-│   │   └── entry_state.go      # 逐链接状态诊断与视图构建
+│   │   ├── entry_state.go      # 逐链接状态诊断与视图构建
+│   │   └── consistency.go      # 一致性巡检 + 修复
 │   ├── service/                # 业务逻辑层
 │   │   ├── repo_service.go     # 仓库生命周期
 │   │   ├── backup_service.go   # 备份执行（git add/commit/push）

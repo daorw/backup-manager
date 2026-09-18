@@ -10,6 +10,8 @@ import type {
   AddLinkRequest,
   BulkLinkRequest,
   ApplyResult,
+  AuditResult,
+  RepairResult,
   ContentEntry,
   BrowseEntry,
   PreviewResult,
@@ -152,6 +154,20 @@ export async function removeLink(
   const { data } = await api.post<Entry>(
     `/repos/${repoId}/entries/${entryId}/links/${linkId}/remove`
   );
+  return data;
+}
+
+// ── 一致性巡检 ────────────────────────────────────────────────────────
+
+/** 巡检仓库：清单不变量 + 本机链接实际状态。 */
+export async function fetchConsistency(repoId: string): Promise<AuditResult> {
+  const { data } = await api.get<AuditResult>(`/repos/${repoId}/consistency`);
+  return data;
+}
+
+/** 收敛所有可自动修复的问题。 */
+export async function repairConsistency(repoId: string): Promise<RepairResult> {
+  const { data } = await api.post<RepairResult>(`/repos/${repoId}/consistency/repair`);
   return data;
 }
 

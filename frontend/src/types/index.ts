@@ -134,6 +134,43 @@ export interface ApplyResult {
   completed_at: string;
 }
 
+// ── 一致性巡检 ────────────────────────────────────────────────────────
+
+export type FindingSeverity = 'error' | 'warning';
+
+export interface AuditFinding {
+  code: string;
+  severity: FindingSeverity;
+  repo_path?: string;
+  link_id?: string;
+  local_path?: string;
+  /** 是否可由一键修复处理。 */
+  repairable: boolean;
+  message: string;
+}
+
+export interface AuditResult {
+  repo_id: string;
+  device: string;
+  clean: boolean;
+  errors: number;
+  warnings: number;
+  entry_count: number;
+  link_count: number;
+  findings: AuditFinding[];
+  audited_at: string;
+}
+
+export interface RepairResult {
+  repo_id: string;
+  repaired: ApplyAction[];
+  /** 无法自动修复的结论。 */
+  skipped: AuditFinding[];
+  repaired_count: number;
+  remaining_errors: number;
+  completed_at: string;
+}
+
 // ── 仓库内容 ──────────────────────────────────────────────────────────
 
 export interface ContentEntry {

@@ -355,6 +355,7 @@ backup-manager/
 │   │       ├── entry.go         # list / adopt / switch / delete an entry
 │   │       ├── link.go          # add / bulk / repair / remove a link
 │   │       ├── device.go        # current / register / rename / delete / apply
+│   │       ├── consistency.go   # audit + repair
 │   │       ├── browse.go
 │   │       ├── content.go       # tree / preview / save / changes
 │   │       ├── backup.go
@@ -372,7 +373,8 @@ backup-manager/
 │   │   ├── entry_service.go     # adopt, list, remove (unlink / move_back / purge)
 │   │   ├── link_service.go      # add out link, bulk link, switch, repair, remove
 │   │   ├── device_service.go    # register, rename, delete, apply
-│   │   └── entry_state.go       # per-link state diagnosis + view building
+│   │   ├── entry_state.go       # per-link state diagnosis + view building
+│   │   └── consistency.go       # audit + repair (§9.8)
 │   ├── service/
 │   │   ├── repo_service.go
 │   │   ├── backup_service.go
@@ -900,6 +902,26 @@ POST /api/v1/repos/:id/consistency/repair     # converge everything that can be 
 
 `unmanaged_link` is the direct detector for the Issue's forbidden shape: a link to a sub-path that was created outside the application. It cannot scan the whole filesystem, so it is scoped to the parent directories of registered links and reported as a warning rather than an error.
 
+#### 9.8.1 What repair can and cannot fix
+
+| Finding | Repair action |
+|------|------|
+| `multiple_in` | Keep the oldest `in` link, demote the rest to `out` (R-1) |
+| `nested_link` | Disable the offending link — a disabled link is not active, so it no longer violates R-4 |
+| `link_missing` / `link_wrong_target` | Recreate the local symlink |
+| `link_replaced` | Report only — recovering the content requires an explicit re-adopt decision |
+| `content_missing`, `symlink_in_data`, `overlapping_entries`, structural problems | Report only — there is no safe automatic action |
+
+#### 9.8.2 Where validation happens
+
+| Stage | Behaviour | Why |
+|------|------|------|
+| `Load` | Parses and assigns missing ids; does **not** validate | A hand-edited manifest must stay readable. If loading failed, the repository would become completely unusable and the user could not even see what is wrong |
+| `Save` | Validates; refuses any write that would introduce an error-level violation | The application never persists an invalid state |
+| `SaveUnchecked` | Skips validation | Used only by repair and removal, which can only reduce the number of violations. Without it, a manifest that was hand-edited into an invalid state could never be corrected through the app |
+
+Note that R-4 is evaluated over **enabled** links only. That is what makes "disable the offending link" a legal convergence step rather than another violation.
+
 ### 9.9 Removing
 
 **Link level** — always safe:
@@ -938,6 +960,7 @@ internal/
 │   ├── link_service.go           # add out link, bulk link, switch, repair, remove
 │   ├── device_service.go         # register, rename, delete, apply
 │   ├── entry_state.go            # per-link state diagnosis + views (§9.7)
+│   ├── consistency.go            # audit + repair (§9.8)
 │   └── entry_service_test.go
 ├── model/
 │   ├── repo.go                   # unchanged
@@ -1280,7 +1303,6 @@ The main line above is implemented and verified. The following are deliberately 
 
 | Item | Why deferred |
 |------|------|
-| **Consistency audit** (`GET /repos/:id/consistency` + repair, §9.8) | The invariants are already enforced at write time by `validateManifest` (R-1/R-3/R-4), so the audit only adds detection for hand-edited or externally-created inconsistencies. No `consistency.go` was added yet |
 | **`readopt`** (recovering a `replaced` link) | `apply` already reports `replaced` as a conflict instead of overwriting it, which is the safe half. The automatic recovery is a separate action |
 | **`detach`** (device detach, §9.6.3) | Deleting a device already works; detach is the softer variant |
 | **Entry rename** (`PATCH /entries/:id`) | Requires re-pointing every existing symlink of the entry, so it is more than a metadata change |

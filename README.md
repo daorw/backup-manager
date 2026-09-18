@@ -241,6 +241,7 @@ backup-manager/
 │   │       ├── entry.go        # Entry list / adopt / switch / delete
 │   │       ├── link.go         # Link add / bulk / repair / remove
 │   │       ├── device.go       # Device current / register / rename / delete / apply
+│   │       ├── consistency.go  # Consistency audit + repair
 │   │       ├── browse.go       # Local file browsing + allowed roots
 │   │       ├── content.go      # Tree / preview / save / changes
 │   │       ├── backup.go       # Backup trigger + history + push
@@ -254,7 +255,8 @@ backup-manager/
 │   │   ├── entry_service.go    # adopt, list, remove (unlink / move_back / purge)
 │   │   ├── link_service.go     # add out link, bulk link, switch, repair, remove
 │   │   ├── device_service.go   # register, rename, delete, apply
-│   │   └── entry_state.go      # Per-link state diagnosis + views
+│   │   ├── entry_state.go      # Per-link state diagnosis + views
+│   │   └── consistency.go      # Consistency audit + repair
 │   ├── service/                # Business logic layer
 │   │   ├── repo_service.go     # Repo lifecycle
 │   │   ├── backup_service.go   # Backup execution (git add/commit/push)

@@ -116,6 +116,7 @@ func main() {
 	entryHandler := handler.NewEntryHandler(entrySvc)
 	linkHandler := handler.NewLinkHandler(entrySvc)
 	deviceHandler := handler.NewDeviceHandler(entrySvc)
+	consistencyHandler := handler.NewConsistencyHandler(entrySvc)
 	browseHandler := handler.NewBrowseHandler(browserSvc)
 	contentHandler := handler.NewContentHandler(contentSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc)
@@ -129,6 +130,7 @@ func main() {
 		entryHandler,
 		linkHandler,
 		deviceHandler,
+		consistencyHandler,
 		browseHandler,
 		contentHandler,
 		backupHandler,

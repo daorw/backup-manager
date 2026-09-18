@@ -139,6 +139,18 @@ func (s *Service) save(repo *model.Repo, m *model.Manifest, msg string) error {
 	return nil
 }
 
+// saveConverging 与 save 相同，但跳过不变量校验。
+//
+// 只供「只会减少违规」的收敛路径使用（巡检修复、移除链接/条目）。若这些操作也被校验拦住，
+// 清单一旦被手工编辑成不合规状态，用户就再也无法通过应用把它修回来。
+func (s *Service) saveConverging(repo *model.Repo, m *model.Manifest, msg string) error {
+	if err := s.manifests.SaveUnchecked(repo.Path, m); err != nil {
+		return err
+	}
+	s.commitManifest(repo.Path, msg)
+	return nil
+}
+
 // commitManifest 把清单变更提交进 Git，使定义随仓库一起传输。
 // 仓库尚未初始化 Git 时直接跳过；提交失败只记日志 —— 清单文件已经落盘，
 // 下次备份的 git add -A 会兜住它。

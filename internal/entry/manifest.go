@@ -64,7 +64,10 @@ func newManifestStore() *manifestStore {
 	return &manifestStore{cache: make(map[string]*cachedManifest)}
 }
 
-// Load 读取并校验仓库清单。文件不存在时返回一份空清单（不算错误）。
+// Load 读取仓库清单。文件不存在时返回一份空清单（不算错误）。
+//
+// 这里**不做不变量校验**：手工编辑出错时仓库仍应可打开、可在巡检里看到问题，
+// 而不是每个接口都失败。校验只拦写入（Save），并且巡检会把问题列出来。
 func (s *manifestStore) Load(repoRoot string) (*model.Manifest, error) {
 	path := ManifestPath(repoRoot)
 
@@ -95,22 +98,25 @@ func (s *manifestStore) Load(repoRoot string) (*model.Manifest, error) {
 	}
 	assignMissingIDs(m)
 
-	if err := validateManifest(m); err != nil {
-		return nil, fmt.Errorf("manifest validation failed: %w", err)
-	}
-
 	s.mu.Lock()
 	s.cache[repoRoot] = &cachedManifest{manifest: m, mtime: info.ModTime(), size: info.Size()}
 	s.mu.Unlock()
 	return m, nil
 }
 
-// Save 校验并原子写入清单（tmp → fsync → rename），随后刷新缓存。
+// Save 校验不变量后原子写入清单。
 func (s *manifestStore) Save(repoRoot string, m *model.Manifest) error {
 	if err := validateManifest(m); err != nil {
 		return fmt.Errorf("manifest validation failed: %w", err)
 	}
+	return s.SaveUnchecked(repoRoot, m)
+}
 
+// SaveUnchecked 跳过不变量校验直接原子写入（tmp → fsync → rename），随后刷新缓存。
+//
+// 仅供「只会减少违规」的收敛路径使用（巡检修复、移除链接/条目）：
+// 这些操作必须能在清单已经不合规时依然落盘，否则用户会陷入无法修复的死结。
+func (s *manifestStore) SaveUnchecked(repoRoot string, m *model.Manifest) error {
 	m.Version = manifestVersion
 	m.UpdatedAt = time.Now().UTC()
 
@@ -191,49 +197,73 @@ func assignMissingIDs(m *model.Manifest) {
 	}
 }
 
-// validateManifest 校验清单的 R-1/R-3/R-4 及引用完整性。
-func validateManifest(m *model.Manifest) error {
+// checkManifest 校验清单的结构、引用完整性与 R-1/R-3/R-4 不变量，
+// 返回**全部**问题（不短路），供写入校验与巡检共用。
+func checkManifest(m *model.Manifest) []Finding {
+	var findings []Finding
+	add := func(code, repoPath, linkID, localPath, format string, args ...any) {
+		findings = append(findings, Finding{
+			Code:      code,
+			Severity:  SeverityError,
+			RepoPath:  repoPath,
+			LinkID:    linkID,
+			LocalPath: localPath,
+			Message:   fmt.Sprintf(format, args...),
+		})
+	}
+
 	entryIDs := make(map[string]bool, len(m.Entries))
 	linkIDs := make(map[string]bool)
 
 	for _, e := range m.Entries {
 		if e.ID == "" || e.RepoPath == "" {
-			return fmt.Errorf("entry is missing id or repo_path")
+			add(CodeInvalidEntry, e.RepoPath, "", "", "条目缺少 id 或 repo_path")
+			continue
 		}
 		if entryIDs[e.ID] {
-			return fmt.Errorf("duplicate entry id %q", e.ID)
+			add(CodeInvalidEntry, e.RepoPath, "", "", "条目 id 重复：%q", e.ID)
 		}
 		entryIDs[e.ID] = true
 
-		// R-2：链接只能挂在条目上，repo_path 必须是干净的非空相对路径
+		// R-2：repo_path 必须是干净的非空相对路径
 		if e.RepoPath != filepath.ToSlash(filepath.Clean(e.RepoPath)) ||
 			strings.HasPrefix(e.RepoPath, "../") || e.RepoPath == "." {
-			return fmt.Errorf("entry %q has an invalid repo_path", e.RepoPath)
+			add(CodeInvalidEntry, e.RepoPath, "", "", "repo_path 非法")
 		}
 
-		// R-1：至多一个 in 链接。0 个是合法状态（新设备初始化时未绑定）。
 		inCount := 0
 		for _, l := range e.Links {
 			if linkIDs[l.ID] {
-				return fmt.Errorf("duplicate link id %q", l.ID)
+				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "链接 id 重复：%q", l.ID)
 			}
 			linkIDs[l.ID] = true
 
-			if l.Type == model.LinkTypeIn {
+			switch l.Type {
+			case model.LinkTypeIn:
 				inCount++
-			} else if l.Type != model.LinkTypeOut {
-				return fmt.Errorf("link %q has an unknown type %q", l.ID, l.Type)
+			case model.LinkTypeOut:
+			default:
+				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "未知的链接类型：%q", l.Type)
 			}
 			if l.LocalPath == "" || l.Device == "" {
-				return fmt.Errorf("link %q is missing local_path or device", l.ID)
+				add(CodeInvalidLink, e.RepoPath, l.ID, l.LocalPath, "链接缺少 local_path 或 device")
 			}
 			// 引用完整性：链接必须指向已登记的设备
 			if m.FindDevice(l.Device) == nil {
-				return fmt.Errorf("link %q references an unknown device %q", l.ID, l.Device)
+				add(CodeUnknownDevice, e.RepoPath, l.ID, l.LocalPath, "链接引用了未登记的设备：%q", l.Device)
 			}
 		}
-		if inCount > 1 {
-			return fmt.Errorf("entry %q has %d in links (R-1 allows at most one)", e.RepoPath, inCount)
+
+		// R-1：至多一个 in 链接。0 个合法（新设备初始化期间未绑定），按 warning 报告。
+		switch {
+		case inCount > 1:
+			add(CodeMultipleIn, e.RepoPath, "", "",
+				"有 %d 个 in 链接（R-1 只允许至多一个）", inCount)
+		case inCount == 0:
+			findings = append(findings, Finding{
+				Code: CodeNoInLink, Severity: SeverityWarning, RepoPath: e.RepoPath,
+				Message: "条目没有 in 链接（未绑定）；新设备初始化期间属正常，指定一条即可",
+			})
 		}
 	}
 
@@ -241,29 +271,46 @@ func validateManifest(m *model.Manifest) error {
 	for i := 0; i < len(m.Entries); i++ {
 		for j := i + 1; j < len(m.Entries); j++ {
 			if repoPathsOverlap(m.Entries[i].RepoPath, m.Entries[j].RepoPath) {
-				return fmt.Errorf("entries %q and %q overlap (R-3 forbids nested entries)",
-					m.Entries[i].RepoPath, m.Entries[j].RepoPath)
+				add(CodeOverlappingEntries, m.Entries[i].RepoPath, "", "",
+					"与条目 %q 重叠（R-3 禁止嵌套条目）", m.Entries[j].RepoPath)
 			}
 		}
 	}
 
-	// R-4：链接的 local_path 不得位于某个目录条目的 local_path 之内
+	// R-4：链接的 local_path 不得位于某个目录条目的 local_path 之内。
+	// 已禁用的链接不参与判定 —— 禁用正是巡检修复 R-4 违规的收敛手段。
 	for _, dir := range m.Entries {
 		if dir.Kind != model.EntryKindDir {
 			continue
 		}
 		for _, owner := range dir.Links {
+			if !owner.Enabled {
+				continue
+			}
 			for _, e := range m.Entries {
 				for _, l := range e.Links {
-					if l == owner {
+					if l == owner || !l.Enabled {
 						continue
 					}
 					if localPathsOverlap(l.LocalPath, owner.LocalPath) {
-						return fmt.Errorf("link %q (%s) is inside directory entry %q (R-4)",
-							l.LocalPath, e.RepoPath, dir.RepoPath)
+						add(CodeNestedLink, e.RepoPath, l.ID, l.LocalPath,
+							"位于目录条目 %q 的本机路径之内（R-4）", dir.RepoPath)
 					}
 				}
 			}
+		}
+	}
+	return findings
+}
+
+// validateManifest 供写入路径使用：存在 error 级问题时返回第一个错误。
+func validateManifest(m *model.Manifest) error {
+	for _, f := range checkManifest(m) {
+		if f.Severity == SeverityError {
+			if f.RepoPath != "" {
+				return fmt.Errorf("%s: %s", f.RepoPath, f.Message)
+			}
+			return fmt.Errorf("%s", f.Message)
 		}
 	}
 	return nil

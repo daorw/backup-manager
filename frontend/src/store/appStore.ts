@@ -9,6 +9,8 @@ import type {
   AddLinkRequest,
   BulkLinkRequest,
   ApplyResult,
+  AuditResult,
+  RepairResult,
   GitAuth,
   CommitEntry,
   CommitFileChange,
@@ -69,6 +71,12 @@ interface AppState {
     mode: api.EntryRemoveMode,
     linkId?: string
   ) => Promise<void>;
+
+  // 一致性巡检
+  audit: AuditResult | null;
+  auditLoading: boolean;
+  runAudit: (repoId: string) => Promise<AuditResult>;
+  repairConsistency: (repoId: string) => Promise<RepairResult>;
 
   // 设备
   fetchCurrentDevice: () => Promise<void>;
@@ -262,6 +270,37 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
       set({ error: errMsg(err, 'Failed to remove the entry') });
+      throw err;
+    }
+  },
+
+  // ── 一致性巡检 ───────────────────────────────────────────────────────
+
+  audit: null,
+  auditLoading: false,
+
+  runAudit: async (repoId: string) => {
+    set({ auditLoading: true, error: null });
+    try {
+      const audit = await api.fetchConsistency(repoId);
+      set({ audit, auditLoading: false });
+      return audit;
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to audit the repository'), auditLoading: false });
+      throw err;
+    }
+  },
+
+  repairConsistency: async (repoId: string) => {
+    set({ auditLoading: true, error: null });
+    try {
+      const result = await api.repairConsistency(repoId);
+      // 修复会改动本机软链接，重新拉一次条目与巡检结论
+      await get().fetchEntries(repoId);
+      set({ audit: await api.fetchConsistency(repoId), auditLoading: false });
+      return result;
+    } catch (err: unknown) {
+      set({ error: errMsg(err, 'Failed to repair'), auditLoading: false });
       throw err;
     }
   },

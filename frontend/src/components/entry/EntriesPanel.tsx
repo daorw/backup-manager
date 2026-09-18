@@ -21,6 +21,7 @@ import {
   ToolOutlined,
   SwapOutlined,
   CloudDownloadOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../../store/appStore';
 import type { Entry, Link, LinkState, ApplyResult, AdoptRequest } from '../../types';
@@ -67,6 +68,10 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const removeLink = useAppStore((s) => s.removeLink);
   const removeEntry = useAppStore((s) => s.removeEntry);
   const applyDevice = useAppStore((s) => s.applyDevice);
+  const audit = useAppStore((s) => s.audit);
+  const auditLoading = useAppStore((s) => s.auditLoading);
+  const runAudit = useAppStore((s) => s.runAudit);
+  const repairConsistency = useAppStore((s) => s.repairConsistency);
   const loading = useAppStore((s) => s.loading);
 
   const [adoptOpen, setAdoptOpen] = useState(false);
@@ -76,6 +81,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const [removeMode, setRemoveMode] = useState<'unlink' | 'move_back' | 'purge'>('unlink');
   const [plan, setPlan] = useState<ApplyResult | null>(null);
   const [applying, setApplying] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   useEffect(() => {
     fetchCurrentDevice();
@@ -127,6 +133,30 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       message.error(err instanceof Error ? err.message : 'Failed to apply');
     } finally {
       setApplying(false);
+    }
+  };
+
+  // 巡检：先出结论再决定是否修复
+  const handleAudit = async () => {
+    try {
+      await runAudit(repoId);
+      setAuditOpen(true);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Audit failed');
+    }
+  };
+
+  const handleRepair = async () => {
+    try {
+      const res = await repairConsistency(repoId);
+      message.success(
+        res.remaining_errors > 0
+          ? `Repaired ${res.repaired_count}; ${res.remaining_errors} error(s) still need manual resolution`
+          : `Repaired ${res.repaired_count}`
+      );
+      refresh();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Repair failed');
     }
   };
 
@@ -236,6 +266,22 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           disabled={!fingerprint}
         >
           Apply
+        </Button>
+        <Button
+          icon={<SafetyCertificateOutlined />}
+          onClick={handleAudit}
+          loading={auditLoading}
+          danger={!!audit && audit.errors > 0}
+        >
+          Audit
+          {audit && (audit.errors > 0 || audit.warnings > 0) && (
+            <Tag
+              color={audit.errors > 0 ? 'red' : 'gold'}
+              style={{ marginInlineStart: 6, marginInlineEnd: 0 }}
+            >
+              {audit.errors + audit.warnings}
+            </Tag>
+          )}
         </Button>
       </Space>
 
@@ -359,6 +405,73 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             </Radio>
           </Space>
         </Radio.Group>
+      </Modal>
+
+      {/* 一致性巡检结论 */}
+      <Modal
+        title="Consistency Audit"
+        open={auditOpen}
+        onCancel={() => setAuditOpen(false)}
+        width={720}
+        footer={[
+          <Button key="close" onClick={() => setAuditOpen(false)}>
+            Close
+          </Button>,
+          <Button
+            key="repair"
+            type="primary"
+            loading={auditLoading}
+            disabled={!audit || (audit.findings ?? []).length === 0}
+            onClick={handleRepair}
+          >
+            Repair
+          </Button>,
+        ]}
+      >
+        {!audit || audit.findings.length === 0 ? (
+          <Alert type="success" showIcon message="No inconsistency found" />
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Text>
+              <Text type="danger">{audit.errors} error(s)</Text>
+              {' · '}
+              <Text type="warning">{audit.warnings} warning(s)</Text>
+              {' · '}
+              <Text type="secondary">
+                {audit.entry_count} entr(ies), {audit.link_count} link(s)
+              </Text>
+            </Text>
+            {(audit.findings ?? []).map((f, i) => (
+              <div
+                key={`${f.code}-${f.link_id || f.repo_path || i}`}
+                style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}
+              >
+                <Space wrap size={4}>
+                  <Tag color={f.severity === 'error' ? 'red' : 'gold'} style={{ margin: 0 }}>
+                    {f.severity}
+                  </Tag>
+                  <Text code>{f.code}</Text>
+                  {f.repairable && <Tag color="blue">repairable</Tag>}
+                </Space>
+                <div>
+                  <Text>{f.message}</Text>
+                </div>
+                {f.repo_path && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    repo: {f.repo_path}
+                  </Text>
+                )}
+                {f.local_path && (
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {f.local_path}
+                    </Text>
+                  </div>
+                )}
+              </div>
+            ))}
+          </Space>
+        )}
       </Modal>
 
       {/* apply 计划确认 */}

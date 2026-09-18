@@ -17,6 +17,7 @@ func SetupRouter(
 	entryHandler *handler.EntryHandler,
 	linkHandler *handler.LinkHandler,
 	deviceHandler *handler.DeviceHandler,
+	consistencyHandler *handler.ConsistencyHandler,
 	browseHandler *handler.BrowseHandler,
 	contentHandler *handler.ContentHandler,
 	backupHandler *handler.BackupHandler,
@@ -56,6 +57,10 @@ func SetupRouter(
 		v1.GET("/repos/:id/entries/:entryId", entryHandler.Get)
 		v1.POST("/repos/:id/entries/:entryId/switch", entryHandler.Switch)
 		v1.DELETE("/repos/:id/entries/:entryId", entryHandler.Delete)
+
+		// 一致性巡检
+		v1.GET("/repos/:id/consistency", consistencyHandler.Audit)
+		v1.POST("/repos/:id/consistency/repair", consistencyHandler.Repair)
 
 		// 链接
 		v1.POST("/repos/:id/links/bulk", linkHandler.Bulk)

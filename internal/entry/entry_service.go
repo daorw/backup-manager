@@ -192,7 +192,7 @@ func (s *Service) Remove(repoID, entryID, mode, linkID string) error {
 		}
 		e.Links = kept
 		if len(e.Links) > 0 {
-			return s.save(repo, m, "entry: unlink "+e.RepoPath)
+			return s.saveConverging(repo, m, "entry: unlink "+e.RepoPath)
 		}
 
 	case RemoveModeMoveBack:
@@ -230,7 +230,7 @@ func (s *Service) Remove(repoID, entryID, mode, linkID string) error {
 	}
 
 	m.Entries = removeEntry(m.Entries, entryID)
-	return s.save(repo, m, "entry: remove "+e.RepoPath)
+	return s.saveConverging(repo, m, "entry: remove "+e.RepoPath)
 }
 
 // removeEntry 从列表中移除指定条目。

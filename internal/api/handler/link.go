@@ -52,7 +52,7 @@ func (h *LinkHandler) Bulk(c *gin.Context) {
 
 // Repair 处理 POST /api/v1/repos/:id/entries/:entryId/links/:linkId/repair
 func (h *LinkHandler) Repair(c *gin.Context) {
-	view, err := h.svc.Repair(c.Param("id"), c.Param("entryId"), c.Param("linkId"))
+	view, err := h.svc.RepairLink(c.Param("id"), c.Param("entryId"), c.Param("linkId"))
 	if err != nil {
 		respondError(c, err)
 		return

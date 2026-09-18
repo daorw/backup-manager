@@ -104,7 +104,7 @@ GET    /api/v1/repos/:id/consistency             → ConsistencyHandler.Audit
 POST   /api/v1/repos/:id/consistency/repair      → ConsistencyHandler.Repair
 
 GET    /api/v1/browse         ?path=...         → BrowseHandler.Browse       // ★ P0-2: 安全修复
-GET    /api/v1/browse/allowed-roots              → BrowseHandler.AllowedRoots
+GET    /api/v1/browse/home                       → BrowseHandler.Home          // 默认起始目录
 
 GET    /api/v1/repos/:id/tree    ?path=...        → ContentHandler.Tree
 GET    /api/v1/repos/:id/preview ?path=...        → ContentHandler.Preview
@@ -1157,7 +1157,8 @@ export interface Entry {
 | `adopt` 破坏原始文件 | 明确确认：「文件将被移入仓库，此位置将被替换为软链接」；任一失败路径全量回滚；跨文件系统路径下先校验大小再删除源文件 |
 | 链接覆盖无关数据 | 添加链接时拒绝已存在的非空路径；`apply` 从不覆盖 —— `occupied` 条目只报告，不强制 |
 | `purge` 删除内容 | 需输入 `repo_path` 确认；上一个提交可恢复；操作前先报告其余所有链接 |
-| 路径遍历 | 所有用户路径过 `util.SafeResolve` / `util.SafeJoin`；本机路径限定在 AllowedRoots（`$HOME` + 仓库根目录） |
+| 路径遍历 | 所有用户路径过 `util.SafeResolve` / `util.SafeJoin`；浏览无根目录白名单（仅 `~` 展开 + Clean/Abs/EvalSymlinks） |
+| 内容跳出 `data/` | 新建条目以 `<repo>/data` 为根：`resolveRepoPathIn` 拒绝绝对路径与 `..`，并在解析软链接后复核仍在 `data/` 内；内容树/预览/保存走同一个根 |
 | 自引用 | 拒绝位于 `repo.Path` 内的 `local_path` |
 | 危险目标 | 拒绝把 `/`、`$HOME`、仓库根目录本身作为 `local_path` |
 | 软链接成环 | 创建任何链接前用 `util.ResolveNestedSymlink` 解析候选链；检测到环即拒绝 |

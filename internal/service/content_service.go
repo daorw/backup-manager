@@ -64,18 +64,22 @@ func NewContentService(s *store.Store, g *git.GitEngine, repoMu *util.RepoMutexM
 }
 
 // resolve 把 data/ 下的相对路径解析为安全的绝对路径。
+//
+// 仓库内容的根永远是 data/：解析软链接后若落在 data/ 之外就拒绝，
+// 因此浏览、预览与保存都不可能突破 data/ 的范围。
 func (s *ContentService) resolve(repoID, relPath string) (string, error) {
 	repo, err := s.store.GetRepo(repoID)
 	if err != nil {
 		return "", err
 	}
+	dataRoot := filepath.Join(repo.Path, dataDirName)
 	clean := filepath.Clean(relPath)
 	if relPath == "" || clean == "." {
-		return filepath.Join(repo.Path, dataDirName), nil
+		return dataRoot, nil
 	}
-	resolved, err := util.SafeJoin(filepath.Join(repo.Path, dataDirName), clean)
+	resolved, err := util.SafeResolve(dataRoot, clean)
 	if err != nil {
-		return "", fmt.Errorf("invalid path: %w", err)
+		return "", fmt.Errorf("path must stay inside the repository data/ directory: %w", err)
 	}
 	return resolved, nil
 }

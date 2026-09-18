@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"backup-manager/internal/service"
 
@@ -18,23 +19,29 @@ func NewBrowseHandler(browserSvc *service.BrowserService) *BrowseHandler {
 	return &BrowseHandler{browserSvc: browserSvc}
 }
 
-// AllowedRoots handles GET /api/v1/browse/allowed-roots
-func (h *BrowseHandler) AllowedRoots(c *gin.Context) {
-	roots := h.browserSvc.AllowedRoots()
-	if roots == nil {
-		roots = []string{}
-	}
-	c.JSON(http.StatusOK, gin.H{"data": roots})
+// Home handles GET /api/v1/browse/home — the default starting directory.
+func (h *BrowseHandler) Home(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": h.browserSvc.Home()})
 }
 
 // Browse handles GET /api/v1/browse
+// Query params:
+//   - path: directory to list (default: home directory; `~` is expanded)
+//   - include_hidden: "true" to include dot-files/dot-directories
 func (h *BrowseHandler) Browse(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		path = "."
+		path = h.browserSvc.Home()
 	}
 
-	entries, err := h.browserSvc.Browse(path)
+	includeHidden := false
+	if raw := c.Query("include_hidden"); raw != "" {
+		if v, err := strconv.ParseBool(raw); err == nil {
+			includeHidden = v
+		}
+	}
+
+	entries, err := h.browserSvc.Browse(path, includeHidden)
 	if err != nil {
 		respondError(c, err)
 		return

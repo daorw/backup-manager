@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Modal,
   Tree,
@@ -9,15 +9,18 @@ import {
   message,
   Empty,
   Typography,
+  Switch,
+  Tooltip,
 } from 'antd';
 import {
   FolderOutlined,
   FileOutlined,
   ReloadOutlined,
   ArrowUpOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { browsePath, fetchAllowedRoots } from '../../api/client';
+import { browsePath, fetchHomeDir } from '../../api/client';
 import type { BrowseEntry } from '../../types';
 
 interface FileBrowserNode extends DataNode {
@@ -37,8 +40,7 @@ interface DirectoryPickerModalProps {
   initialPath?: string;
 }
 
-async function loadChildren(nodePath: string): Promise<FileBrowserNode[]> {
-  const entries: BrowseEntry[] = await browsePath(nodePath);
+function toNodes(entries: BrowseEntry[]): FileBrowserNode[] {
   return entries
     .map((entry) => ({
       key: entry.path,
@@ -56,6 +58,14 @@ async function loadChildren(nodePath: string): Promise<FileBrowserNode[]> {
     });
 }
 
+async function loadChildren(
+  nodePath: string,
+  includeHidden: boolean
+): Promise<FileBrowserNode[]> {
+  const entries: BrowseEntry[] = await browsePath(nodePath, includeHidden);
+  return toNodes(entries);
+}
+
 const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   open,
   onClose,
@@ -68,47 +78,53 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
-  const [roots, setRoots] = useState<string[]>([]);
+  const [homeDir, setHomeDir] = useState<string>('/');
   const [currentPathInput, setCurrentPathInput] = useState<string>('');
+  const [showHidden, setShowHidden] = useState(false);
+  const [pathWarning, setPathWarning] = useState<string>('');
+  // 供 loadRoot 读取，避免因 showHidden 变化触发 useEffect 重新初始化
+  const showHiddenRef = useRef(false);
+
+  useEffect(() => {
+    showHiddenRef.current = showHidden;
+  }, [showHidden]);
+
+  /** 载入某个目录的内容，作为树的根。失败时保留用户输入的路径（仍可手动使用）。 */
+  const loadDir = useCallback(
+    async (target: string, includeHidden: boolean) => {
+      setLoading(true);
+      try {
+        const nodes = await loadChildren(target, includeHidden);
+        setTreeData(nodes);
+        setExpandedKeys([]);
+        setPathWarning('');
+        return true;
+      } catch (err) {
+        setTreeData([]);
+        setPathWarning(
+          err instanceof Error ? err.message : 'Cannot open this directory'
+        );
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   const loadRoot = useCallback(async () => {
-    setLoading(true);
+    let home = '/';
     try {
-      const allowedRoots = await fetchAllowedRoots();
-      setRoots(allowedRoots);
-
-      let startPath = initialPath;
-      if (!startPath || startPath === '') {
-        startPath = allowedRoots.length > 0 ? allowedRoots[0] : '/';
-      }
-
-      setCurrentPathInput(startPath);
-
-      try {
-        const nodes = await loadChildren(startPath);
-        setTreeData(nodes);
-      } catch {
-        if (allowedRoots.length > 0) {
-          const rootNodes = allowedRoots.map((root) => ({
-            key: root,
-            title: root,
-            path: root,
-            isLeaf: false,
-            nodeType: 'directory' as const,
-            icon: <FolderOutlined />,
-            children: [] as FileBrowserNode[],
-          }));
-          setTreeData(rootNodes);
-        } else {
-          setTreeData([]);
-        }
-      }
+      home = await fetchHomeDir();
     } catch {
-      setTreeData([]);
-    } finally {
-      setLoading(false);
+      home = '/';
     }
-  }, [initialPath]);
+    setHomeDir(home);
+
+    const startPath = initialPath && initialPath !== '' ? initialPath : home;
+    setCurrentPathInput(startPath);
+    await loadDir(startPath, showHiddenRef.current);
+  }, [initialPath, loadDir]);
 
   useEffect(() => {
     if (open) {
@@ -123,7 +139,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       return;
     }
     try {
-      const children = await loadChildren(node.path);
+      const children = await loadChildren(node.path, showHidden);
       setTreeData((prev) => updateTreeNode(prev, node.key, children));
       setCurrentPathInput(node.path);
     } catch (err) {
@@ -164,55 +180,45 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     }
   };
 
+  /** 方式 1：跳转到输入框里的路径（Go / 回车）。 */
   const handleNavigateToPath = async () => {
-    if (!currentPathInput.trim()) return;
-    setLoading(true);
-    try {
-      const info = await browsePath(currentPathInput);
-      if (Array.isArray(info)) {
-        setTreeData(info.map((entry) => ({
-          key: entry.path,
-          title: entry.name,
-          path: entry.path,
-          isLeaf: entry.type === 'file',
-          nodeType: entry.type,
-          icon: entry.type === 'directory' ? <FolderOutlined /> : <FileOutlined />,
-          children: entry.type === 'directory' ? [] : undefined,
-        })));
-        setExpandedKeys([]);
-      }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Invalid path');
-    } finally {
-      setLoading(false);
+    const target = currentPathInput.trim();
+    if (!target) return;
+    setCurrentPathInput(target);
+    await loadDir(target, showHidden);
+  };
+
+  /** 方式 1：直接使用用户填写的完整路径，不要求能在树里打开（路径可能尚不存在）。 */
+  const useTypedPath = () => {
+    const target = currentPathInput.trim();
+    if (!target) {
+      message.warning('Please enter a path first');
+      return;
     }
+    onSelect(target);
+    onClose();
   };
 
   const handleGoUp = async () => {
     if (!currentPathInput || currentPathInput === '/') return;
-    const parentPath = currentPathInput.substring(0, currentPathInput.lastIndexOf('/')) || '/';
+    const parentPath =
+      currentPathInput.substring(0, currentPathInput.lastIndexOf('/')) || '/';
     setCurrentPathInput(parentPath);
-    setLoading(true);
-    try {
-      const info = await browsePath(parentPath);
-      if (Array.isArray(info)) {
-        setTreeData(info.map((entry) => ({
-          key: entry.path,
-          title: entry.name,
-          path: entry.path,
-          isLeaf: entry.type === 'file',
-          nodeType: entry.type,
-          icon: entry.type === 'directory' ? <FolderOutlined /> : <FileOutlined />,
-          children: entry.type === 'directory' ? [] : undefined,
-        })));
-        setExpandedKeys([]);
-        setSelectedPath(parentPath);
-      }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to navigate');
-    } finally {
-      setLoading(false);
-    }
+    const ok = await loadDir(parentPath, showHidden);
+    if (ok) setSelectedPath(parentPath);
+  };
+
+  const handleGoHome = async () => {
+    setCurrentPathInput(homeDir);
+    const ok = await loadDir(homeDir, showHidden);
+    if (ok) setSelectedPath(homeDir);
+  };
+
+  /** 隐藏文件开关：切换后按当前目录重新载入。 */
+  const toggleHidden = async (checked: boolean) => {
+    setShowHidden(checked);
+    const target = currentPathInput.trim() || homeDir;
+    await loadDir(target, checked);
   };
 
   const handleConfirm = () => {
@@ -224,27 +230,20 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     onClose();
   };
 
-  const selectCurrentDir = () => {
-    if (!currentPathInput) {
-      message.warning('No directory selected');
-      return;
-    }
-    onSelect(currentPathInput);
-    onClose();
-  };
-
   return (
     <Modal
       title={title}
       open={open}
       onCancel={onClose}
-      width={640}
+      width={680}
       footer={
         <Space>
           <Button onClick={onClose}>Cancel</Button>
-          {mode !== 'file' && (
-            <Button onClick={selectCurrentDir}>Use Current Directory</Button>
-          )}
+          <Tooltip title="Use the path typed above as-is (it does not need to exist yet)">
+            <Button onClick={useTypedPath} disabled={!currentPathInput.trim()}>
+              Use Typed Path
+            </Button>
+          </Tooltip>
           <Button type="primary" onClick={handleConfirm} disabled={!selectedPath}>
             Select
           </Button>
@@ -253,15 +252,42 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Space.Compact style={{ width: '100%' }}>
-          <Button icon={<ArrowUpOutlined />} onClick={handleGoUp} title="Go to parent directory" />
+          <Tooltip title="Parent directory">
+            <Button icon={<ArrowUpOutlined />} onClick={handleGoUp} />
+          </Tooltip>
+          <Tooltip title={`Home (${homeDir})`}>
+            <Button onClick={handleGoHome}>~</Button>
+          </Tooltip>
           <Input
             value={currentPathInput}
             onChange={(e) => setCurrentPathInput(e.target.value)}
             onPressEnter={handleNavigateToPath}
-            placeholder="Enter path and press Enter to navigate"
+            placeholder="Type a full path (e.g. /Users/me/notes) and press Enter"
           />
           <Button onClick={handleNavigateToPath}>Go</Button>
+          <Tooltip title="Reload">
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => loadDir(currentPathInput.trim() || homeDir, showHidden)}
+            />
+          </Tooltip>
         </Space.Compact>
+
+        <Space>
+          <Switch
+            checked={showHidden}
+            onChange={toggleHidden}
+            checkedChildren={<EyeOutlined />}
+            unCheckedChildren={<EyeOutlined />}
+            size="small"
+          />
+          <Typography.Text style={{ fontSize: 12 }}>Show hidden files</Typography.Text>
+          {pathWarning && (
+            <Typography.Text type="warning" style={{ fontSize: 12 }}>
+              {pathWarning}
+            </Typography.Text>
+          )}
+        </Space>
 
         <div
           style={{
@@ -278,7 +304,11 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
               <Spin />
             </div>
           ) : treeData.length === 0 ? (
-            <Empty description="No entries found" />
+            <Empty
+              description={
+                pathWarning ? 'Directory cannot be listed' : 'No entries found'
+              }
+            />
           ) : (
             <Tree
               treeData={treeData}
@@ -294,9 +324,10 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
         </div>
 
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {mode === 'directory' && 'Click a directory to select it, or navigate to a directory and click "Use Current Directory".'}
-          {mode === 'file' && 'Click a file to select it.'}
-          {mode === 'both' && 'Click a file or directory to select it.'}
+          Two ways to choose: type a full path above and click &quot;Use Typed Path&quot;, or
+          browse the tree and click a node then &quot;Select&quot;.
+          {mode === 'directory' && ' (directories only)'}
+          {mode === 'file' && ' (files only)'}
         </Typography.Text>
       </Space>
     </Modal>

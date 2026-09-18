@@ -105,7 +105,7 @@ GET    /api/v1/repos/:id/consistency             → ConsistencyHandler.Audit
 POST   /api/v1/repos/:id/consistency/repair      → ConsistencyHandler.Repair
 
 GET    /api/v1/browse         ?path=...         → BrowseHandler.Browse       // ★ P0-2: Security Fix
-GET    /api/v1/browse/allowed-roots              → BrowseHandler.AllowedRoots
+GET    /api/v1/browse/home                       → BrowseHandler.Home          // 默认起始目录
 
 GET    /api/v1/repos/:id/tree    ?path=...        → ContentHandler.Tree
 GET    /api/v1/repos/:id/preview ?path=...        → ContentHandler.Preview
@@ -1159,7 +1159,8 @@ export interface Entry {
 | `adopt` destroys the original file | Explicit confirmation: "the file will be moved into the repository and this location replaced by a symlink"; full rollback on every failure path; in the cross-filesystem path the source is removed only after the size is verified |
 | A link overwrites unrelated data | Adding a link refuses an existing non-empty path; `apply` never overwrites — `occupied` items are reported, not forced |
 | `purge` deletes content | Requires typing the `repo_path`; the previous commit restores it; every other link is reported before the operation |
-| Path traversal | `util.SafeResolve` / `util.SafeJoin` on every user path; local paths limited to AllowedRoots (`$HOME` + repo roots) |
+| Path traversal | `util.SafeResolve` / `util.SafeJoin` on every user path; browsing has no root whitelist (`~` expansion + Clean/Abs/EvalSymlinks only) |
+| Content escaping `data/` | New entries are rooted at `<repo>/data` — `resolveRepoPathIn` rejects absolute paths and `..` and re-checks containment after symlink resolution; content tree/preview/save resolve through the same root |
 | Self reference | `local_path` inside `repo.Path` is rejected |
 | Dangerous targets | `/`, `$HOME`, and the repository root itself are rejected as `local_path` |
 | Symlink loops | A candidate chain is resolved with `util.ResolveNestedSymlink` before any link is created; cycles are rejected |

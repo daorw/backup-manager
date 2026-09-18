@@ -74,7 +74,7 @@ backup-manager/
 │   │       ├── link.go              # 链接：add / bulk / repair / readopt / remove
 │   │       ├── device.go            # 设备：current / register / rename / delete / apply
 │   │       ├── consistency.go       # 一致性巡检 + 修复
-│   │       ├── browse.go            # 本地文件浏览（安全限定 AllowedRoots）
+│   │       ├── browse.go            # 本地文件浏览（任意路径 + 隐藏文件开关）
 │   │       ├── content.go           # tree / preview / save / changes
 │   │       ├── backup.go            # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go              # Git 认证管理
@@ -95,7 +95,7 @@ backup-manager/
 │   │   ├── repo_service.go          # 仓库生命周期（创建/删除/配置/Git Init）
 │   │   ├── backup_service.go        # 备份执行（git add/commit/push）
 │   │   ├── auth_service.go          # Git 认证管理（加密存储/注入）
-│   │   ├── browser_service.go       # 安全文件浏览（AllowedRoots 机制）
+│   │   ├── browser_service.go       # 文件浏览（任意路径 + 隐藏文件开关）
 │   │   ├── content_service.go       # 内容树 / 预览 / 保存（直接读写 data/）
 │   │   └── rollback_service.go      # 内容回滚 + 单文件恢复 + 提交文件预览
 │   │
@@ -253,8 +253,8 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 ### 文件操作
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | /browse?path=... | 浏览本地文件系统 |
-| GET | /browse/allowed-roots | 列出可浏览根目录 |
+| GET | /browse?path=...&include_hidden=true | 浏览任意本地目录（`~` 展开，可选隐藏文件） |
+| GET | /browse/home | 浏览默认起始目录（服务端家目录） |
 | GET | /repos/:id/tree?path=... | 列出 data/ 下的条目及挂载徽标 |
 | GET | /repos/:id/preview?path=... | 预览文件内容 |
 | PUT | /repos/:id/save | 保存到 data/ |
@@ -309,8 +309,9 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 
 - `EvalSymlinks` 失败时仅 `fs.ErrNotExist` 可降级，其他错误直接拒绝
 - 预览文件限制 ≤ 10MB，最大 5 并发
-- 浏览文件限定在 AllowedRoots（$HOME + repo 根目录）
-- 链接的 `local_path` 同样限定在 AllowedRoots 内；拒绝位于 `repo.Path` 内部的自引用；拒绝把 `/`、`$HOME`、仓库根目录本身作为目标
+- 浏览文件**无根目录白名单**：服务端可见的任意路径都可浏览，仅做 `~` 展开 + Clean/Abs/软链接归一；隐藏文件由 `include_hidden` 参数控制
+- 链接的 `local_path`：拒绝位于 `repo.Path` 内部的自引用；拒绝把 `/`、`$HOME`、仓库根目录本身作为目标
+- **新建备份文件/目录时内容必须落在 `<repo>/data/`**：条目 `repo_path` 起点固定为 `data/`，拒绝绝对路径与任何 `..`，并在解析软链接后校验仍在 `data/` 内（`resolveRepoPathIn`）；仓库内容的浏览/预览/保存同样以 `data/` 为根
 - 建链接前用 `util.ResolveNestedSymlink` 解析候选链，检测到环即拒绝
 
 ### 3. Git 认证加密

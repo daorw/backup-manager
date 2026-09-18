@@ -88,6 +88,42 @@ func TestAdoptMovesContentAndCreatesLink(t *testing.T) {
 	}
 }
 
+// TestAdoptRejectsRepoPathOutsideData 验证新建条目时内容不得落到 data/ 之外。
+func TestAdoptRejectsRepoPathOutsideData(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	local := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, local, "hello")
+
+	for _, p := range []string{
+		"../../escape.txt",
+		"/etc/passwd",
+		"a/../../escape.txt",
+		"..\\escape.txt",
+	} {
+		if _, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: p}); err == nil {
+			t.Fatalf("expected repo_path %q to be rejected", p)
+		}
+	}
+}
+
+// TestAdoptRejectsRepoPathEscapingViaSymlink 验证 data/ 内的软链接也不能把内容带出仓库。
+func TestAdoptRejectsRepoPathEscapingViaSymlink(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(repo.Path, "data", "escape")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	local := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, local, "hello")
+
+	if _, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "escape/notes.txt"}); err == nil {
+		t.Fatal("expected repo_path escaping data/ through a symlink to be rejected")
+	}
+}
+
 // TestAdoptRejectsOverlappingRepoPath 验证 R-2：条目之间不得重叠。
 func TestAdoptRejectsOverlappingRepoPath(t *testing.T) {
 	svc, repo := newTestService(t)

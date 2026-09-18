@@ -71,7 +71,7 @@ func SetupRouter(
 
 		// 本机文件浏览
 		v1.GET("/browse", browseHandler.Browse)
-		v1.GET("/browse/allowed-roots", browseHandler.AllowedRoots)
+		v1.GET("/browse/home", browseHandler.Home)
 
 		// 仓库内容
 		v1.GET("/repos/:id/tree", contentHandler.Tree)

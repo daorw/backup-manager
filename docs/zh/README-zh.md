@@ -50,7 +50,7 @@
 - **内容回滚** — 选择历史提交版本，把 `data/` 恢复到指定版本（全量、按条目、或单文件）
 - **单文件恢复** — 预览和恢复历史提交中的单个文件
 - **Git 集成** — 远程仓库配置、SSH/HTTPS 认证管理（AES-256-GCM 加密存储）
-- **本地文件浏览** — 安全限定在用户主目录和仓库根目录，防止路径穿越
+- **本地文件浏览** — 无根目录白名单，服务端可见的任意路径都可浏览；可显示隐藏文件，也可直接填写完整路径
 - **定时调度** — 基于 cron 的自动备份，应用启动时自动加载，配置变更时动态注册/注销
 - **系统托盘** — macOS 菜单栏 / 系统托盘图标，支持启动/停止服务器控制
 - **前后端一体** — 单二进制文件，一键启动
@@ -161,8 +161,8 @@ go build -o backup-manager .
 | 内容 | `GET /repos/:id/preview?path=...` | 预览文件内容 |
 | 内容 | `PUT /repos/:id/save` | 保存到 `data/` |
 | 内容 | `GET /repos/:id/changes` | `data/` 下的未提交变更（`git status`） |
-| 浏览 | `GET /browse?path=...` | 浏览本地文件系统 |
-| 浏览 | `GET /browse/allowed-roots` | 列出可浏览根目录 |
+| 浏览 | `GET /browse?path=...&include_hidden=true` | 浏览任意本地目录（展开 `~`，可选显示隐藏文件） |
+| 浏览 | `GET /browse/home` | 浏览默认起始目录（服务端家目录） |
 | 备份 | `POST /repos/:id/backup` | 触发备份（可指定 commit_message） |
 | 备份 | `GET /repos/:id/backup/history?limit=&offset=` | 备份历史（分页） |
 | 备份 | `POST /repos/:id/push` | 推送到远程仓库（可选 force 参数） |
@@ -201,7 +201,7 @@ go build -o backup-manager .
 
 ## 安全设计
 
-- **路径安全**: 四层校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越；本机链接路径限定在允许根目录（`$HOME` + 仓库根目录）内，并拒绝指向仓库内部的自引用
+- **路径安全**: 四层校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越；浏览无根目录白名单（服务端可见的任意路径，展开 `~`，隐藏文件可选显示）；链接 `local_path` 拒绝指向仓库内部的自引用；新建/写入的内容一律限定在 `<repo>/data/` 内（拒绝绝对路径与 `..`，解析软链接后再校验）
 - **链接一致性**: 每次写入前按 R-1..R-3 校验清单（链接只绑定完整条目；条目不重叠；链接不在目录条目内部）；文件无法解析时阻止写入，不合规时由巡检报告，而不是静默重写
 - **清单原子写**: `manifest.json.tmp` → `fsync` → `os.Rename`
 - **默认非破坏性**: 建链接拒绝已占用路径；`apply` 从不覆盖；删除内容需输入路径二次确认，且删除前先提交，因此 `git revert` 可恢复
@@ -239,7 +239,7 @@ backup-manager/
 │   │       ├── link.go         # 链接 add / bulk / repair / remove
 │   │       ├── device.go       # 设备 current / register / rename / delete / apply
 │   │       ├── consistency.go  # 一致性巡检 + 修复
-│   │       ├── browse.go       # 本地文件浏览 + 允许根目录
+│   │       ├── browse.go       # 本地文件浏览（任意路径 + 隐藏文件）
 │   │       ├── content.go      # tree / preview / save / changes
 │   │       ├── backup.go       # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go         # Git 认证管理
@@ -258,7 +258,7 @@ backup-manager/
 │   │   ├── repo_service.go     # 仓库生命周期
 │   │   ├── backup_service.go   # 备份执行（git add/commit/push）
 │   │   ├── auth_service.go     # Git 认证管理
-│   │   ├── browser_service.go  # 安全文件浏览
+│   │   ├── browser_service.go  # 本地文件浏览（任意路径 + 隐藏文件）
 │   │   ├── content_service.go  # 内容树 / 预览 / 保存
 │   │   └── rollback_service.go # 回滚逻辑
 │   ├── store/                  # 数据持久化层

@@ -297,14 +297,44 @@ func findSymlinks(root string) ([]string, error) {
 }
 
 // resolveRepoPath 校验用户给出的仓库相对路径，返回斜杠分隔的干净形式。
+//
+// 起点永远是仓库的 data/ 目录：绝对路径与任何 ".." 段都被拒绝，
+// 因此条目内容不可能落到 data/ 之外。
 func resolveRepoPath(p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("repo_path is required")
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(p))
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") ||
-		strings.HasPrefix(cleaned, "/") {
-		return "", fmt.Errorf("invalid repo_path: %s", p)
+	// 先统一分隔符，避免 "a\..\b" 这类写法绕过 filepath.Clean
+	normalized := strings.ReplaceAll(p, "\\", "/")
+	if strings.HasPrefix(normalized, "/") {
+		return "", fmt.Errorf("invalid repo_path %q: must be relative to data/", p)
+	}
+	for _, seg := range strings.Split(normalized, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("invalid repo_path %q: must stay inside data/", p)
+		}
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(normalized))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("invalid repo_path %q: must stay inside data/", p)
+	}
+	return cleaned, nil
+}
+
+// resolveRepoPathIn 在 resolveRepoPath 之上再解析一次真实路径：
+// 结果必须仍位于 <repoRoot>/data 之内，防止借 data/ 下的软链接跳出仓库。
+//
+// 新建条目（即新建备份文件/目录）是唯一会往 data/ 写入新内容的入口，
+// 所以这里必须做最严的包含性校验。
+func resolveRepoPathIn(repoRoot, p string) (string, error) {
+	cleaned, err := resolveRepoPath(p)
+	if err != nil {
+		return "", err
+	}
+	dataRoot := filepath.Join(repoRoot, "data")
+	if _, err := util.SafeResolve(dataRoot, cleaned); err != nil {
+		// 带上 "invalid"，让 respondError 归为 400（这是用户输入问题，不是服务端故障）
+		return "", fmt.Errorf("invalid repo_path %q: must stay inside the repository data/ directory", p)
 	}
 	return cleaned, nil
 }

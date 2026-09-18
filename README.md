@@ -52,7 +52,7 @@ The system refuses anything else at creation time and reports drift in the consi
 - **Content Rollback** — Select a historical commit and restore `data/` to that version (full, per-entry, or single file)
 - **File-Level Restore** — Preview and restore individual files from historical commits
 - **Git Integration** — Remote repo config, SSH/HTTPS auth management (AES-256-GCM encrypted storage)
-- **Local File Browsing** — Safely scoped to home directory and repo root, prevents path traversal
+- **Local File Browsing** — Any path visible to the server can be browsed (no root whitelist); optional hidden-file display, and a path can also be typed in directly
 - **Scheduled Backups** — Cron-based auto-backup, auto-load on startup, dynamic register/unregister on config change
 - **System Tray** — macOS menu bar / system tray icon, server start/stop control
 - **All-in-One Binary** — Single binary, one-click launch
@@ -163,8 +163,8 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 | Content | `GET /repos/:id/preview?path=` | Preview file content |
 | Content | `PUT /repos/:id/save` | Save to `data/` |
 | Content | `GET /repos/:id/changes` | Uncommitted changes under `data/` (`git status`) |
-| Browse | `GET /browse?path=...` | Browse local filesystem |
-| Browse | `GET /browse/allowed-roots` | List allowed browsing roots |
+| Browse | `GET /browse?path=...&include_hidden=true` | Browse any local directory (`~` expanded, hidden files optional) |
+| Browse | `GET /browse/home` | Default browsing directory (server home) |
 | Backup | `POST /repos/:id/backup` | Trigger backup (optional `commit_message` body) |
 | Backup | `GET /repos/:id/backup/history?limit=&offset=` | Backup history (paginated) |
 | Backup | `POST /repos/:id/push` | Push to remote (optional `force` body) |
@@ -203,7 +203,7 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 
 ## Security Design
 
-- **Path Safety**: Four-layer validation (Clean→Abs→EvalSymlinks→Prefix) prevents path traversal; local link paths are confined to the allowed roots (`$HOME` + repo roots), and self-reference into the repository is rejected
+- **Path Safety**: Four-layer validation (Clean→Abs→EvalSymlinks→Prefix) prevents path traversal; browsing has no root whitelist (any server-visible path, `~` expanded, hidden files opt-in); link `local_path` rejects self-reference into the repository; content created or written is always confined to `<repo>/data/` (absolute paths and `..` rejected, symlinks resolved before the check)
 - **Link Consistency**: the manifest is validated before every write against R-1..R-3 (links bind whole entries; no overlapping entries; no link inside a directory entry); an unparsable file blocks writes, and an invalid one is reported by the audit instead of being silently rewritten
 - **Atomic Manifest Writes**: `manifest.json.tmp` → `fsync` → `os.Rename`
 - **Non-Destructive by Default**: linking refuses an occupied path; `apply` never overwrites; deleting content requires typed confirmation and is preceded by a commit so `git revert` restores it
@@ -241,7 +241,7 @@ backup-manager/
 │   │       ├── link.go         # Link add / bulk / repair / remove
 │   │       ├── device.go       # Device current / register / rename / delete / apply
 │   │       ├── consistency.go  # Consistency audit + repair
-│   │       ├── browse.go       # Local file browsing + allowed roots
+│   │       ├── browse.go       # Local file browsing (any path + hidden files)
 │   │       ├── content.go      # Tree / preview / save / changes
 │   │       ├── backup.go       # Backup trigger + history + push
 │   │       ├── auth.go         # Git auth management
@@ -260,7 +260,7 @@ backup-manager/
 │   │   ├── repo_service.go     # Repo lifecycle
 │   │   ├── backup_service.go   # Backup execution (git add/commit/push)
 │   │   ├── auth_service.go     # Git auth management
-│   │   ├── browser_service.go  # Safe file browsing
+│   │   ├── browser_service.go  # Local file browsing (any path + hidden files)
 │   │   ├── content_service.go  # Content tree / preview / save
 │   │   └── rollback_service.go # Rollback logic
 │   ├── store/                  # Data persistence layer

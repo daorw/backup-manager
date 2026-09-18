@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"backup-manager/internal/store"
-	"backup-manager/internal/util"
 )
 
 // BrowseEntry represents an entry in a directory listing.
@@ -19,53 +19,67 @@ type BrowseEntry struct {
 	ModifiedAt string `json:"modified_at,omitempty"`
 }
 
-// BrowserService handles filesystem browsing with security boundaries.
+// BrowserService handles filesystem browsing.
+//
+// There is no AllowedRoots whitelist anymore: any path the server process can
+// see is browsable. The only normalisation applied is `~` expansion, Clean and
+// (best-effort) symlink evaluation, so callers always get back an absolute,
+// canonical path.
 type BrowserService struct {
-	store        *store.Store
-	allowedRoots []string
+	store   *store.Store
+	homeDir string
 }
 
 // NewBrowserService creates a new BrowserService.
-// allowedRoots are additional directories that can be browsed (e.g., $HOME).
-func NewBrowserService(s *store.Store, additionalRoots ...string) *BrowserService {
+// homeDir is the default / fallback directory (also used to expand `~`).
+func NewBrowserService(s *store.Store, homeDir string) *BrowserService {
 	return &BrowserService{
-		store:        s,
-		allowedRoots: additionalRoots,
+		store:   s,
+		homeDir: homeDir,
 	}
 }
 
-// Browse lists the contents of a directory, with security checks.
-// Only directories within allowed roots can be browsed.
-func (s *BrowserService) Browse(browsePath string) ([]BrowseEntry, error) {
-	if browsePath == "" {
-		browsePath = "."
+// Home returns the default starting directory for browsing.
+func (s *BrowserService) Home() string {
+	if s.homeDir != "" {
+		return s.homeDir
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		return h
+	}
+	return string(filepath.Separator)
+}
+
+// Browse lists the contents of a directory.
+// includeHidden controls whether dot-files/dot-directories are returned.
+func (s *BrowserService) Browse(browsePath string, includeHidden bool) ([]BrowseEntry, error) {
+	if strings.TrimSpace(browsePath) == "" {
+		browsePath = s.Home()
 	}
 
-	// Build the list of allowed roots: repos' root paths + additional roots
-	roots := s.buildAllowedRoots()
-
-	// Resolve the browse path safely
-	resolved, err := s.resolveBrowsePath(browsePath, roots)
-	if err != nil {
-		return nil, err
-	}
+	resolved := s.resolvePath(browsePath)
 
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("cannot access path: %w", err)
+		return nil, fmt.Errorf("cannot access path %q: %w", browsePath, err)
 	}
 
 	if !info.IsDir() {
-		return nil, fmt.Errorf("path is not a directory")
+		return nil, fmt.Errorf("path is not a directory: %s", resolved)
 	}
 
 	entries, err := os.ReadDir(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read directory: %w", err)
+		return nil, fmt.Errorf("failed to read directory %q: %w", resolved, err)
 	}
 
 	var result []BrowseEntry
 	for _, entry := range entries {
+		// Skip hidden files/directories unless explicitly requested
+		if !includeHidden && isHidden(entry.Name()) {
+			continue
+		}
+
 		e := BrowseEntry{
 			Name: entry.Name(),
 			Path: filepath.Join(resolved, entry.Name()),
@@ -80,11 +94,6 @@ func (s *BrowserService) Browse(browsePath string) ([]BrowseEntry, error) {
 				e.Size = fi.Size()
 				e.ModifiedAt = fi.ModTime().Format("2006-01-02T15:04:05Z07:00")
 			}
-		}
-
-		// Skip hidden files/directories
-		if len(entry.Name()) > 0 && entry.Name()[0] == '.' {
-			continue
 		}
 
 		result = append(result, e)
@@ -104,61 +113,29 @@ func (s *BrowserService) Browse(browsePath string) ([]BrowseEntry, error) {
 	return result, nil
 }
 
-// buildAllowedRoots collects all directories that can be browsed.
-func (s *BrowserService) buildAllowedRoots() []string {
-	rootSet := make(map[string]bool)
+// resolvePath normalises a user-provided path into an absolute path:
+// expands a leading `~`, makes it absolute (relative to the home directory),
+// cleans it, and evaluates symlinks when the path exists.
+func (s *BrowserService) resolvePath(userPath string) string {
+	p := strings.TrimSpace(userPath)
 
-	// Include additional roots (e.g., $HOME)
-	for _, r := range s.allowedRoots {
-		if r != "" {
-			abs, err := filepath.Abs(r)
-			if err == nil {
-				rootSet[abs] = true
-			}
-		}
+	if p == "~" || strings.HasPrefix(p, "~"+string(filepath.Separator)) {
+		p = filepath.Join(s.Home(), strings.TrimPrefix(p, "~"))
 	}
 
-	// Include repo root directories
-	repos, err := s.store.ListRepos()
-	if err == nil {
-		for _, repo := range repos {
-			rootSet[repo.Path] = true
-		}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(s.Home(), p)
 	}
 
-	var roots []string
-	for r := range rootSet {
-		roots = append(roots, r)
+	cleaned := filepath.Clean(p)
+
+	if real, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return real
 	}
-	return roots
+	return cleaned
 }
 
-// AllowedRoots returns the list of directories that can be browsed.
-func (s *BrowserService) AllowedRoots() []string {
-	return s.buildAllowedRoots()
-}
-
-// resolveBrowsePath resolves a user-provided path against all allowed roots.
-func (s *BrowserService) resolveBrowsePath(userPath string, roots []string) (string, error) {
-	// First try to resolve as-is (absolute or relative to CWD) against each root
-	if filepath.IsAbs(userPath) {
-		cleaned := filepath.Clean(userPath)
-		for _, root := range roots {
-			resolved, err := util.SafeResolve(root, cleaned)
-			if err == nil {
-				return resolved, nil
-			}
-		}
-		return "", fmt.Errorf("path %q is outside allowed browsing roots", userPath)
-	}
-
-	// For relative paths, try each root
-	for _, root := range roots {
-		resolved, err := util.SafeResolve(root, userPath)
-		if err == nil {
-			return resolved, nil
-		}
-	}
-
-	return "", fmt.Errorf("path %q is outside allowed browsing roots", userPath)
+// isHidden reports whether a file name should be treated as hidden.
+func isHidden(name string) bool {
+	return name != "" && name[0] == '.'
 }

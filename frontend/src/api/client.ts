@@ -256,13 +256,17 @@ export async function fetchChanges(repoId: string): Promise<ChangesResult> {
 
 // ── 本机文件浏览 ──────────────────────────────────────────────────────
 
-export async function browsePath(path: string): Promise<BrowseEntry[]> {
-  const { data } = await api.get<BrowseEntry[]>('/browse', { params: { path } });
+/** 浏览本机目录。无白名单限制：任意服务端可见路径均可浏览。 */
+export async function browsePath(path: string, includeHidden = false): Promise<BrowseEntry[]> {
+  const { data } = await api.get<BrowseEntry[]>('/browse', {
+    params: { path, include_hidden: includeHidden },
+  });
   return data;
 }
 
-export async function fetchAllowedRoots(): Promise<string[]> {
-  const { data } = await api.get<string[]>('/browse/allowed-roots');
+/** 浏览对话框的默认起始目录（服务端进程的家目录）。 */
+export async function fetchHomeDir(): Promise<string> {
+  const { data } = await api.get<string>('/browse/home');
   return data;
 }
 

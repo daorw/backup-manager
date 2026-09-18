@@ -101,7 +101,8 @@ func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 	if repoPath == "" {
 		repoPath = filepath.Base(local)
 	}
-	repoPath, err = resolveRepoPath(repoPath)
+	// 起点固定为 data/：解析软链接后不得跳出该目录
+	repoPath, err = resolveRepoPathIn(repo.Path, repoPath)
 	if err != nil {
 		return nil, err
 	}

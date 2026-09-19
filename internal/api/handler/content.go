@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"backup-manager/internal/service"
 
@@ -18,9 +19,19 @@ func NewContentHandler(svc *service.ContentService) *ContentHandler {
 	return &ContentHandler{svc: svc}
 }
 
-// Tree 处理 GET /api/v1/repos/:id/tree?path=
+// Tree 处理 GET /api/v1/repos/:id/tree?path=&include_hidden=
 func (h *ContentHandler) Tree(c *gin.Context) {
-	entries, err := h.svc.Tree(c.Param("id"), c.Query("path"))
+	includeHidden := false
+	if raw := c.Query("include_hidden"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid include_hidden value"})
+			return
+		}
+		includeHidden = value
+	}
+
+	entries, err := h.svc.Tree(c.Param("id"), c.Query("path"), includeHidden)
 	if err != nil {
 		respondError(c, err)
 		return

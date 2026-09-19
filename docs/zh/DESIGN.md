@@ -469,7 +469,7 @@ backup-manager/
 ### 7.1 API 契约
 
 ```
-GET  /api/v1/repos/:id/tree?path=          → 列出 data/<path> 下的条目，含挂载徽标
+GET  /api/v1/repos/:id/tree?path=&include_hidden= → 列出 data/<path> 下的内容；隐藏项按需返回
 GET  /api/v1/repos/:id/preview?path=       → {content, mime_type, size, text, truncated}
 PUT  /api/v1/repos/:id/save                → {path, content} → {file_size, modified_at}
 GET  /api/v1/repos/:id/changes             → {dirty, changes:[{status, path}]}  (git status --porcelain data/)
@@ -731,7 +731,10 @@ R-3 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 
 
 ```
 1. 校验 local_path：存在、不是软链接、父目录可写、不在 repo.Path 内
-2. repo_path = 用户输入，默认 filepath.Base(local_path)
+2. repo_path = 目标路径输入框，默认 filepath.Base(local_path)。
+     UI 可通过范围限定在 data/ 内的父目录选择器回填该输入框：
+     repo_path = 所选父目录 + filepath.Base(local_path)。选择器中的待创建目录
+     在确认前只保留于前端，移动内容时才创建缺失的父目录。
 3. R-2 校验：repo_path 不得是任何既有条目的祖先或后代 → 409
 4. data/<repo_path> 不得已存在 → 409
 5. 若 local_path 是目录，扫描其中的软链接。
@@ -747,21 +750,23 @@ R-3 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 
 
 | 失败点 | 补偿动作 |
 |------|------|
-| 步骤 6 失败 | 未移动任何内容 —— 直接返回错误 |
-| 步骤 7 失败 | 把 `data/<repo_path>` 移回 `local_path` |
-| 步骤 8 失败 | 删除软链接，把 `data/<repo_path>` 移回 `local_path` |
+| 步骤 6 失败 | 未移动任何内容；移除本次创建的空目标父目录 |
+| 步骤 7 失败 | 把 `data/<repo_path>` 移回 `local_path`，再移除新建的空父目录 |
+| 步骤 8 失败 | 删除软链接，把 `data/<repo_path>` 移回 `local_path`，再移除新建的空父目录 |
 
 #### 9.4.2 添加链接 —— 已有条目的又一个视图
 
 ```
 1. 解析条目；它必须存在。**不要求**已有链接 —— 这条流程正是
    新初始化的设备为「尚无链接」的条目建立首个链接的方式
-2. 校验 local_path：不存在，或为空目录
-3. R-3 校验：local_path 不得位于任何目录条目的 local_path 之内 → 409
-4. local_path 不得位于 repo.Path 内
-5. 确保 local_path 的父目录存在
-6. 创建软链接：local_path → <repo>/data/<entry.repo_path>
-7. 向该条目追加链接，提交
+2. local_path 可手动输入完整路径，或由可视化父目录选择器按
+   所选父目录 + basename(entry.repo_path) 生成
+3. 校验 local_path：不存在，或为空目录
+4. R-3 校验：local_path 不得位于任何目录条目的 local_path 之内 → 409
+5. local_path 不得位于 repo.Path 内
+6. 确保 local_path 的父目录存在
+7. 创建软链接：local_path → <repo>/data/<entry.repo_path>
+8. 向该条目追加链接，提交
 ```
 
 同一个 `repo_path` 可以带多条链接，同设备或跨设备皆可 —— 这正是 Issue 所说的「把同一份备份分发到不同位置」。
@@ -1022,7 +1027,7 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | `/api/v1/repos/:id/tree?path=` | `data/` 下的条目，附条目徽标与链接数 |
+| GET | `/api/v1/repos/:id/tree?path=&include_hidden=` | `data/` 下的内容；仓库父目录选择器可显式请求隐藏项 |
 | GET | `/api/v1/repos/:id/preview?path=` | 文件预览 |
 | PUT | `/api/v1/repos/:id/save` | 保存到 `data/` |
 | GET | `/api/v1/repos/:id/changes` | `git status --porcelain data/` |
@@ -1083,13 +1088,16 @@ type ApplyResult struct {
 本地化资源由 i18next 管理，并通过 react-i18next 提供给 React。启动时，应用在渲染前调用 `GET /api/v1/settings`；侧边栏语言切换器应用所选语言，并通过 `PUT /api/v1/settings` 持久化。同一变更会同步更新 Ant Design 的 `ConfigProvider`、dayjs 与文档 `lang` 属性；保存失败时恢复原语言。
 
 ```
-components/entry/
-├── EntriesPanel.tsx          # Tab 根组件：工具栏（设备、新建条目、应用、巡检、卸载）、
-│                             #   条目列表与可展开的链接行，以及添加链接 / 应用计划 /
-│                             #   巡检 / 卸载 / 移除条目等弹窗
-└── AdoptModal.tsx            # 创建条目：本机选择 + repo_path 编辑
-                              #   + 「内容将被移入仓库」警告
+components/
+├── entry/
+│   ├── EntriesPanel.tsx      # Tab 根组件：工具栏、条目列表与各操作弹窗
+│   └── AdoptModal.tsx        # 本机选择 + 完整 repo_path 输入框 + 移动警告
+└── common/
+    └── RepositoryDirectoryPickerModal.tsx
+                              # data/ 范围内的父目录浏览与待创建目录
 ```
+
+仓库父目录选择器只是路径的可视化填写方式，不会立即修改文件系统。选择父目录后，系统追加源对象名称并把完整值写回 `repo_path`；「新建目录」只在选择器状态中生成待创建路径，最终确认 Adopt、移动源内容时才创建缺失的父目录。选择器调用 `tree?include_hidden=true`，以便隐藏名称仍参与同名冲突检测；点号开头的目录默认不显示，可通过“显示隐藏文件”开关展示。选择器不能向上离开 `data/`，也不接受绝对文件系统路径。
 
 列表以条目为中心，因为不变量本身就是条目级的：
 

@@ -84,9 +84,9 @@ func (s *ContentService) resolve(repoID, relPath string) (string, error) {
 	return resolved, nil
 }
 
-// Tree 列出 data/<relPath> 下的条目，目录优先、组内按名称排序，隐藏项跳过。
-// relPath 与返回的 path 都相对于 data/，与 Preview/Save 保持一致。
-func (s *ContentService) Tree(repoID, relPath string) ([]ContentEntry, error) {
+// Tree 列出 data/<relPath> 下的条目，目录优先、组内按名称排序。
+// relPath 与返回的 path 都相对于 data/，与 Preview/Save 保持一致；隐藏项默认由调用方排除。
+func (s *ContentService) Tree(repoID, relPath string, includeHidden bool) ([]ContentEntry, error) {
 	dir, err := s.resolve(repoID, relPath)
 	if err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func (s *ContentService) Tree(repoID, relPath string) ([]ContentEntry, error) {
 
 	result := make([]ContentEntry, 0, len(raw))
 	for _, r := range raw {
-		if strings.HasPrefix(r.Name(), ".") {
+		if !includeHidden && strings.HasPrefix(r.Name(), ".") {
 			continue
 		}
 		e := ContentEntry{Name: r.Name(), Path: filepath.ToSlash(filepath.Join(base, r.Name()))}

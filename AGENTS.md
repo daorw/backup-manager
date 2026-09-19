@@ -169,7 +169,8 @@ backup-manager/
             │   ├── RollbackConfirmModal.tsx
             │   └── RollbackResultModal.tsx
             ├── common/
-            │   └── DirectoryPickerModal.tsx
+            │   ├── DirectoryPickerModal.tsx
+            │   └── RepositoryDirectoryPickerModal.tsx  # data/ 内父目录选择 + 待创建目录
             └── config/
                 └── ConfigPanel.tsx
 ```
@@ -260,7 +261,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 |------|------|------|
 | GET | /browse?path=...&include_hidden=true | 浏览任意本地目录（`~` 展开，可选隐藏文件） |
 | GET | /browse/home | 浏览默认起始目录（服务端家目录） |
-| GET | /repos/:id/tree?path=... | 列出 data/ 下的条目及挂载徽标 |
+| GET | /repos/:id/tree?path=...&include_hidden=true | 列出 data/ 下的内容（可选隐藏项） |
 | GET | /repos/:id/preview?path=... | 预览文件内容 |
 | PUT | /repos/:id/save | 保存到 data/ |
 | GET | /repos/:id/changes | data/ 下的未提交变更（git status） |
@@ -319,6 +320,8 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - 浏览文件**无根目录白名单**：服务端可见的任意路径都可浏览，仅做 `~` 展开 + Clean/Abs/软链接归一；隐藏文件由 `include_hidden` 参数控制
 - 链接的 `local_path`：拒绝位于 `repo.Path` 内部的自引用；拒绝把 `/`、`$HOME`、仓库根目录本身作为目标
 - **新建备份文件/目录时内容必须落在 `<repo>/data/`**：条目 `repo_path` 起点固定为 `data/`，拒绝绝对路径与任何 `..`，并在解析软链接后校验仍在 `data/` 内（`resolveRepoPathIn`）；仓库内容的浏览/预览/保存同样以 `data/` 为根
+- 新建条目的仓库父目录选择器只浏览 `data/`，选择后追加源对象原名并回填完整 `repo_path`；“显示隐藏文件”开关控制点号目录展示；选择器内的新目录仅为前端待创建路径，确认 adopt 时才随内容移动创建
+- 添加链接的 `local_path` 可手动输入完整路径，也可通过本机目录选择器选择父目录并自动追加条目名称
 - 建链接前用 `util.ResolveNestedSymlink` 解析候选链，检测到环即拒绝
 
 ### 3. Git 认证加密
@@ -336,7 +339,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 ### 5. 错误处理
 - 备份失败时 repo 状态设为 error（而非 active）
 - Git push 失败不阻断本地 commit，记录日志
-- adopt 失败按阶段回滚：mv 失败无副作用；建链接失败把内容移回原位置；写清单失败再撤销链接与移动
+- adopt 失败按阶段回滚：mv 失败无副作用；建链接失败把内容移回原位置；写清单失败再撤销链接与移动；本次为目标创建的空父目录一并清理
 - 跨文件系统（EXDEV）降级为 CopyFile + 校验大小 + Remove，校验通过前不删除源文件
 - 清单无法解析（如 Git 冲突）时阻止所有写入，返回 409 与原始错误
 

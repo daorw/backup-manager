@@ -38,6 +38,49 @@ import DirectoryPickerModal from '../common/DirectoryPickerModal';
 
 const { Text, Paragraph } = Typography;
 
+function entryBaseName(repoPath?: string): string {
+  if (!repoPath) return '';
+  return (
+    repoPath.replace(/\\/g, '/').replace(/\/+$/, '').split('/').filter(Boolean).pop() || ''
+  );
+}
+
+// Backslash is a legal POSIX filename character, so only normalize clear Windows paths.
+function isWindowsLocalPath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
+}
+
+function joinLocalPath(parent: string, name: string): string {
+  const value = parent.trim();
+  if (!value) return name;
+  const windowsPath = isWindowsLocalPath(value);
+  const separator = windowsPath ? '\\' : '/';
+  const normalized = windowsPath ? value.replace(/\//g, '\\') : value;
+  const withoutTrailingSeparators = windowsPath
+    ? normalized.replace(/\\+$/, '')
+    : normalized.replace(/\/+$/, '');
+  if (!withoutTrailingSeparators && separator === '/') return `/${name}`;
+  return `${withoutTrailingSeparators}${separator}${name}`;
+}
+
+function localParentPath(path?: string): string | undefined {
+  if (!path) return undefined;
+  const raw = path.trim();
+  const windowsPath = isWindowsLocalPath(raw);
+  const normalized = windowsPath ? raw.replace(/\//g, '\\') : raw;
+  const value = windowsPath
+    ? normalized.replace(/\\+$/, '')
+    : normalized.replace(/\/+$/, '');
+  if (!value) return '/';
+  const lastSeparator = windowsPath ? value.lastIndexOf('\\') : value.lastIndexOf('/');
+  if (lastSeparator < 0) return undefined;
+  if (lastSeparator === 0) return value.slice(0, 1);
+  if (windowsPath && /^[A-Za-z]:/.test(value) && lastSeparator === 2) {
+    return value.slice(0, 3);
+  }
+  return value.slice(0, lastSeparator);
+}
+
 /** 链接状态 → 展示样式。 */
 const STATE_META: Record<LinkState, { color: string; labelKey: string }> = {
   ok: { color: 'green', labelKey: 'entries.state.ok' },
@@ -93,6 +136,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   const [adoptOpen, setAdoptOpen] = useState(false);
   const [addLinkFor, setAddLinkFor] = useState<Entry | null>(null);
   const [addLinkPath, setAddLinkPath] = useState('');
+  const [addLinkPickerOpen, setAddLinkPickerOpen] = useState(false);
   const [removeEntryFor, setRemoveEntryFor] = useState<Entry | null>(null);
   const [removeMode, setRemoveMode] = useState<'unlink' | 'move_back' | 'purge'>('unlink');
   const [plan, setPlan] = useState<ApplyResult | null>(null);
@@ -123,6 +167,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
     };
   }, [repoId, fetchCurrentDevice, fetchEntries, fetchDevices, registerDevice]);
 
+  useEffect(() => {
+    setAddLinkFor(null);
+    setAddLinkPath('');
+    setAddLinkPickerOpen(false);
+  }, [repoId]);
+
   const refresh = () => {
     fetchEntries(repoId);
     fetchDevices(repoId);
@@ -142,6 +192,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       message.success(t('entries.message.linkAdded'));
       setAddLinkFor(null);
       setAddLinkPath('');
+      setAddLinkPickerOpen(false);
     } catch (err) {
       message.error(err instanceof Error ? err.message : t('entries.error.addLink'));
     }
@@ -433,6 +484,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                   onClick={() => {
                     setAddLinkFor(entry);
                     setAddLinkPath('');
+                    setAddLinkPickerOpen(false);
                   }}
                 >
                   {t('entries.action.addLink')}
@@ -444,19 +496,25 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       )}
 
       <AdoptModal
+        key={repoId}
         open={adoptOpen}
+        repoId={repoId}
         onClose={() => setAdoptOpen(false)}
         onSubmit={handleAdopt}
       />
 
-      {/* 添加链接：目标路径必须空闲（不存在或为空目录），所以用自由输入 */}
+      {/* 添加链接：可填写完整路径，或选择父目录后自动追加条目名称。 */}
       <Modal
         title={t('entries.addLink.title', { repoPath: addLinkFor?.repo_path || '' })}
         open={!!addLinkFor}
-        onCancel={() => setAddLinkFor(null)}
+        onCancel={() => {
+          setAddLinkFor(null);
+          setAddLinkPickerOpen(false);
+        }}
         onOk={handleAddLink}
         okText={t('entries.action.add')}
         cancelText={t('entries.action.cancel')}
+        okButtonProps={{ disabled: !addLinkPath.trim() }}
       >
         <Alert
           type="info"
@@ -465,12 +523,42 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           message={t('entries.addLink.info')}
         />
         <Text>{t('entries.addLink.localPath')}</Text>
-        <input
-          className="ant-input"
+        <Input
           style={{ marginTop: 4 }}
-          placeholder={t('entries.addLink.placeholder')}
+          placeholder={t('entries.addLink.placeholder', {
+            name: entryBaseName(addLinkFor?.repo_path) || 'notes.txt',
+          })}
           value={addLinkPath}
           onChange={(e) => setAddLinkPath(e.target.value)}
+          onPressEnter={() => void handleAddLink()}
+          addonAfter={
+            <Tooltip title={t('entries.addLink.chooseParent')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<FolderOpenOutlined />}
+                aria-label={t('entries.addLink.chooseParent')}
+                onClick={() => setAddLinkPickerOpen(true)}
+              />
+            </Tooltip>
+          }
+        />
+        <Text type="secondary" style={{ display: 'block', marginTop: 6, fontSize: 12 }}>
+          {t('entries.addLink.pathHelp')}
+        </Text>
+
+        <DirectoryPickerModal
+          open={addLinkPickerOpen}
+          mode="directory"
+          title={t('entries.addLink.pickerTitle')}
+          initialPath={localParentPath(addLinkPath)}
+          onClose={() => setAddLinkPickerOpen(false)}
+          onSelect={(parent) => {
+            const name = entryBaseName(addLinkFor?.repo_path);
+            if (!name) return;
+            setAddLinkPath(joinLocalPath(parent, name));
+            setAddLinkPickerOpen(false);
+          }}
         />
       </Modal>
 

@@ -46,7 +46,7 @@ func newContentService(t *testing.T) (*ContentService, *model.Repo) {
 func TestTreePreviewSaveRoundTrip(t *testing.T) {
 	svc, repo := newContentService(t)
 
-	roots, err := svc.Tree(repo.ID, "")
+	roots, err := svc.Tree(repo.ID, "", false)
 	if err != nil {
 		t.Fatalf("tree root: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestTreePreviewSaveRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected root entries: %+v", roots)
 	}
 
-	children, err := svc.Tree(repo.ID, roots[0].Path)
+	children, err := svc.Tree(repo.ID, roots[0].Path, false)
 	if err != nil {
 		t.Fatalf("tree docs: %v", err)
 	}
@@ -92,4 +92,34 @@ func TestContentRejectsPathTraversal(t *testing.T) {
 	if _, err := svc.Preview(repo.ID, "../../etc/passwd"); err == nil {
 		t.Fatal("expected path traversal to be rejected")
 	}
+}
+
+// TestTreeIncludeHidden 验证仓库目录选择器可以显式请求隐藏目录，
+// 同时保持内容浏览接口默认隐藏这些目录的行为。
+func TestTreeIncludeHidden(t *testing.T) {
+	svc, repo := newContentService(t)
+	if err := os.Mkdir(filepath.Join(repo.Path, "data", ".profiles"), 0755); err != nil {
+		t.Fatalf("mkdir hidden directory: %v", err)
+	}
+
+	visible, err := svc.Tree(repo.ID, "", false)
+	if err != nil {
+		t.Fatalf("tree without hidden entries: %v", err)
+	}
+	for _, entry := range visible {
+		if entry.Name == ".profiles" {
+			t.Fatal("hidden directory should be excluded by default")
+		}
+	}
+
+	all, err := svc.Tree(repo.ID, "", true)
+	if err != nil {
+		t.Fatalf("tree with hidden entries: %v", err)
+	}
+	for _, entry := range all {
+		if entry.Name == ".profiles" && entry.Type == "directory" {
+			return
+		}
+	}
+	t.Fatal("hidden directory should be returned when includeHidden is true")
 }

@@ -192,6 +192,36 @@ func createSymlink(localPath, repoRoot, repoPath string) error {
 	return nil
 }
 
+// missingParentDirs 返回 targetParent 到 existingRoot 之间当前尚不存在的目录，
+// 顺序为从最深层到最浅层。adopt 失败时可按此顺序清理本次创建的空目录。
+func missingParentDirs(targetParent, existingRoot string) []string {
+	root := filepath.Clean(existingRoot)
+	current := filepath.Clean(targetParent)
+	var missing []string
+	for current != root {
+		if _, err := os.Lstat(current); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			break
+		}
+		missing = append(missing, current)
+		next := filepath.Dir(current)
+		if next == current {
+			break
+		}
+		current = next
+	}
+	return missing
+}
+
+// removeEmptyDirs 尽力移除本次操作创建的父目录。os.Remove 只会删除空目录，
+// 因此并发写入或已有内容不会被误删。
+func removeEmptyDirs(dirs []string) {
+	for _, dir := range dirs {
+		_ = os.Remove(dir)
+	}
+}
+
 // movePath 把 src 移动到 dst。跨文件系统时降级为「复制 + 校验大小 + 删除」。
 // 只有在复制内容校验通过后才会删除源，确保不会丢数据。
 func movePath(src, dst string) error {

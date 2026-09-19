@@ -76,14 +76,16 @@ Click "+ New Entry" in the Entries tab:
 
 ![Add Entry Dialog](assets/add-symlink.jpeg)
 
-1. **Source Path**: Enter or browse to the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`)
-2. **Repo Path**: the logical path inside the repository (e.g. `opencode/opencode.json`). It defaults to the file name and must not overlap another entry's path.
-3. Read the warning: **the content will be moved into the repository and this location replaced by a symlink.**
-4. Click **Create**. The original location now holds the entry's first link.
+1. **Source Path**: Enter or browse to the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`).
+2. **Target Repo Path**: Type the complete path under `data/`, or use the folder button to browse and choose its parent directory. The picker appends the original file/directory name and writes the complete result back to this input (e.g. choosing `data/opencode/` produces `opencode/opencode.json`).
+3. Turn on **Show hidden files** when you need to choose a dot-prefixed parent directory; it is off by default.
+4. In the repository picker, **New Directory** adds a pending subdirectory beneath the current directory. It is not written to disk until you finish the Adopt operation, so cancelling leaves the repository unchanged.
+5. Read the warning: **the content will be moved into the repository and this location replaced by a symlink.**
+6. Click **Create**. Missing target parents are created, the content is moved, and the original location now holds the entry's first link.
 
 ### Distributing an Entry (add a link):
 
-Select an entry → "Add Link" → choose a local path. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none. The path may be absolute or start with `~` (expanded to your home directory), and it must be free — a missing entry or an empty directory.
+Select an entry → "Add Link" → enter the complete local path, or use the folder button to choose its parent directory. Parent selection appends the entry's file/directory name automatically. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none. The path may be absolute or start with `~` (expanded to your home directory), and it must be free — a missing entry or an empty directory.
 
 ### All Links Are Equal:
 

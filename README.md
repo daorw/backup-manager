@@ -163,7 +163,7 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 | Devices | `POST /repos/:id/devices/:fp/detach` | Detach this machine |
 | Consistency | `GET /repos/:id/consistency` | Audit findings |
 | Consistency | `POST /repos/:id/consistency/repair` | Repair everything convergable |
-| Content | `GET /repos/:id/tree?path=` | List entries under `data/` with badges |
+| Content | `GET /repos/:id/tree?path=&include_hidden=` | List content under `data/`; hidden entries are optional |
 | Content | `GET /repos/:id/preview?path=` | Preview file content |
 | Content | `PUT /repos/:id/save` | Save to `data/` |
 | Content | `GET /repos/:id/changes` | Uncommitted changes under `data/` (`git status`) |
@@ -186,8 +186,8 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 2. Click tray icon → "Open UI" to open browser
 3. Dashboard shows repo list
 4. Click "Create Repo" → Enter name, select path
-5. Enter repo detail → Entries tab → "+ New Entry" (the content moves into the repo; the original location becomes its first link)
-6. Optionally add more links to distribute the same entry to further local paths
+5. Enter repo detail → Entries tab → "+ New Entry" → choose a local source and either type its target path or visually choose/create a pending parent under `data/`; enable Show Hidden when selecting a dot-prefixed directory (the content moves only after confirmation; the original location becomes its first link)
+6. Optionally add more links by typing a complete local path or visually choosing its parent directory; the entry name is appended automatically
 7. Browse, preview and edit content in the Browse tab
 8. Switch to Backup tab → Click "Trigger Backup"
 9. Configure remote repo and auth (optional)
@@ -326,6 +326,9 @@ backup-manager/
             │   ├── BackupPanel.tsx
             │   ├── RollbackConfirmModal.tsx
             │   └── RollbackResultModal.tsx
+            ├── common/
+            │   ├── DirectoryPickerModal.tsx
+            │   └── RepositoryDirectoryPickerModal.tsx  # data/-scoped parent picker
             └── config/
                 └── ConfigPanel.tsx
 ```

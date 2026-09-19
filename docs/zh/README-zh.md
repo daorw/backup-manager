@@ -161,7 +161,7 @@ go build -o backup-manager .
 | 设备 | `POST /repos/:id/devices/:fp/detach` | 卸载本机 |
 | 一致性 | `GET /repos/:id/consistency` | 巡检结论（R-1..R-3、未托管链接） |
 | 一致性 | `POST /repos/:id/consistency/repair` | 修复所有可收敛项 |
-| 内容 | `GET /repos/:id/tree?path=` | 列出 `data/` 下的条目及徽标 |
+| 内容 | `GET /repos/:id/tree?path=&include_hidden=` | 列出 `data/` 下的内容，可选显示隐藏项 |
 | 内容 | `GET /repos/:id/preview?path=...` | 预览文件内容 |
 | 内容 | `PUT /repos/:id/save` | 保存到 `data/` |
 | 内容 | `GET /repos/:id/changes` | `data/` 下的未提交变更（`git status`） |
@@ -184,8 +184,8 @@ go build -o backup-manager .
 2. 点击托盘图标 → "Open UI" 打开浏览器
 3. 仪表盘显示仓库列表
 4. 点击"创建仓库" → 输入名称、选择路径
-5. 进入仓库详情 → Entries 标签页 → "+ New Entry"（内容移入仓库，原位置成为它的第一条链接）
-6. （可选）添加更多链接，把同一条目分发到更多本机路径
+5. 进入仓库详情 → Entries 标签页 → "+ New Entry" → 选择本机源路径，并手动填写目标路径或在 `data/` 下可视化选择/新建待创建父目录；选择点号开头的目录时开启“显示隐藏文件”（确认后才移动内容，原位置成为它的第一条链接）
+6. （可选）添加更多链接：可输入完整本机路径，或可视化选择父目录并自动追加条目名称
 7. 在 Browse 标签页浏览、预览和编辑内容
 8. 切换到备份标签页 → 点击"触发备份"
 9. 配置远程仓库和认证信息（可选）
@@ -324,6 +324,9 @@ backup-manager/
             │   ├── BackupPanel.tsx
             │   ├── RollbackConfirmModal.tsx
             │   └── RollbackResultModal.tsx
+            ├── common/
+            │   ├── DirectoryPickerModal.tsx
+            │   └── RepositoryDirectoryPickerModal.tsx  # data/ 范围内的父目录选择器
             └── config/
                 └── ConfigPanel.tsx
 ```

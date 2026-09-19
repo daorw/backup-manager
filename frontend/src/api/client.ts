@@ -244,9 +244,13 @@ export async function applyDevice(
 
 // ── 仓库内容 ──────────────────────────────────────────────────────────
 
-export async function fetchTree(repoId: string, path?: string): Promise<ContentEntry[]> {
+export async function fetchTree(
+  repoId: string,
+  path?: string,
+  includeHidden = false
+): Promise<ContentEntry[]> {
   const { data } = await api.get<ContentEntry[]>(`/repos/${repoId}/tree`, {
-    params: { path: path || '' },
+    params: { path: path || '', include_hidden: includeHidden || undefined },
   });
   return data;
 }

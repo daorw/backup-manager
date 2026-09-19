@@ -116,6 +116,14 @@ func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 		return nil, fmt.Errorf("repo_path already exists in data/: %s", repoPath)
 	}
 
+	pendingParents := missingParentDirs(filepath.Dir(content), filepath.Join(repo.Path, "data"))
+	keepParents := false
+	defer func() {
+		if !keepParents {
+			removeEmptyDirs(pendingParents)
+		}
+	}()
+
 	// 1) 内容移入仓库
 	if err := movePath(local, content); err != nil {
 		return nil, fmt.Errorf("failed to move content into repository: %w", err)
@@ -157,6 +165,7 @@ func (s *Service) Adopt(repoID string, req *AdoptRequest) (*EntryView, error) {
 		_ = movePath(content, local)
 		return nil, err
 	}
+	keepParents = true
 
 	return s.Get(repoID, entry.ID)
 }

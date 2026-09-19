@@ -41,6 +41,32 @@ interface DirectoryPickerModalProps {
   initialPath?: string;
 }
 
+function isWindowsPath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
+}
+
+function parentDirectoryPath(value: string, windowsHint: boolean): string {
+  if (isWindowsPath(value) || (windowsHint && !value.includes('/'))) {
+    let normalized = value.replace(/\//g, '\\');
+    if (/^[A-Za-z]:\\*$/.test(normalized)) return `${normalized.slice(0, 2)}\\`;
+    if (/^\\\\[^\\]+\\[^\\]+\\*$/.test(normalized)) {
+      return normalized.replace(/\\+$/, '');
+    }
+    normalized = normalized.replace(/\\+$/, '');
+    const index = normalized.lastIndexOf('\\');
+    if (/^[A-Za-z]:/.test(normalized) && index === 2) return normalized.slice(0, 3);
+    if (index < 0) return '.';
+    return normalized.slice(0, index) || '\\';
+  }
+
+  let normalized = value;
+  if (normalized === '/') return normalized;
+  normalized = normalized.replace(/\/+$/, '');
+  const index = normalized.lastIndexOf('/');
+  if (index < 0) return '.';
+  return index === 0 ? '/' : normalized.slice(0, index);
+}
+
 function toNodes(entries: BrowseEntry[], locale: string): FileBrowserNode[] {
   return entries
     .map((entry) => ({
@@ -140,6 +166,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     if (node.children && node.children.length > 0) {
       return;
     }
+    setSelectedPath('');
     try {
       const children = await loadChildren(node.path, showHidden, locale);
       setTreeData((prev) => updateTreeNode(prev, node.key, children));
@@ -169,17 +196,24 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   };
 
   const handleSelect = (selectedKeys: React.Key[], info: { node: FileBrowserNode }) => {
-    if (selectedKeys.length > 0) {
-      const node = info.node;
-      if (mode === 'directory' && node.nodeType === 'directory') {
-        setSelectedPath(node.path);
-      } else if (mode === 'file' && node.nodeType === 'file') {
-        setSelectedPath(node.path);
-      } else if (mode === 'both') {
-        setSelectedPath(node.path);
-      }
-      setCurrentPathInput(node.path);
+    if (selectedKeys.length === 0) {
+      setSelectedPath('');
+      return;
     }
+
+    const node = info.node;
+    const eligible =
+      mode === 'both' ||
+      (mode === 'directory' && node.nodeType === 'directory') ||
+      (mode === 'file' && node.nodeType === 'file');
+    if (!eligible) {
+      setSelectedPath('');
+      if (node.nodeType === 'directory') setCurrentPathInput(node.path);
+      return;
+    }
+
+    setSelectedPath(node.path);
+    setCurrentPathInput(node.path);
   };
 
   /** 方式 1：跳转到输入框里的路径（Go / 回车）。 */
@@ -187,7 +221,9 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     const target = currentPathInput.trim();
     if (!target) return;
     setCurrentPathInput(target);
-    await loadDir(target, showHidden);
+    setSelectedPath('');
+    const ok = await loadDir(target, showHidden);
+    if (ok && mode !== 'file') setSelectedPath(target);
   };
 
   /** 方式 1：直接使用用户填写的完整路径，不要求能在树里打开（路径可能尚不存在）。 */
@@ -202,18 +238,20 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   };
 
   const handleGoUp = async () => {
-    if (!currentPathInput || currentPathInput === '/') return;
-    const parentPath =
-      currentPathInput.substring(0, currentPathInput.lastIndexOf('/')) || '/';
+    if (!currentPathInput) return;
+    const parentPath = parentDirectoryPath(currentPathInput, isWindowsPath(homeDir));
+    if (parentPath === currentPathInput) return;
     setCurrentPathInput(parentPath);
+    setSelectedPath('');
     const ok = await loadDir(parentPath, showHidden);
-    if (ok) setSelectedPath(parentPath);
+    if (ok && mode !== 'file') setSelectedPath(parentPath);
   };
 
   const handleGoHome = async () => {
     setCurrentPathInput(homeDir);
+    setSelectedPath('');
     const ok = await loadDir(homeDir, showHidden);
-    if (ok) setSelectedPath(homeDir);
+    if (ok && mode !== 'file') setSelectedPath(homeDir);
   };
 
   /** 隐藏文件开关：切换后按当前目录重新载入。 */
@@ -224,6 +262,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   };
 
   const handleConfirm = () => {
+    if (loading) return;
     if (!selectedPath) {
       message.warning(t('picker.warning.selectPath'));
       return;
@@ -242,11 +281,11 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
         <Space>
           <Button onClick={onClose}>{t('picker.action.cancel')}</Button>
           <Tooltip title={t('picker.tooltip.useTypedPath')}>
-            <Button onClick={useTypedPath} disabled={!currentPathInput.trim()}>
+            <Button onClick={useTypedPath} disabled={loading || !currentPathInput.trim()}>
               {t('picker.action.useTypedPath')}
             </Button>
           </Tooltip>
-          <Button type="primary" onClick={handleConfirm} disabled={!selectedPath}>
+          <Button type="primary" onClick={handleConfirm} disabled={loading || !selectedPath}>
             {t('picker.action.select')}
           </Button>
         </Space>
@@ -262,7 +301,10 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           </Tooltip>
           <Input
             value={currentPathInput}
-            onChange={(e) => setCurrentPathInput(e.target.value)}
+            onChange={(e) => {
+              setCurrentPathInput(e.target.value);
+              setSelectedPath('');
+            }}
             onPressEnter={handleNavigateToPath}
             placeholder={t('picker.pathPlaceholder')}
           />

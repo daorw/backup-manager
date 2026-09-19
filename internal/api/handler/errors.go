@@ -11,6 +11,7 @@ import (
 // It uses simple string matching to determine the HTTP status code:
 //   - "not found" → 404
 //   - "is required" or "invalid" → 400
+//   - expected target collisions → 409
 //   - everything else → 500
 func respondError(c *gin.Context, err error) {
 	msg := err.Error()
@@ -19,6 +20,9 @@ func respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": msg})
 	case strings.Contains(msg, "is required") || strings.Contains(msg, "invalid"):
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+	case strings.Contains(msg, "overlaps existing entry") ||
+		strings.Contains(msg, "already exists in data/"):
+		c.JSON(http.StatusConflict, gin.H{"error": msg})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 	}

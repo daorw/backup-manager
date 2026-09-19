@@ -88,6 +88,59 @@ func TestAdoptMovesContentAndCreatesLink(t *testing.T) {
 	}
 }
 
+// TestAdoptCreatesMissingTargetParents 验证目录选择器中的待创建父目录
+// 不需要预先落盘；确认 adopt 时由移动流程创建完整父目录链。
+func TestAdoptCreatesMissingTargetParents(t *testing.T) {
+	svc, repo := newTestService(t)
+	local := filepath.Join(t.TempDir(), "settings.json")
+	writeFile(t, local, "{}")
+
+	parent := filepath.Join(repo.Path, "data", "configs", "editors")
+	if _, err := os.Stat(parent); !os.IsNotExist(err) {
+		t.Fatalf("target parent should not exist before adopt: %v", err)
+	}
+
+	view, err := svc.Adopt(repo.ID, &AdoptRequest{
+		LocalPath: local,
+		RepoPath:  "configs/editors/settings.json",
+	})
+	if err != nil {
+		t.Fatalf("adopt into missing parents: %v", err)
+	}
+	if view.RepoPath != "configs/editors/settings.json" {
+		t.Fatalf("unexpected repo_path: %q", view.RepoPath)
+	}
+	if info, err := os.Stat(parent); err != nil || !info.IsDir() {
+		t.Fatalf("target parents should be created during adopt: %v", err)
+	}
+	if content, err := os.ReadFile(filepath.Join(parent, "settings.json")); err != nil || string(content) != "{}" {
+		t.Fatalf("content not moved under the selected parent: %v", err)
+	}
+}
+
+// TestPendingParentCleanupKeepsExistingAncestors 验证失败回滚只清理本次新建的空目录，
+// 不会删除原本就存在的仓库目录。
+func TestPendingParentCleanupKeepsExistingAncestors(t *testing.T) {
+	dataRoot := t.TempDir()
+	existing := filepath.Join(dataRoot, "configs")
+	if err := os.Mkdir(existing, 0755); err != nil {
+		t.Fatalf("mkdir existing parent: %v", err)
+	}
+	targetParent := filepath.Join(existing, "editors", "profiles")
+	missing := missingParentDirs(targetParent, dataRoot)
+	if err := os.MkdirAll(targetParent, 0755); err != nil {
+		t.Fatalf("mkdir pending parents: %v", err)
+	}
+
+	removeEmptyDirs(missing)
+	if _, err := os.Stat(targetParent); !os.IsNotExist(err) {
+		t.Fatalf("pending parent should be removed: %v", err)
+	}
+	if info, err := os.Stat(existing); err != nil || !info.IsDir() {
+		t.Fatalf("existing ancestor should remain: %v", err)
+	}
+}
+
 // TestAdoptRejectsRepoPathOutsideData 验证新建条目时内容不得落到 data/ 之外。
 func TestAdoptRejectsRepoPathOutsideData(t *testing.T) {
 	svc, repo := newTestService(t)

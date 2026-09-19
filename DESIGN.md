@@ -470,7 +470,7 @@ The mount model (§9) removes the source-vs-copy duality: content lives in `<rep
 ### 7.1 API Contract
 
 ```
-GET  /api/v1/repos/:id/tree?path=          → list entries under data/<path>, each with mount badges
+GET  /api/v1/repos/:id/tree?path=&include_hidden= → list content under data/<path>; hidden entries are opt-in
 GET  /api/v1/repos/:id/preview?path=       → {content, mime_type, size, text, truncated}
 PUT  /api/v1/repos/:id/save                → {path, content} → {file_size, modified_at}
 GET  /api/v1/repos/:id/changes             → {dirty, changes:[{status, path}]}  (git status --porcelain data/)
@@ -732,7 +732,10 @@ The manifest is grouped **by entry**, which is what makes R-2 and R-3 structural
 
 ```
 1. Validate local_path: exists, is NOT a symlink, parent writable, NOT inside repo.Path
-2. repo_path = user input, default filepath.Base(local_path)
+2. repo_path = target-path input, default filepath.Base(local_path).
+     The UI may fill this input through a data/-scoped parent-directory picker:
+     repo_path = selected parent + filepath.Base(local_path). Pending picker directories
+     remain client-side until confirmation; MOVE creates missing parents.
 3. R-2 check: repo_path must not be an ancestor or descendant of any existing entry → 409
 4. data/<repo_path> must not already exist → 409
 5. If local_path is a directory, scan it for symlinks.
@@ -749,21 +752,23 @@ Failure rollback:
 
 | Failure point | Compensation |
 |------|------|
-| 6 fails | nothing moved — return the error |
-| 7 fails | move `data/<repo_path>` back to `local_path` |
-| 8 fails | remove the symlink, move `data/<repo_path>` back to `local_path` |
+| 6 fails | nothing moved; remove any empty target parents created by this attempt |
+| 7 fails | move `data/<repo_path>` back to `local_path`, then remove newly created empty parents |
+| 8 fails | remove the symlink, move `data/<repo_path>` back to `local_path`, then remove newly created empty parents |
 
 #### 9.4.2 Add Link — an additional view of an existing entry
 
 ```
 1. Resolve the entry; it must exist. Having a link already is NOT required — this
    flow is how a freshly initialised device binds an entry that has none
-2. Validate local_path: does not exist, or is an empty directory
-3. R-3 check: local_path must not be inside any directory entry's local_path → 409
-4. local_path must not be inside repo.Path
-5. Ensure the parent directory of local_path exists
-6. Create the symlink: local_path → <repo>/data/<entry.repo_path>
-7. Append the link to the entry, commit
+2. Obtain the complete local_path from manual input, or from the visual parent
+   picker as selected parent + basename(entry.repo_path)
+3. Validate local_path: does not exist, or is an empty directory
+4. R-3 check: local_path must not be inside any directory entry's local_path → 409
+5. local_path must not be inside repo.Path
+6. Ensure the parent directory of local_path exists
+7. Create the symlink: local_path → <repo>/data/<entry.repo_path>
+8. Append the link to the entry, commit
 ```
 
 The same `repo_path` may carry many links, on the same device or on different ones — that is the Issue's "distribute one backup to many locations".
@@ -1024,7 +1029,7 @@ repo_auths    — repo_id(FK), auth_type, ssh_private_key, ...                  
 
 | Method | Path | Purpose |
 |------|------|------|
-| GET | `/api/v1/repos/:id/tree?path=` | Entries under `data/`, each with an entry badge and link count |
+| GET | `/api/v1/repos/:id/tree?path=&include_hidden=` | Entries under `data/`; hidden entries are opt-in for the repository parent picker |
 | GET | `/api/v1/repos/:id/preview?path=` | File preview |
 | PUT | `/api/v1/repos/:id/save` | Save to `data/` |
 | GET | `/api/v1/repos/:id/changes` | `git status --porcelain data/` |
@@ -1085,13 +1090,16 @@ Repository detail tabs: **Browse** · **Entries** · **Backup** · **Config**.
 Localization resources are managed by i18next and exposed to React through react-i18next. On startup, the app loads `GET /api/v1/settings` before rendering; the sidebar switch applies the selected locale and persists it with `PUT /api/v1/settings`. The same change updates Ant Design's `ConfigProvider`, dayjs, and the document `lang` attribute; a failed save restores the previous locale.
 
 ```
-components/entry/
-├── EntriesPanel.tsx          # tab root: toolbar (device, New Entry, Apply, Audit, Detach),
-│                             #   entry list with expandable link rows, add-link / apply-plan /
-│                             #   audit / detach / remove-entry modals
-└── AdoptModal.tsx            # create an entry: local picker + repo_path editor
-                              #   + "content will be moved into the repository" warning
+components/
+├── entry/
+│   ├── EntriesPanel.tsx      # tab root: toolbar, entry list, and action modals
+│   └── AdoptModal.tsx        # local picker + complete repo_path input + move warning
+└── common/
+    └── RepositoryDirectoryPickerModal.tsx
+                              # data/-scoped parent browser with pending directories
 ```
+
+The repository parent picker is a visual input method, not a filesystem mutation. Selecting a parent appends the source basename and writes the complete value back to `repo_path`. "New Directory" creates a pending path in picker state; only the final Adopt action creates missing parent directories while moving the source. The picker calls `tree?include_hidden=true` so hidden names remain collision-safe, hides dot-prefixed directories by default, and exposes a Show Hidden switch to display them. It cannot navigate above `data/` and never accepts an absolute filesystem path.
 
 The list view is entry-centric, because that is what the invariants are about:
 

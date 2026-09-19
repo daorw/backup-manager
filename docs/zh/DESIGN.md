@@ -1114,7 +1114,7 @@ components/
 
 链接统一展示：没有 in/out 徽标，也没有「设为跟踪」操作，因为所有链接完全等价（§9.3.3）。逐链接操作只有三个：**修复**（`missing` / `wrong_target`）、**重新纳入**（`replaced`）与**移除**。`添加链接` 始终可用，包括对没有任何链接的条目。
 
-`components/files/FilesPanel.tsx`（Browse）渲染 `data/` 目录树，并在每个节点显示徽标：是条目 / 不是条目 / 存在链接漂移。`symlink/` 下组件全部删除。
+`components/files/FilesPanel.tsx`（Browse）渲染 `data/` 目录树，并在每个节点显示徽标：是条目 / 不是条目 / 存在链接漂移。根目录和懒加载子目录均请求 `include_hidden=true`，因为点号开头的仓库内容本身也可能是受管条目，必须保持可见。`symlink/` 下组件全部删除。
 
 `frontend/src/types/index.ts` 新增类型：
 

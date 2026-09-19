@@ -270,7 +270,7 @@ Entries, links and devices live inside the repository rather than in SQLite beca
 
 ### 7.1 Feature Description
 
-In the Browse tab of the repository detail page, users select a node in the `data/` tree to:
+In the Browse tab of the repository detail page, the `data/` tree includes dot-prefixed files and directories so every backed-up item remains visible. Users select a node to:
 - **Plain text files**: View contents (read-only preview) and switch to edit mode to modify and save
 - **Markdown files**: Toggle between rendered preview mode and raw text edit mode, then save
 - **Binary files**: Only display file type information, not editable

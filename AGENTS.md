@@ -320,6 +320,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - 浏览文件**无根目录白名单**：服务端可见的任意路径都可浏览，仅做 `~` 展开 + Clean/Abs/软链接归一；隐藏文件由 `include_hidden` 参数控制
 - 链接的 `local_path`：拒绝位于 `repo.Path` 内部的自引用；拒绝把 `/`、`$HOME`、仓库根目录本身作为目标
 - **新建备份文件/目录时内容必须落在 `<repo>/data/`**：条目 `repo_path` 起点固定为 `data/`，拒绝绝对路径与任何 `..`，并在解析软链接后校验仍在 `data/` 内（`resolveRepoPathIn`）；仓库内容的浏览/预览/保存同样以 `data/` 为根
+- Browse 标签页始终请求 `include_hidden=true`，确保点号开头的已备份文件/目录不会从 `data/` 内容树中消失
 - 新建条目的仓库父目录选择器只浏览 `data/`，选择后追加源对象原名并回填完整 `repo_path`；“显示隐藏文件”开关控制点号目录展示；选择器内的新目录仅为前端待创建路径，确认 adopt 时才随内容移动创建
 - 添加链接的 `local_path` 可手动输入完整路径，也可通过本机目录选择器选择父目录并自动追加条目名称
 - 建链接前用 `util.ResolveNestedSymlink` 解析候选链，检测到环即拒绝

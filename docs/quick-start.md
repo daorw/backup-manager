@@ -40,7 +40,7 @@ The Browse tab shows the repository's real content under `data/`, and lets you p
 ![Browse Tab](assets/preview.png)
 
 ### Features:
-- Browse the `data/` tree
+- Browse the complete `data/` tree, including dot-prefixed files and directories
 - Each node carries a badge: is an entry / not backed up / has link drift
 - Preview file content
 - Click "Edit" to edit, "Save" to write in place

@@ -113,9 +113,10 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
     [entryIndex, isCovered, t]
   );
 
+  // Browse is the complete repository inventory, so managed dot-prefixed content must stay visible.
   const loadChildren = useCallback(
     async (path: string) => {
-      const list = await fetchTree(repoId, path);
+      const list = await fetchTree(repoId, path, true);
       setTreeData((prev) => updateChildren(prev, path, list.map(toNode)));
       return list;
     },
@@ -126,7 +127,7 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
     setLoading(true);
     setError(null);
     try {
-      const list = await fetchTree(repoId, '');
+      const list = await fetchTree(repoId, '', true);
       setTreeData(list.map(toNode));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('files.errors.loadContent'));

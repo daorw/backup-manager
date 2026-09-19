@@ -1116,7 +1116,7 @@ The list view is entry-centric, because that is what the invariants are about:
 
 Links are listed uniformly: there is no in/out badge and no "set as tracked" action, because all links are equal (§9.3.3). The only per-link actions are **repair** (for `missing` / `wrong_target`), **re-adopt** (for `replaced`) and **remove**. `Add Link` is always available, including for an entry with no links.
 
-`components/files/FilesPanel.tsx` (Browse) renders the `data/` tree and badges each node: has entry / not an entry / has link drift. The `symlink/` components are deleted.
+`components/files/FilesPanel.tsx` (Browse) renders the `data/` tree and badges each node: has entry / not an entry / has link drift. Both root and lazy child loads request `include_hidden=true`, because dot-prefixed repository content may itself be a managed entry and must remain visible. The `symlink/` components are deleted.
 
 Type additions in `frontend/src/types/index.ts`:
 

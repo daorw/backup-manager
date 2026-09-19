@@ -40,8 +40,10 @@ import {
   CodeOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import type { ColumnsType } from 'antd/es/table';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../store/appStore';
 import { fetchChanges, fetchBackupHistory as fetchHistoryApi } from '../../api/client';
 import type { CommitEntry, CommitFileChange, CommitFileContent } from '../../types';
@@ -72,6 +74,9 @@ const statusTagConfig: Record<string, { color: string; icon: React.ReactNode }> 
 };
 
 const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => {
+  const { t, i18n } = useTranslation();
+  const dayjsLocale = i18n.resolvedLanguage?.toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
+
   const backupProgress = useAppStore((s) => s.backupProgress);
   const backupHistory = useAppStore((s) => s.backupHistory);
   const commitFilesByHash = useAppStore((s) => s.commitFilesByHash);
@@ -165,7 +170,11 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
   }, [rollbackResult]);
 
   const handleBackupClick = () => {
-    setCommitMessage(`Backup: ${dayjs().format('YYYY-MM-DD HH:mm:ss')}`);
+    setCommitMessage(
+      t('backup.commit.defaultMessage', {
+        date: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      }),
+    );
     setCommitModalOpen(true);
   };
 
@@ -175,12 +184,16 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
     try {
       const result = await triggerBackup(repoId, commitMessage || undefined);
       if (result) {
-        const detail = result.commit_hash
-          ? `Committed ${result.files_changed} changed, ${result.files_removed} removed`
-          : 'No changes to commit';
-        message.success(`Backup completed — ${detail}`);
+        message.success(
+          result.commit_hash
+            ? t('backup.toast.backupCommitted', {
+                changed: result.files_changed,
+                removed: result.files_removed,
+              })
+            : t('backup.toast.noChanges'),
+        );
       } else {
-        message.success('Backup completed');
+        message.success(t('backup.toast.completed'));
       }
       fetchBackupHistory(repoId, pageSize, 0);
       refreshChanges();
@@ -198,7 +211,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
     setPushing(true);
     try {
       await pushRepo(repoId);
-      message.success('Pushed to remote successfully');
+      message.success(t('backup.toast.pushSuccess'));
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -213,7 +226,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
     setForcePushConfirmOpen(false);
     try {
       await pushRepo(repoId, true);
-      message.success('Force pushed to remote successfully');
+      message.success(t('backup.toast.forcePushSuccess'));
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -227,7 +240,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
     setInitializing(true);
     try {
       await gitInitRepo(repoId);
-      message.success('Git repository initialized');
+      message.success(t('backup.toast.gitInitSuccess'));
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -310,7 +323,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         commit_hash: rollbackTarget.commitHash,
         paths: rollbackTarget.paths,
       });
-      message.success('Rollback completed');
+      message.success(t('rollback.toast.completed'));
       fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
       refreshChanges();
       refreshTotal();
@@ -354,27 +367,27 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
 
   const handleFileRestore = useCallback(async (filePath: string, commitHash: string) => {
     Modal.confirm({
-      title: 'Restore File',
+      title: t('rollback.restoreFile.title'),
       icon: <UndoOutlined />,
       content: (
         <div>
           <Typography.Paragraph>
-            Restore <Typography.Text code>{`data/${filePath}`}</Typography.Text> to the version from
-            this commit?
+            {t('rollback.restoreFile.questionPrefix')}
+            <Typography.Text code>{`data/${filePath}`}</Typography.Text>
+            {t('rollback.restoreFile.questionSuffix')}
           </Typography.Paragraph>
           <Typography.Text type="warning">
-            This overwrites the current content under data/ with the version from the commit; every
-            link points there, so all local paths reflect it immediately.
+            {t('rollback.restoreFile.warning')}
           </Typography.Text>
         </div>
       ),
-      okText: 'Restore',
+      okText: t('rollback.action.restore'),
       okButtonProps: { danger: true },
-      cancelText: 'Cancel',
+      cancelText: t('backup.action.cancel'),
       onOk: async () => {
         try {
           await restoreCommitFile(repoId, commitHash, filePath);
-          message.success(`File "${filePath}" restored successfully`);
+          message.success(t('rollback.toast.fileRestored', { path: filePath }));
           // 内容写回 data/，本机链接自动反映；只需刷新条目状态
           useAppStore.getState().fetchEntries(repoId);
           fetchBackupHistory(repoId, pageSize, (page - 1) * pageSize);
@@ -388,7 +401,16 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         }
       },
     });
-  }, [repoId, restoreCommitFile, fetchBackupHistory, page, pageSize, refreshChanges, refreshTotal]);
+  }, [
+    repoId,
+    restoreCommitFile,
+    fetchBackupHistory,
+    page,
+    pageSize,
+    refreshChanges,
+    refreshTotal,
+    t,
+  ]);
 
   const renderFilePreview = (filePath: string) => {
     const content = fileContentCache[filePath];
@@ -398,7 +420,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         <div style={{ padding: '12px 24px', textAlign: 'center' }}>
           <Spin size="small" />
           <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-            Loading content...
+            {t('backup.preview.loading')}
           </Typography.Text>
         </div>
       );
@@ -439,7 +461,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
             {displayLines.join('\n')}
             {(truncated || isTruncatedLines) && (
               <Typography.Text type="warning" style={{ display: 'block', marginTop: 8, color: '#f0ad4e' }}>
-                ... (file truncated, showing first {maxPreviewLines} lines)
+                {t('backup.preview.truncated', { count: maxPreviewLines })}
               </Typography.Text>
             )}
           </pre>
@@ -451,9 +473,12 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
       return (
         <div style={{ padding: '8px 24px 8px 40px' }}>
           <Space>
-            <Tag color="default">Binary file</Tag>
+            <Tag color="default">{t('backup.preview.binaryFile')}</Tag>
             <Typography.Text type="secondary">
-              {content.mime_type} — {content.size.toLocaleString()} bytes
+              {content.mime_type} -{' '}
+              {t('backup.preview.fileSize', {
+                size: content.size.toLocaleString(i18n.resolvedLanguage),
+              })}
             </Typography.Text>
           </Space>
         </div>
@@ -469,7 +494,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
 
   const columns: ColumnsType<CommitEntry> = [
     {
-      title: 'Commit',
+      title: t('backup.table.commit'),
       dataIndex: 'hash',
       key: 'hash',
       width: 110,
@@ -483,14 +508,14 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         ),
     },
     {
-      title: 'Author',
+      title: t('backup.table.author'),
       dataIndex: 'author',
       key: 'author',
       width: 150,
       ellipsis: true,
     },
     {
-      title: 'Date',
+      title: t('backup.table.date'),
       dataIndex: 'date',
       key: 'date',
       width: 180,
@@ -498,7 +523,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-',
     },
     {
-      title: 'Message',
+      title: t('backup.table.message'),
       dataIndex: 'message',
       key: 'message',
       ellipsis: true,
@@ -513,14 +538,14 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         <div style={{ textAlign: 'center', padding: 24 }}>
           <Spin size="small" />
           <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-            Loading changed files...
+            {t('backup.history.loadingFiles')}
           </Typography.Text>
         </div>
       );
     }
 
     if (recordFiles.length === 0 && expandedCommitHash === record.hash) {
-      return <Empty description="No changed files in this commit" />;
+      return <Empty description={t('backup.history.noChangedFiles')} />;
     }
 
     const fileGroups = groupChangedFiles(recordFiles);
@@ -528,7 +553,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
     return (
       <div style={{ padding: '8px 0' }}>
         <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>
-          Files changed ({recordFiles.length})
+          {t('backup.history.filesChanged', { count: recordFiles.length })}
         </Typography.Text>
 
         {fileGroups.map((group) => (
@@ -561,13 +586,19 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                   {group.files[0]?.relative_path || group.id}
                 </Typography.Text>
                 <Tag color={group.type === 'directory' ? 'orange' : 'blue'}>
-                  {group.type}
+                  {group.type === 'directory'
+                    ? t('backup.group.directory')
+                    : t('backup.group.file')}
                 </Tag>
                 {group.files.length > 1 && (
-                  <Tag>{group.files.length} files</Tag>
+                  <Tag>
+                    {t('backup.group.fileCount', {
+                      count: group.files.length,
+                    })}
+                  </Tag>
                 )}
               </Space>
-              <Tooltip title="Restore this file to the version in this commit">
+              <Tooltip title={t('rollback.tooltip.rollbackFile')}>
                 <Button
                   type="link"
                   size="small"
@@ -581,7 +612,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                     )
                   }
                 >
-                  Rollback
+                  {t('rollback.action.rollback')}
                 </Button>
               </Tooltip>
             </div>
@@ -633,7 +664,11 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                         }
                         style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
                       >
-                        {file.change_type === 'A' ? 'Added' : file.change_type === 'D' ? 'Deleted' : 'Modified'}
+                        {file.change_type === 'A'
+                          ? t('backup.change.added')
+                          : file.change_type === 'D'
+                            ? t('backup.change.deleted')
+                            : t('backup.change.modified')}
                       </Tag>
                     </Space>
                     <Button
@@ -648,7 +683,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                       }}
                       style={{ fontSize: 12 }}
                     >
-                      Restore
+                      {t('rollback.action.restore')}
                     </Button>
                   </div>
 
@@ -676,7 +711,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                 )
               }
             >
-              Rollback All ({fileGroups.length})
+              {t('rollback.action.rollbackAll', { count: fileGroups.length })}
             </Button>
           </div>
         )}
@@ -687,13 +722,21 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
   const isBackingUp = backupProgress?.status === 'running';
   const isGitInit = currentRepo?.git_initialized ?? false;
   const hasRemote = !!(currentRepo?.remote_url || currentRepo?.has_remote);
+  const repoStatusLabel =
+    currentRepo?.status === 'active'
+      ? t('backup.status.active')
+      : currentRepo?.status === 'error'
+        ? t('backup.status.error')
+        : currentRepo?.status === 'backing_up'
+          ? t('backup.status.backingUp')
+          : t('backup.status.unknown');
 
   return (
     <div>
       {!isGitInit && (
         <Alert
-          message="Git repository not initialized"
-          description="The .git directory is missing. Click 'Git Init' below to initialize the repository before running backups."
+          message={t('backup.git.notInitialized')}
+          description={t('backup.git.notInitializedDescription')}
           type="warning"
           showIcon
           icon={<ExclamationCircleOutlined />}
@@ -705,11 +748,11 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         <Col span={6}>
           <Card size="small">
             <Statistic
-              title="Last Backup"
+              title={t('backup.stats.lastBackup')}
               value={
                 currentRepo?.last_backup_at
-                  ? dayjs(currentRepo.last_backup_at).fromNow()
-                  : 'Never'
+                  ? dayjs(currentRepo.last_backup_at).locale(dayjsLocale).fromNow()
+                  : t('backup.stats.never')
               }
               valueStyle={{ fontSize: 16 }}
               prefix={<ClockCircleOutlined />}
@@ -719,7 +762,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         <Col span={6}>
           <Card size="small">
             <Statistic
-              title="Total Backups"
+              title={t('backup.stats.totalBackups')}
               value={totalCommits === null ? '-' : totalCommits >= 1000 ? '1000+' : totalCommits}
               prefix={<HistoryOutlined />}
             />
@@ -728,8 +771,8 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         <Col span={6}>
           <Card size="small">
             <Statistic
-              title="Status"
-              value={currentRepo?.status || 'unknown'}
+              title={t('backup.stats.status')}
+              value={repoStatusLabel}
               valueStyle={{
                 color:
                   currentRepo?.status === 'active'
@@ -752,16 +795,22 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                         {line.trim()}
                       </div>
                     ))}
-                    {uncommitted.length > 10 && <div>… and {uncommitted.length - 10} more</div>}
+                    {uncommitted.length > 10 && (
+                      <div>
+                        {t('backup.uncommitted.more', {
+                          count: uncommitted.length - 10,
+                        })}
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  'No uncommitted changes under data/'
+                  t('backup.uncommitted.none')
                 )
               }
             >
               <div>
                 <Statistic
-                  title="Uncommitted Changes"
+                  title={t('backup.stats.uncommittedChanges')}
                   value={uncommitted.length}
                   valueStyle={{
                     color: uncommitted.length > 0 ? '#faad14' : '#52c41a',
@@ -782,7 +831,11 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
           type={isGitInit ? 'default' : 'primary'}
           disabled={isGitInit && !initializing}
         >
-          {initializing ? 'Initializing...' : isGitInit ? 'Git Init ✓' : 'Git Init'}
+          {initializing
+            ? t('backup.action.initializing')
+            : isGitInit
+              ? t('backup.action.gitInitialized')
+              : t('backup.action.gitInit')}
         </Button>
 
         <Button
@@ -793,7 +846,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
           loading={backingUp || isBackingUp}
           disabled={!isGitInit || isBackingUp}
         >
-          {isBackingUp ? 'Backing up...' : 'Trigger Backup'}
+          {isBackingUp ? t('backup.action.backingUp') : t('backup.action.trigger')}
         </Button>
 
         {hasRemote && (
@@ -804,9 +857,9 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
               loading={pushing}
               disabled={!isGitInit}
             >
-              {pushing ? 'Pushing...' : 'Push to Remote'}
+              {pushing ? t('backup.action.pushing') : t('backup.action.pushRemote')}
             </Button>
-            <Tooltip title="Force push overwrites remote history. Use when remote is out of sync with local.">
+            <Tooltip title={t('backup.tooltip.forcePush')}>
               <Button
                 danger
                 icon={<WarningOutlined />}
@@ -814,7 +867,7 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
                 loading={pushing}
                 disabled={!isGitInit}
               >
-                Force Push
+                {t('backup.action.forcePush')}
               </Button>
             </Tooltip>
           </Space>
@@ -824,7 +877,11 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
       {isBackingUp && (
         <Card size="small" style={{ marginBottom: 16 }}>
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Typography.Text>{backupProgress?.message}</Typography.Text>
+            <Typography.Text>
+              {backupProgress?.message === 'Starting backup...'
+                ? t('backup.progress.starting')
+                : backupProgress?.message}
+            </Typography.Text>
             <Progress
               percent={backupProgress?.progress || 0}
               status="active"
@@ -834,10 +891,10 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
         </Card>
       )}
 
-      <Typography.Title level={5}>Backup History</Typography.Title>
+      <Typography.Title level={5}>{t('backup.history.title')}</Typography.Title>
 
       {backupHistory.length === 0 ? (
-        <Empty description="No backup history yet" />
+        <Empty description={t('backup.history.empty')} />
       ) : (
         <Table
           columns={columns}
@@ -861,23 +918,24 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
       )}
 
       <Modal
-        title="Custom Commit Message"
+        title={t('backup.commitModal.title')}
         open={commitModalOpen}
         onCancel={() => setCommitModalOpen(false)}
         onOk={handleBackupConfirm}
-        okText="Start Backup"
+        okText={t('backup.commitModal.start')}
+        cancelText={t('backup.action.cancel')}
         confirmLoading={backingUp}
         okButtonProps={{ icon: <PlayCircleOutlined /> }}
       >
         <Space direction="vertical" style={{ width: '100%' }}>
           <Typography.Text type="secondary">
-            Customize the commit message for this backup. Leave as-is to use the default.
+            {t('backup.commitModal.description')}
           </Typography.Text>
           <Input.TextArea
             value={commitMessage}
             onChange={(e) => setCommitMessage(e.target.value)}
             rows={3}
-            placeholder="Backup: YYYY-MM-DD HH:mm:ss"
+            placeholder={t('backup.commitModal.placeholder')}
           />
         </Space>
       </Modal>
@@ -901,28 +959,28 @@ const BackupPanel: React.FC<BackupPanelProps> = ({ repoId, active = false }) => 
       />
 
       <Modal
-        title="Force Push Confirmation"
+        title={t('backup.forceModal.title')}
         open={forcePushConfirmOpen}
         onCancel={() => setForcePushConfirmOpen(false)}
         onOk={handleForcePush}
-        okText="Force Push"
+        okText={t('backup.action.forcePush')}
+        cancelText={t('backup.action.cancel')}
         okButtonProps={{ danger: true }}
         confirmLoading={pushing}
       >
         <Typography.Text>
-          This will{' '}
+          {t('backup.forceModal.warningPrefix')}
           <Typography.Text strong type="danger">
-            force push
-          </Typography.Text>{' '}
-          and overwrite the remote branch history. Any commits on the remote
-          that are not in your local branch will be{' '}
-          <Typography.Text strong type="danger">
-            permanently lost
+            {t('backup.forceModal.action')}
           </Typography.Text>
-          .
+          {t('backup.forceModal.warningMiddle')}
+          <Typography.Text strong type="danger">
+            {t('backup.forceModal.loss')}
+          </Typography.Text>
+          {t('backup.forceModal.warningSuffix')}
         </Typography.Text>
         <Typography.Paragraph style={{ marginTop: 12 }}>
-          Are you sure you want to continue?
+          {t('backup.forceModal.question')}
         </Typography.Paragraph>
       </Modal>
     </div>

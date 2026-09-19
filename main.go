@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"backup-manager/internal/api"
 	"backup-manager/internal/api/handler"
+	"backup-manager/internal/appconfig"
 	"backup-manager/internal/entry"
 	"backup-manager/internal/git"
 	"backup-manager/internal/scheduler"
@@ -26,21 +26,6 @@ import (
 //go:embed frontend/dist/*
 var frontendAssets embed.FS
 
-// AppConfig is the application-level configuration.
-type AppConfig struct {
-	Port        int    `json:"port"`
-	OpenBrowser bool   `json:"open_browser"`
-	Theme       string `json:"theme"`
-}
-
-func defaultConfig() AppConfig {
-	return AppConfig{
-		Port:        9800,
-		OpenBrowser: true,
-		Theme:       "light",
-	}
-}
-
 func main() {
 	// Determine app data directory
 	homeDir, err := os.UserHomeDir()
@@ -54,7 +39,11 @@ func main() {
 	}
 
 	// Load app config
-	appConfig := loadConfig(appDir)
+	configManager, err := appconfig.NewManager(appDir)
+	if err != nil {
+		log.Fatalf("failed to initialize app config: %v", err)
+	}
+	appConfig := configManager.Get()
 
 	// Initialize key manager (AES-256-GCM)
 	keyPath := filepath.Join(appDir, "master.key")
@@ -121,7 +110,7 @@ func main() {
 	contentHandler := handler.NewContentHandler(contentSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc)
 	authHandler := handler.NewAuthHandler(authSvc)
-	systemHandler := handler.NewSystemHandler()
+	systemHandler := handler.NewSystemHandler(configManager)
 	rollbackHandler := handler.NewRollbackHandler(rollbackSvc)
 
 	// Setup router
@@ -213,40 +202,6 @@ func main() {
 	_ = srvMgr.Stop()
 
 	log.Println("Backup Manager stopped")
-}
-
-// loadConfig loads application configuration from disk.
-func loadConfig(appDir string) AppConfig {
-	config := defaultConfig()
-	configPath := filepath.Join(appDir, "config.json")
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		// Write default config
-		saveConfig(appDir, config)
-		return config
-	}
-
-	if err := json.Unmarshal(data, &config); err != nil {
-		log.Printf("warning: failed to parse config, using defaults: %v", err)
-		saveConfig(appDir, config)
-	}
-
-	return config
-}
-
-// saveConfig writes application configuration to disk.
-func saveConfig(appDir string, config AppConfig) {
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		log.Printf("warning: failed to marshal config: %v", err)
-		return
-	}
-
-	configPath := filepath.Join(appDir, "config.json")
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		log.Printf("warning: failed to write config: %v", err)
-	}
 }
 
 // registerAutoBackups registers cron jobs for repos with auto_backup enabled.

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Typography, Button, Space, Tabs } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
@@ -44,6 +45,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
   onSave,
   saving = false,
 }) => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<string>('preview');
   const [editContent, setEditContent] = useState(content);
 
@@ -72,7 +74,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
     </div>
   ) : (
     <div className="markdown-preview" style={{ ...previewContainerStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <Typography.Text type="secondary">Empty file</Typography.Text>
+      <Typography.Text type="secondary">{t('preview.emptyFile')}</Typography.Text>
     </div>
   );
 
@@ -83,12 +85,12 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
   const tabItems = [
     {
       key: 'preview',
-      label: 'Preview',
+      label: t('preview.tabs.preview'),
       children: markdownElement,
     },
     {
       key: 'edit',
-      label: 'Edit',
+      label: t('preview.tabs.edit'),
       children: (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Space style={{ marginBottom: 8 }}>
@@ -98,14 +100,14 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
               onClick={handleSave}
               loading={saving}
             >
-              Save
+              {t('preview.actions.save')}
             </Button>
             <Button
               icon={<CloseOutlined />}
               onClick={handleCancel}
               disabled={saving}
             >
-              Cancel
+              {t('preview.actions.cancel')}
             </Button>
           </Space>
           <textarea

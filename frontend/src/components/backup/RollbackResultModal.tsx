@@ -5,6 +5,7 @@ import {
   CloseCircleOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { RollbackResult } from '../../types';
 
 interface RollbackResultModalProps {
@@ -18,6 +19,8 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
   result,
   onClose,
 }) => {
+  const { t } = useTranslation();
+
   if (!result) return null;
 
   const allSuccess = result.failed === 0 && result.total > 0;
@@ -32,21 +35,22 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
 
   return (
     <Modal
-      title="Rollback Result"
+      title={t('rollback.result.title')}
       open={open}
       onCancel={onClose}
       onOk={onClose}
-      okText="Close"
+      okText={t('rollback.result.close')}
+      cancelText={t('rollback.result.cancel')}
       width={520}
     >
       <div style={{ textAlign: 'center', marginBottom: 20 }}>
         {icon}
         <Typography.Title level={4} style={{ marginTop: 12 }}>
           {allSuccess
-            ? 'Rollback completed successfully'
+            ? t('rollback.result.success')
             : result.success > 0
-            ? 'Rollback completed with issues'
-            : 'Rollback failed'}
+              ? t('rollback.result.issues')
+              : t('rollback.result.failed')}
         </Typography.Title>
       </div>
 
@@ -62,26 +66,32 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
           <Typography.Title level={3} style={{ color: '#52c41a', margin: 0 }}>
             {result.success}
           </Typography.Title>
-          <Typography.Text type="secondary">Restored</Typography.Text>
+          <Typography.Text type="secondary">
+            {t('rollback.result.restoredLabel')}
+          </Typography.Text>
         </div>
         <div style={{ textAlign: 'center' }}>
           <Typography.Title level={3} style={{ color: '#ff4d4f', margin: 0 }}>
             {result.failed}
           </Typography.Title>
-          <Typography.Text type="secondary">Failed</Typography.Text>
+          <Typography.Text type="secondary">
+            {t('rollback.result.failedLabel')}
+          </Typography.Text>
         </div>
       </div>
 
       <Space style={{ marginBottom: 12 }}>
-        <Typography.Text type="secondary">Commit:</Typography.Text>
+        <Typography.Text type="secondary">{t('rollback.result.commit')}</Typography.Text>
         <Tag color="blue">{result.commit_hash.substring(0, 8)}</Tag>
-        <Typography.Text type="secondary">Total: {result.total}</Typography.Text>
+        <Typography.Text type="secondary">
+          {t('rollback.result.total', { count: result.total })}
+        </Typography.Text>
       </Space>
 
       {result.failures && result.failures.length > 0 && (
         <div>
           <Typography.Text strong style={{ color: '#ff4d4f' }}>
-            Failure Details:
+            {t('rollback.result.failureDetails')}
           </Typography.Text>
           <List
             size="small"
@@ -102,8 +112,8 @@ const RollbackResultModal: React.FC<RollbackResultModalProps> = ({
       <Alert
         type="info"
         showIcon
-        message="Next Steps"
-        description="The rollback rewrote the content under data/. Every link points there, so all local paths already show the restored version — run a backup to record it in a new commit."
+        message={t('rollback.result.nextSteps')}
+        description={t('rollback.result.nextStepsDescription')}
         style={{ marginTop: 16 }}
       />
     </Modal>

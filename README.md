@@ -54,6 +54,7 @@ The system refuses anything else at creation time and reports drift in the consi
 - **Git Integration** — Remote repo config, SSH/HTTPS auth management (AES-256-GCM encrypted storage)
 - **Local File Browsing** — Any path visible to the server can be browsed (no root whitelist); optional hidden-file display, and a path can also be typed in directly
 - **Scheduled Backups** — Cron-based auto-backup, auto-load on startup, dynamic register/unregister on config change
+- **Bilingual UI** — Switch between English (`en`) and Simplified Chinese (`zh-CN`); English is the default, and the choice is persisted app-wide by the backend
 - **System Tray** — macOS menu bar / system tray icon, server start/stop control
 - **All-in-One Binary** — Single binary, one-click launch
 
@@ -125,6 +126,7 @@ go build -o backup-manager .
 |------|------|
 | Backend | Go 1.22+ (Gin, SQLite via modernc.org/sqlite) |
 | Frontend | React 18 + TypeScript + Vite + Ant Design 5 |
+| Localization | i18next + react-i18next; synchronized Ant Design/dayjs locales |
 | State Management | Zustand |
 | Scheduling | robfig/cron/v3 |
 | Encryption | AES-256-GCM |
@@ -137,6 +139,8 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 
 | Category | Endpoint | Function |
 |------|------|------|
+| Settings | `GET /settings` | Read the app-wide default language; response `{"data":{"language":"en"}}` |
+| Settings | `PUT /settings` | Persist `{"language":"en"}` or `{"language":"zh-CN"}`; response returns the same `data.language` shape |
 | Repos | `POST/GET/DELETE /repos` | Repo CRUD |
 | Repos | `GET /repos/:id` | Repo detail (with config and status) |
 | Repos | `PUT /repos/:id/config` | Update config (partial update) |
@@ -196,7 +200,7 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 
 | Path | Description |
 |------|------|
-| `~/.config/backup-manager/config.json` | App config (port, theme, auto-open browser, etc.) — JSON keys: `port`, `open_browser`, `theme` |
+| `~/.config/backup-manager/config.json` | App config — JSON keys: `port`, `open_browser`, `theme`, `language`; `language` is the app-wide UI default (`en` or `zh-CN`, default `en`) |
 | `~/.config/backup-manager/master.key` | AES-256 encryption key (auto-generated on first start) |
 | `~/.config/backup-manager/backup-manager.db` | SQLite database (local, per machine) — holds `repos`, `repo_configs`, `repo_auths` |
 | `<repo-root>/.backup-manager/manifest.json` | **Inside the repo**, tracked by Git — holds entries, links and devices. This is *not* the SQLite database; it lives in the repo so it travels with `git clone` / `git push` |
@@ -246,8 +250,9 @@ backup-manager/
 │   │       ├── backup.go       # Backup trigger + history + push
 │   │       ├── auth.go         # Git auth management
 │   │       ├── rollback.go     # Content rollback + file restore
-│   │       ├── system.go       # Health check
+│   │       ├── system.go       # Health check + app settings
 │   │       └── errors.go       # Error code mapping
+│   ├── appconfig/              # config.json loading and persistence
 │   ├── entry/                  # Entry & link subsystem
 │   │   ├── manifest.go         # Manifest load / save / atomic write / R-1..R-3 validation
 │   │   ├── service.go          # Service wiring, repo mutex, manifest commit, helpers
@@ -294,6 +299,7 @@ backup-manager/
         ├── App.tsx              # Route config
         ├── App.css              # Global styles
         ├── api/client.ts        # axios instance + all API functions
+        ├── i18n/                # English/Chinese resources + locale synchronization
         ├── types/index.ts       # TypeScript type definitions
         ├── store/appStore.ts    # Zustand state management
         ├── routes/              # Page components

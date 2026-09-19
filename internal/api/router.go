@@ -34,6 +34,8 @@ func SetupRouter(
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", systemHandler.Health)
+		v1.GET("/settings", systemHandler.Settings)
+		v1.PUT("/settings", systemHandler.UpdateSettings)
 
 		// 仓库
 		v1.POST("/repos", repoHandler.Create)

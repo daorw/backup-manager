@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Typography, Button, Space } from 'antd';
 import { EditOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
 
@@ -85,6 +86,7 @@ const TextPreview: React.FC<TextPreviewProps> = ({
   onSave,
   saving = false,
 }) => {
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
 
@@ -111,7 +113,7 @@ const TextPreview: React.FC<TextPreviewProps> = ({
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {truncated && (
           <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
-            File was truncated. Only the first 10MB is shown.
+            {t('preview.text.truncatedWarning')}
           </Typography.Text>
         )}
         <Space style={{ marginBottom: 8 }}>
@@ -121,14 +123,14 @@ const TextPreview: React.FC<TextPreviewProps> = ({
             onClick={handleSave}
             loading={saving}
           >
-            Save
+            {t('preview.actions.save')}
           </Button>
           <Button
             icon={<CloseOutlined />}
             onClick={handleCancel}
             disabled={saving}
           >
-            Cancel
+            {t('preview.actions.cancel')}
           </Button>
         </Space>
         <textarea
@@ -150,12 +152,12 @@ const TextPreview: React.FC<TextPreviewProps> = ({
           onClick={handleStartEdit}
           style={{ marginBottom: 8 }}
         >
-          Edit
+          {t('preview.actions.edit')}
         </Button>
       )}
       {truncated && (
         <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
-          File was truncated. Only the first 10MB is shown.
+          {t('preview.text.truncatedWarning')}
         </Typography.Text>
       )}
       <pre

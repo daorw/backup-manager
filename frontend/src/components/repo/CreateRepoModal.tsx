@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Modal, Form, Input, Typography, message, Button } from 'antd';
 import { FolderOpenOutlined } from '@ant-design/icons';
+import { Trans, useTranslation } from 'react-i18next';
 import { useAppStore } from '../../store/appStore';
 import DirectoryPickerModal from '../common/DirectoryPickerModal';
 
@@ -10,6 +11,7 @@ interface CreateRepoModalProps {
 }
 
 const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
+  const { t } = useTranslation();
   const [form] = Form.useForm();
   const createRepo = useAppStore((s) => s.createRepo);
   const [submitting, setSubmitting] = useState(false);
@@ -21,7 +23,7 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
       setSubmitting(true);
       await createRepo(values.name, values.path);
       form.resetFields();
-      message.success('Repository created successfully');
+      message.success(t('repo.create.success'));
       onClose();
     } catch (err) {
       if (err instanceof Error) {
@@ -44,12 +46,12 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
   return (
     <>
       <Modal
-        title="Create Repository"
+        title={t('repo.create.title')}
         open={open}
         onOk={handleOk}
         onCancel={handleCancel}
         confirmLoading={submitting}
-        okText="Create"
+        okText={t('repo.create.submit')}
         width={520}
       >
         <Form
@@ -59,27 +61,26 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
         >
           <Form.Item
             name="name"
-            label="Repository Name"
+            label={t('repo.create.name')}
             rules={[
-              { required: true, message: 'Please enter a repository name' },
-              { min: 1, max: 100, message: 'Name must be 1-100 characters' },
+              { required: true, message: t('repo.create.nameRequired') },
+              { min: 1, max: 100, message: t('repo.create.nameLength') },
               {
                 pattern: /^[a-zA-Z0-9_\-\s]+$/,
-                message:
-                  'Name can only contain letters, numbers, spaces, underscores and hyphens',
+                message: t('repo.create.namePattern'),
               },
             ]}
           >
-            <Input placeholder="My Backups" />
+            <Input placeholder={t('repo.create.namePlaceholder')} />
           </Form.Item>
           <Form.Item
             name="path"
-            label="Repository Path"
+            label={t('repo.create.path')}
             rules={[
-              { required: true, message: 'Please enter a repository path' },
+              { required: true, message: t('repo.create.pathRequired') },
               {
                 pattern: /^\/|^~\/|^\.\.\/|^\.\//,
-                message: 'Please enter an absolute path starting with /',
+                message: t('repo.create.pathAbsolute'),
               },
             ]}
           >
@@ -94,29 +95,33 @@ const CreateRepoModal: React.FC<CreateRepoModalProps> = ({ open, onClose }) => {
                   onClick={() => setPickerOpen(true)}
                   style={{ padding: '0 4px' }}
                 >
-                  Browse
+                  {t('repo.create.browse')}
                 </Button>
               }
             />
           </Form.Item>
           <Form.Item>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              The repository will be created at the specified path and Git will be initialized
-              automatically. Backed-up content lives in{' '}
-              <Typography.Text code>data/</Typography.Text>; entries, links and devices are stored in{' '}
-              <Typography.Text code>.backup-manager/manifest.json</Typography.Text> and travel with
-              Git.
+              <Trans
+                i18nKey="repo.create.description"
+                components={{
+                  data: <Typography.Text code />,
+                  manifest: <Typography.Text code />,
+                }}
+              />
             </Typography.Text>
           </Form.Item>
         </Form>
+
+        {/* Nested to inherit the parent Modal's z-index context. */}
+        <DirectoryPickerModal
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onSelect={handlePickDirectory}
+          mode="directory"
+          title={t('repo.create.selectDirectory')}
+        />
       </Modal>
-      <DirectoryPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelect={handlePickDirectory}
-        mode="directory"
-        title="Select Repository Directory"
-      />
     </>
   );
 };

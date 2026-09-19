@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import i18n from '../i18n';
 import type {
   BackupRepo,
   BackupResult,
@@ -143,7 +144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ repos: await api.fetchRepos(), loading: false });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch repos'), loading: false });
+      set({ error: errMsg(err, 'errors.repos.fetch'), loading: false });
     }
   },
 
@@ -152,7 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ currentRepo: await api.fetchRepo(id), loading: false });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch repo'), loading: false });
+      set({ error: errMsg(err, 'errors.repo.fetch'), loading: false });
     }
   },
 
@@ -162,7 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const repo = await api.createRepo({ name, path });
       set({ repos: [...get().repos, repo], loading: false });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to create repo'), loading: false });
+      set({ error: errMsg(err, 'errors.repo.create'), loading: false });
       throw err;
     }
   },
@@ -173,7 +174,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.deleteRepo(id);
       set({ repos: get().repos.filter((r) => r.id !== id), loading: false });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to delete repo'), loading: false });
+      set({ error: errMsg(err, 'errors.repo.delete'), loading: false });
       throw err;
     }
   },
@@ -185,7 +186,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const repo = await api.fetchRepo(id);
       set({ currentRepo: repo, repos: get().repos.map((r) => (r.id === id ? repo : r)) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to update config') });
+      set({ error: errMsg(err, 'errors.repo.updateConfig') });
       throw err;
     }
   },
@@ -197,7 +198,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ entries: await api.fetchEntries(repoId) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch entries') });
+      set({ error: errMsg(err, 'errors.entries.fetch') });
     }
   },
 
@@ -207,7 +208,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.adoptEntry(repoId, req);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to create entry') });
+      set({ error: errMsg(err, 'errors.entry.create') });
       throw err;
     }
   },
@@ -218,7 +219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.addLink(repoId, entryId, req);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to add link') });
+      set({ error: errMsg(err, 'errors.link.add') });
       throw err;
     }
   },
@@ -230,7 +231,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchEntries(repoId);
       return views;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to bulk link') });
+      set({ error: errMsg(err, 'errors.link.bulk') });
       throw err;
     }
   },
@@ -241,7 +242,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.repairLink(repoId, entryId, linkId);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to repair the link') });
+      set({ error: errMsg(err, 'errors.link.repair') });
       throw err;
     }
   },
@@ -252,7 +253,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.readoptLink(repoId, entryId, linkId);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to re-adopt') });
+      set({ error: errMsg(err, 'errors.link.readopt') });
       throw err;
     }
   },
@@ -263,7 +264,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.removeLink(repoId, entryId, linkId);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to remove the link') });
+      set({ error: errMsg(err, 'errors.link.remove') });
       throw err;
     }
   },
@@ -274,7 +275,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.removeEntry(repoId, entryId, mode, linkId);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to remove the entry') });
+      set({ error: errMsg(err, 'errors.entry.remove') });
       throw err;
     }
   },
@@ -291,7 +292,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ audit, auditLoading: false });
       return audit;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to audit the repository'), auditLoading: false });
+      set({ error: errMsg(err, 'errors.audit.fetch'), auditLoading: false });
       throw err;
     }
   },
@@ -305,7 +306,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ audit: await api.fetchConsistency(repoId), auditLoading: false });
       return result;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to repair'), auditLoading: false });
+      set({ error: errMsg(err, 'errors.audit.repair'), auditLoading: false });
       throw err;
     }
   },
@@ -318,7 +319,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ currentDevice: info });
       return info;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch the current device') });
+      set({ error: errMsg(err, 'errors.device.current') });
       return null;
     }
   },
@@ -330,7 +331,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ devices });
       return devices;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch devices') });
+      set({ error: errMsg(err, 'errors.device.fetch') });
       return [];
     }
   },
@@ -341,7 +342,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.registerDevice(repoId, name);
       await get().fetchDevices(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to register the device') });
+      set({ error: errMsg(err, 'errors.device.register') });
       throw err;
     }
   },
@@ -352,7 +353,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.renameDevice(repoId, fingerprint, name);
       await get().fetchDevices(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to rename the device') });
+      set({ error: errMsg(err, 'errors.device.rename') });
       throw err;
     }
   },
@@ -364,7 +365,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchDevices(repoId);
       await get().fetchEntries(repoId);
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to delete the device') });
+      set({ error: errMsg(err, 'errors.device.delete') });
       throw err;
     }
   },
@@ -379,7 +380,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return result;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to apply the device') });
+      set({ error: errMsg(err, 'errors.device.apply') });
       throw err;
     }
   },
@@ -391,7 +392,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchEntries(repoId);
       return result;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to detach the device') });
+      set({ error: errMsg(err, 'errors.device.detach') });
       throw err;
     }
   },
@@ -405,7 +406,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         backupProgress: {
           repo_id: repoId,
           status: 'running',
-          message: 'Starting backup...',
+          message: i18n.t('backup.progress.starting'),
           progress: 0,
           started_at: new Date().toISOString(),
         },
@@ -418,8 +419,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           message:
             result.commit_message ||
             (result.files_changed > 0
-              ? `Changed: ${result.files_changed}, Removed: ${result.files_removed}`
-              : 'No changes'),
+              ? i18n.t('backup.progress.changed', {
+                  changed: result.files_changed,
+                  removed: result.files_removed,
+                })
+              : i18n.t('backup.progress.noChanges')),
           progress: result.commit_hash ? 100 : 0,
           started_at: result.completed_at,
         },
@@ -427,7 +431,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ currentRepo: await api.fetchRepo(repoId) });
       return result;
     } catch (err: unknown) {
-      const message = errMsg(err, 'Backup failed');
+      const message = errMsg(err, 'errors.backup.failed');
       set({
         backupProgress: {
           repo_id: repoId,
@@ -446,7 +450,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ backupHistory: await api.fetchBackupHistory(repoId, limit, offset) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch backup history') });
+      set({ error: errMsg(err, 'errors.backup.history') });
     }
   },
 
@@ -456,7 +460,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.pushRepo(repoId, force);
       set({ currentRepo: await api.fetchRepo(repoId) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Push failed') });
+      set({ error: errMsg(err, 'errors.backup.push') });
       throw err;
     }
   },
@@ -467,7 +471,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.gitInitRepo(repoId);
       set({ currentRepo: await api.fetchRepo(repoId) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Git init failed') });
+      set({ error: errMsg(err, 'errors.backup.gitInit') });
       throw err;
     }
   },
@@ -479,7 +483,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ currentAuth: await api.fetchAuth(repoId) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch auth config') });
+      set({ error: errMsg(err, 'errors.auth.fetch') });
     }
   },
 
@@ -488,7 +492,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ currentAuth: await api.setAuth(repoId, auth) });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to set auth config') });
+      set({ error: errMsg(err, 'errors.auth.set') });
       throw err;
     }
   },
@@ -499,7 +503,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.clearAuth(repoId);
       set({ currentAuth: null });
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to clear auth config') });
+      set({ error: errMsg(err, 'errors.auth.clear') });
       throw err;
     }
   },
@@ -512,7 +516,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const files = await api.fetchCommitChangedFiles(repoId, commitHash);
       set((state) => ({ commitFilesByHash: { ...state.commitFilesByHash, [commitHash]: files } }));
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch commit files') });
+      set({ error: errMsg(err, 'errors.rollback.files') });
     }
   },
 
@@ -523,7 +527,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ rollbackResult: result, rollbackLoading: false });
       return result;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Rollback failed'), rollbackLoading: false });
+      set({ error: errMsg(err, 'errors.rollback.execute'), rollbackLoading: false });
       throw err;
     }
   },
@@ -539,7 +543,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ commitFileContent: content, commitFileContentLoading: false });
       return content;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to fetch commit file content'), commitFileContentLoading: false });
+      set({ error: errMsg(err, 'errors.rollback.preview'), commitFileContentLoading: false });
       throw err;
     }
   },
@@ -551,7 +555,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ restoreFileLoading: false });
       return result;
     } catch (err: unknown) {
-      set({ error: errMsg(err, 'Failed to restore file'), restoreFileLoading: false });
+      set({ error: errMsg(err, 'errors.rollback.restore'), restoreFileLoading: false });
       throw err;
     }
   },
@@ -559,7 +563,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearCommitFileContent: () => set({ commitFileContent: null, commitFileContentLoading: false }),
 }));
 
-/** 统一的错误消息提取。 */
-function errMsg(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
+/** 统一提取后端详情；缺少详情时使用当前语言的操作级错误文案。 */
+function errMsg(err: unknown, fallbackKey: string): string {
+  return err instanceof Error ? err.message : i18n.t(fallbackKey);
 }

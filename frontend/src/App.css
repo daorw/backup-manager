@@ -19,6 +19,14 @@ html, body, #root {
   min-height: 0;
 }
 
+/* 让菜单撑满侧栏剩余空间，底部语言选择器始终贴住视口底部。 */
+.app-sidebar > .ant-layout-sider-children {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',

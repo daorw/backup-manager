@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Descriptions, Tag, Typography } from 'antd';
 import {
   FileExclamationOutlined,
@@ -19,17 +20,19 @@ function formatSize(bytes: number): string {
 }
 
 const BinaryInfo: React.FC<BinaryInfoProps> = ({ preview, fileName }) => {
+  const { t } = useTranslation();
+
   return (
     <div style={{ padding: 24, textAlign: 'center' }}>
       <FileExclamationOutlined
         style={{ fontSize: 48, color: '#faad14', marginBottom: 16 }}
       />
       <Typography.Title level={5} type="secondary">
-        Binary File
+        {t('preview.binary.title')}
       </Typography.Title>
       <Typography.Paragraph type="secondary">
         <Typography.Text>
-          {fileName} is a binary file and cannot be previewed as text.
+          {t('preview.binary.description', { fileName })}
         </Typography.Text>
       </Typography.Paragraph>
       <Descriptions
@@ -38,14 +41,16 @@ const BinaryInfo: React.FC<BinaryInfoProps> = ({ preview, fileName }) => {
         size="small"
         style={{ maxWidth: 400, margin: '0 auto' }}
       >
-        <Descriptions.Item label="File Name">{fileName}</Descriptions.Item>
-        <Descriptions.Item label="MIME Type">
+        <Descriptions.Item label={t('preview.binary.fileNameLabel')}>
+          {fileName}
+        </Descriptions.Item>
+        <Descriptions.Item label={t('preview.binary.mimeTypeLabel')}>
           <Tag>{preview.mime_type || 'application/octet-stream'}</Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="Size">
+        <Descriptions.Item label={t('preview.binary.sizeLabel')}>
           {formatSize(preview.size)}
         </Descriptions.Item>
-        <Descriptions.Item label="Encoding">
+        <Descriptions.Item label={t('preview.binary.encodingLabel')}>
           binary
         </Descriptions.Item>
       </Descriptions>

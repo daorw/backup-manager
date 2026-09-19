@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Row, Col, Typography, Button, Space } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../store/appStore';
 import RepoCard from '../components/repo/RepoCard';
 import CreateRepoModal from '../components/repo/CreateRepoModal';
 
 const Dashboard: React.FC = () => {
+  const { t } = useTranslation();
   const repos = useAppStore((s) => s.repos);
   const fetchRepos = useAppStore((s) => s.fetchRepos);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -25,22 +27,22 @@ const Dashboard: React.FC = () => {
       >
         <div>
           <Typography.Title level={3} style={{ margin: 0 }}>
-            Repositories
+            {t('dashboard.title')}
           </Typography.Title>
           <Typography.Text type="secondary">
-            Manage your backup repositories
+            {t('dashboard.subtitle')}
           </Typography.Text>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => fetchRepos()}>
-            Refresh
+            {t('dashboard.refresh')}
           </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => setCreateModalOpen(true)}
           >
-            Create Repository
+            {t('dashboard.create')}
           </Button>
         </Space>
       </Space>
@@ -55,10 +57,10 @@ const Dashboard: React.FC = () => {
           }}
         >
           <Typography.Title level={4} type="secondary">
-            No repositories yet
+            {t('dashboard.emptyTitle')}
           </Typography.Title>
           <Typography.Paragraph type="secondary">
-            Create your first backup repository to get started.
+            {t('dashboard.emptyDescription')}
           </Typography.Paragraph>
           <Button
             type="primary"
@@ -66,7 +68,7 @@ const Dashboard: React.FC = () => {
             icon={<PlusOutlined />}
             onClick={() => setCreateModalOpen(true)}
           >
-            Create Repository
+            {t('dashboard.create')}
           </Button>
         </div>
       ) : (

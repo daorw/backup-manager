@@ -90,7 +90,9 @@
 |----|------|------|--------|
 | FR-19 | Git 远程仓库配置 | 可视化配置 Git 远程仓库地址和目标分支 | P0 |
 | FR-20 | Git 认证配置 | 配置 Git 操作所需的认证信息（SSH 私钥 或 HTTPS 用户名密码），加密存储在 SQLite | P1 |
-| FR-21 | 应用全局设置 | 应用级别的基本设置（端口号、主题、是否自动打开浏览器） | P1 |
+| FR-21 | 应用全局设置 | 管理应用级基本设置（端口号、主题、是否自动打开浏览器），并在 UI 中提供英文（`en`）与简体中文（`zh-CN`）切换。默认英文；所选语言由后端作为应用级设置持久化 | P1 |
+
+设置 API 契约：`GET /api/v1/settings` 返回 `{"data":{"language":"en"}}`；`PUT /api/v1/settings` 接受 `{"language":"en"}` 或 `{"language":"zh-CN"}`，并返回相同的 `data.language` 结构。
 
 ### 3.7 系统管理
 
@@ -117,6 +119,7 @@
 | NFR-9 | **路径安全** | 四层路径校验（Clean→Abs→EvalSymlinks→Prefix）防止路径穿越 |
 | NFR-10 | **并发安全** | 每个仓库独立互斥锁防止并发备份；预览/编辑接口限流（最大 5 并发） |
 | NFR-11 | **敏感信息加密** | SSH 私钥和 HTTPS 密码使用 AES-256-GCM 加密后存储在 SQLite，密钥文件权限 0600 |
+| NFR-12 | **本地化一致性** | 切换语言时同步更新应用文案、Ant Design 组件与 dayjs 格式；在 UI 展示前恢复已持久化的应用级选择 |
 
 ---
 
@@ -193,7 +196,7 @@ Device                         # 一台机器的元数据
 |------|------|------|------|
 | `repos`、`repo_configs`、`repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite（二进制） | 本机私有：含加密凭据、本机路径、定时任务。绝不提交 |
 | 条目、链接、设备 | `<repo-root>/.backup-manager/manifest.json` | JSON，Git 跟踪 | 必须跨机器传输。SQLite 文件按机器独立，传不过去 |
-| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置 |
+| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置，包括应用范围的 `language`（默认 `en`） |
 
 **SQLite 数据库** —— `~/.config/backup-manager/backup-manager.db`，三张表（不变）：
 
@@ -246,7 +249,8 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 | **设备元数据位置** | 设备、条目与链接存放于仓库内的 `<repo>/.backup-manager/manifest.json`（Git 跟踪），而非按机器独立的 SQLite，从而新机器仅凭 `git clone` 即可获知 |
 | **Adopt 语义** | 创建条目会把源文件**移动**进仓库并用软链接替换原位置。原文件绝不留存为第二份副本 |
 | 内容删除 | 删除内容需输入 `repo_path` 二次确认；提供 `unlink` / `move_back` 作为非破坏性替代；每次删除前先提交，因此 `git revert` 永远可用 |
-| 前端技术选型 | React 18 + TypeScript + Vite + Ant Design 5 |
+| 前端技术选型 | React 18 + TypeScript + Vite + Ant Design 5 + i18next/react-i18next；Ant Design 与 dayjs 使用活动 UI 语言环境 |
+| UI 语言 | 支持 `en` 与 `zh-CN`，默认 `en`，所选应用级默认语言持久化到 `config.json` |
 | 启动方式 | 启动后自动打开浏览器 |
 | Markdown 图片 | 支持 Markdown 中的本地图片显示 |
 | 多仓库 | 支持多个仓库并行管理 |

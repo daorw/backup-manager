@@ -1,3 +1,9 @@
+export type AppLanguage = 'en' | 'zh-CN';
+
+export interface AppSettings {
+  language: AppLanguage;
+}
+
 export type BackupRepoStatus = 'active' | 'error' | 'backing_up';
 
 export interface BackupRepo {

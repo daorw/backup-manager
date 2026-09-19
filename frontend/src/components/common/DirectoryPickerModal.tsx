@@ -20,6 +20,7 @@ import {
   EyeOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
+import { useTranslation } from 'react-i18next';
 import { browsePath, fetchHomeDir } from '../../api/client';
 import type { BrowseEntry } from '../../types';
 
@@ -40,7 +41,7 @@ interface DirectoryPickerModalProps {
   initialPath?: string;
 }
 
-function toNodes(entries: BrowseEntry[]): FileBrowserNode[] {
+function toNodes(entries: BrowseEntry[], locale: string): FileBrowserNode[] {
   return entries
     .map((entry) => ({
       key: entry.path,
@@ -54,16 +55,17 @@ function toNodes(entries: BrowseEntry[]): FileBrowserNode[] {
     .sort((a, b) => {
       if (a.nodeType === 'directory' && b.nodeType === 'file') return -1;
       if (a.nodeType === 'file' && b.nodeType === 'directory') return 1;
-      return a.title.toString().localeCompare(b.title.toString());
+      return a.title.toString().localeCompare(b.title.toString(), locale);
     });
 }
 
 async function loadChildren(
   nodePath: string,
-  includeHidden: boolean
+  includeHidden: boolean,
+  locale: string
 ): Promise<FileBrowserNode[]> {
   const entries: BrowseEntry[] = await browsePath(nodePath, includeHidden);
-  return toNodes(entries);
+  return toNodes(entries, locale);
 }
 
 const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
@@ -71,9 +73,11 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   onClose,
   onSelect,
   mode = 'directory',
-  title = 'Select Directory',
+  title,
   initialPath,
 }) => {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage || i18n.language;
   const [treeData, setTreeData] = useState<FileBrowserNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string>('');
@@ -94,22 +98,20 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     async (target: string, includeHidden: boolean) => {
       setLoading(true);
       try {
-        const nodes = await loadChildren(target, includeHidden);
+        const nodes = await loadChildren(target, includeHidden, locale);
         setTreeData(nodes);
         setExpandedKeys([]);
         setPathWarning('');
         return true;
       } catch (err) {
         setTreeData([]);
-        setPathWarning(
-          err instanceof Error ? err.message : 'Cannot open this directory'
-        );
+        setPathWarning(err instanceof Error ? err.message : t('picker.error.openDirectory'));
         return false;
       } finally {
         setLoading(false);
       }
     },
-    []
+    [locale, t]
   );
 
   const loadRoot = useCallback(async () => {
@@ -139,11 +141,11 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       return;
     }
     try {
-      const children = await loadChildren(node.path, showHidden);
+      const children = await loadChildren(node.path, showHidden, locale);
       setTreeData((prev) => updateTreeNode(prev, node.key, children));
       setCurrentPathInput(node.path);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to load directory');
+      message.error(err instanceof Error ? err.message : t('picker.error.loadDirectory'));
     }
   };
 
@@ -192,7 +194,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const useTypedPath = () => {
     const target = currentPathInput.trim();
     if (!target) {
-      message.warning('Please enter a path first');
+      message.warning(t('picker.warning.enterPath'));
       return;
     }
     onSelect(target);
@@ -223,7 +225,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 
   const handleConfirm = () => {
     if (!selectedPath) {
-      message.warning('Please select a path first');
+      message.warning(t('picker.warning.selectPath'));
       return;
     }
     onSelect(selectedPath);
@@ -232,40 +234,40 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 
   return (
     <Modal
-      title={title}
+      title={title ?? t('picker.title')}
       open={open}
       onCancel={onClose}
       width={680}
       footer={
         <Space>
-          <Button onClick={onClose}>Cancel</Button>
-          <Tooltip title="Use the path typed above as-is (it does not need to exist yet)">
+          <Button onClick={onClose}>{t('picker.action.cancel')}</Button>
+          <Tooltip title={t('picker.tooltip.useTypedPath')}>
             <Button onClick={useTypedPath} disabled={!currentPathInput.trim()}>
-              Use Typed Path
+              {t('picker.action.useTypedPath')}
             </Button>
           </Tooltip>
           <Button type="primary" onClick={handleConfirm} disabled={!selectedPath}>
-            Select
+            {t('picker.action.select')}
           </Button>
         </Space>
       }
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Space.Compact style={{ width: '100%' }}>
-          <Tooltip title="Parent directory">
+          <Tooltip title={t('picker.tooltip.parentDirectory')}>
             <Button icon={<ArrowUpOutlined />} onClick={handleGoUp} />
           </Tooltip>
-          <Tooltip title={`Home (${homeDir})`}>
+          <Tooltip title={t('picker.tooltip.home', { path: homeDir })}>
             <Button onClick={handleGoHome}>~</Button>
           </Tooltip>
           <Input
             value={currentPathInput}
             onChange={(e) => setCurrentPathInput(e.target.value)}
             onPressEnter={handleNavigateToPath}
-            placeholder="Type a full path (e.g. /Users/me/notes) and press Enter"
+            placeholder={t('picker.pathPlaceholder')}
           />
-          <Button onClick={handleNavigateToPath}>Go</Button>
-          <Tooltip title="Reload">
+          <Button onClick={handleNavigateToPath}>{t('picker.action.go')}</Button>
+          <Tooltip title={t('picker.tooltip.reload')}>
             <Button
               icon={<ReloadOutlined />}
               onClick={() => loadDir(currentPathInput.trim() || homeDir, showHidden)}
@@ -281,7 +283,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             unCheckedChildren={<EyeOutlined />}
             size="small"
           />
-          <Typography.Text style={{ fontSize: 12 }}>Show hidden files</Typography.Text>
+          <Typography.Text style={{ fontSize: 12 }}>{t('picker.showHidden')}</Typography.Text>
           {pathWarning && (
             <Typography.Text type="warning" style={{ fontSize: 12 }}>
               {pathWarning}
@@ -306,7 +308,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           ) : treeData.length === 0 ? (
             <Empty
               description={
-                pathWarning ? 'Directory cannot be listed' : 'No entries found'
+                pathWarning ? t('picker.empty.unavailable') : t('picker.empty.noEntries')
               }
             />
           ) : (
@@ -324,10 +326,7 @@ const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
         </div>
 
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          Two ways to choose: type a full path above and click &quot;Use Typed Path&quot;, or
-          browse the tree and click a node then &quot;Select&quot;.
-          {mode === 'directory' && ' (directories only)'}
-          {mode === 'file' && ' (files only)'}
+          {t(`picker.help.${mode}`)}
         </Typography.Text>
       </Space>
     </Modal>

@@ -1,5 +1,7 @@
 import axios from 'axios';
+import i18n from '../i18n';
 import type {
+  AppSettings,
   BackupRepo,
   CreateRepoRequest,
   UpdateConfigRequest,
@@ -48,10 +50,22 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    const message = error.response?.data?.error || error.message || 'Request failed';
+    const message = error.response?.data?.error || i18n.t('errors.requestFailed');
     return Promise.reject(new Error(message));
   }
 );
+
+// ── 应用设置 ──────────────────────────────────────────────────────────
+
+export async function fetchSettings(): Promise<AppSettings> {
+  const { data } = await api.get<AppSettings>('/settings');
+  return data;
+}
+
+export async function updateSettings(settings: AppSettings): Promise<AppSettings> {
+  const { data } = await api.put<AppSettings>('/settings', settings);
+  return data;
+}
 
 // ── 仓库 ──────────────────────────────────────────────────────────────
 

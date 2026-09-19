@@ -30,6 +30,7 @@ import {
   DesktopOutlined,
   FolderOpenOutlined,
 } from '@ant-design/icons';
+import { Trans, useTranslation } from 'react-i18next';
 import { useAppStore } from '../../store/appStore';
 import type { Entry, Link, LinkState, ApplyResult, AdoptRequest, DetachMode } from '../../types';
 import AdoptModal from './AdoptModal';
@@ -38,15 +39,15 @@ import DirectoryPickerModal from '../common/DirectoryPickerModal';
 const { Text, Paragraph } = Typography;
 
 /** 链接状态 → 展示样式。 */
-const STATE_META: Record<LinkState, { color: string; label: string }> = {
-  ok: { color: 'green', label: 'ok' },
-  missing: { color: 'gold', label: 'missing' },
-  wrong_target: { color: 'orange', label: 'wrong target' },
-  replaced: { color: 'volcano', label: 'replaced' },
-  dangling: { color: 'red', label: 'dangling' },
-  occupied: { color: 'red', label: 'occupied' },
-  disabled: { color: 'default', label: 'disabled' },
-  not_current: { color: 'default', label: 'other device' },
+const STATE_META: Record<LinkState, { color: string; labelKey: string }> = {
+  ok: { color: 'green', labelKey: 'entries.state.ok' },
+  missing: { color: 'gold', labelKey: 'entries.state.missing' },
+  wrong_target: { color: 'orange', labelKey: 'entries.state.wrongTarget' },
+  replaced: { color: 'volcano', labelKey: 'entries.state.replaced' },
+  dangling: { color: 'red', labelKey: 'entries.state.dangling' },
+  occupied: { color: 'red', labelKey: 'entries.state.occupied' },
+  disabled: { color: 'default', labelKey: 'entries.state.disabled' },
+  not_current: { color: 'default', labelKey: 'entries.state.otherDevice' },
 };
 
 /** 可以就地修复的状态。 */
@@ -64,6 +65,7 @@ interface EntriesPanelProps {
  * 因此通过任何一条编辑都等于编辑被备份对象本身。
  */
 const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
+  const { t } = useTranslation();
   const entries = useAppStore((s) => s.entries);
   const devices = useAppStore((s) => s.devices);
   const currentDevice = useAppStore((s) => s.currentDevice);
@@ -130,18 +132,18 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
   const handleAdopt = async (req: AdoptRequest) => {
     await adoptEntry(repoId, req);
-    message.success('Entry created');
+    message.success(t('entries.message.entryCreated'));
   };
 
   const handleAddLink = async () => {
     if (!addLinkFor || !addLinkPath.trim()) return;
     try {
       await addLink(repoId, addLinkFor.id, { local_path: addLinkPath.trim() });
-      message.success('Link added');
+      message.success(t('entries.message.linkAdded'));
       setAddLinkFor(null);
       setAddLinkPath('');
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to add the link');
+      message.error(err instanceof Error ? err.message : t('entries.error.addLink'));
     }
   };
 
@@ -150,7 +152,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
     try {
       setPlan(await applyDevice(repoId, fingerprint, true));
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to build the plan');
+      message.error(err instanceof Error ? err.message : t('entries.error.buildPlan'));
     }
   };
 
@@ -160,9 +162,11 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       const result = await applyDevice(repoId, fingerprint, false);
       setPlan(null);
       const n = result.created.length + result.repaired.length;
-      message.success(n > 0 ? `Applied: ${n} link(s) converged` : 'Already converged');
+      message.success(
+        n > 0 ? t('entries.message.applied', { count: n }) : t('entries.message.alreadyConverged')
+      );
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to apply');
+      message.error(err instanceof Error ? err.message : t('entries.error.apply'));
     } finally {
       setApplying(false);
     }
@@ -174,7 +178,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       await runAudit(repoId);
       setAuditOpen(true);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Audit failed');
+      message.error(err instanceof Error ? err.message : t('entries.error.audit'));
     }
   };
 
@@ -183,12 +187,15 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       const res = await repairConsistency(repoId);
       message.success(
         res.remaining_errors > 0
-          ? `Repaired ${res.repaired_count}; ${res.remaining_errors} error(s) still need manual resolution`
-          : `Repaired ${res.repaired_count}`
+          ? t('entries.message.repairedWithErrors', {
+              count: res.remaining_errors,
+              repairedCount: res.repaired_count,
+            })
+          : t('entries.message.repaired', { count: res.repaired_count })
       );
       refresh();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Repair failed');
+      message.error(err instanceof Error ? err.message : t('entries.error.repair'));
     }
   };
 
@@ -198,12 +205,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
       const res = await detachDevice(repoId, fingerprint, detachMode);
       message.success(
         detachMode === 'keep'
-          ? 'Stopped managing the links on this device'
-          : `Detached: ${res.removed.length} link(s) removed. Use Apply to bring them back`
+          ? t('entries.message.stoppedManaging')
+          : t('entries.message.detached', { count: res.removed.length })
       );
       setDetachOpen(false);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Detach failed');
+      message.error(err instanceof Error ? err.message : t('entries.error.detach'));
     }
   };
 
@@ -211,12 +218,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
     if (!removeEntryFor) return;
     try {
       await removeEntry(repoId, removeEntryFor.id, removeMode);
-      message.success('Entry removed');
+      message.success(t('entries.message.entryRemoved'));
       setRemoveEntryFor(null);
       setRemoveMode('unlink');
       setPurgeConfirmText('');
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to remove the entry');
+      message.error(err instanceof Error ? err.message : t('entries.error.removeEntry'));
     }
   };
 
@@ -241,12 +248,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
         local_root: bulkRoot.trim(),
         entry_ids: bulkSelected,
       });
-      message.success(`Created ${created.length} link(s)`);
+      message.success(t('entries.message.linksCreated', { count: created.length }));
       setBulkOpen(false);
       setBulkRoot('');
       setBulkSelected([]);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Failed to create the links');
+      message.error(err instanceof Error ? err.message : t('entries.error.createLinks'));
       // 批量创建可能部分成功，刷新真实状态
       refresh();
     } finally {
@@ -271,7 +278,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
         }}
       >
         <Tag color={meta.color} style={{ margin: 0 }}>
-          {meta.label}
+          {t(meta.labelKey)}
         </Tag>
         <Tooltip title={link.device}>
           <Tag style={{ margin: 0 }}>{link.device_name || link.device.slice(0, 8)}</Tag>
@@ -288,7 +295,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
         )}
         <Space size={4}>
           {REPAIRABLE.includes(link.state) && link.is_current && (
-            <Tooltip title="Recreate the local symlink">
+            <Tooltip title={t('entries.tooltip.recreateLink')}>
               <Button
                 size="small"
                 type="text"
@@ -298,19 +305,19 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             </Tooltip>
           )}
           {link.state === 'replaced' && link.is_current && (
-            <Tooltip title="The app wrote this path atomically, replacing the symlink with a real file. Move that content into the repository and restore the link.">
+            <Tooltip title={t('entries.tooltip.reAdopt')}>
               <Button
                 size="small"
                 type="text"
                 icon={<ImportOutlined />}
                 onClick={() => readoptLink(repoId, entry.id, link.id)}
               >
-                Re-adopt
+                {t('entries.action.reAdopt')}
               </Button>
             </Tooltip>
           )}
           {link.is_current && (
-            <Tooltip title="Remove this link. The repository content is kept.">
+            <Tooltip title={t('entries.tooltip.removeLink')}>
               <Button
                 size="small"
                 type="text"
@@ -329,28 +336,30 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
     <div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Badge status="processing" />
-        <Text strong>{currentDevice?.name || currentDevice?.hostname || 'this device'}</Text>
+        <Text strong>
+          {currentDevice?.name || currentDevice?.hostname || t('entries.thisDevice')}
+        </Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {devices.length} device(s)
+          {t('entries.deviceCount', { count: devices.length })}
         </Text>
         <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>
-          Refresh
+          {t('entries.action.refresh')}
         </Button>
         <Button icon={<PlusOutlined />} type="primary" onClick={() => setAdoptOpen(true)}>
-          New Entry
+          {t('entries.action.newEntry')}
         </Button>
         <Button icon={<LinkOutlined />} onClick={openBulkLink}>
-          Bulk Link
+          {t('entries.action.bulkLink')}
         </Button>
         <Button icon={<DesktopOutlined />} onClick={openDevices}>
-          Devices
+          {t('entries.action.devices')}
         </Button>
         <Button
           icon={<CloudDownloadOutlined />}
           onClick={handlePlan}
           disabled={!fingerprint}
         >
-          Apply
+          {t('entries.action.apply')}
         </Button>
         <Button
           icon={<SafetyCertificateOutlined />}
@@ -358,7 +367,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           loading={auditLoading}
           danger={!!audit && audit.errors > 0}
         >
-          Audit
+          {t('entries.action.audit')}
           {audit && (audit.errors > 0 || audit.warnings > 0) && (
             <Tag
               color={audit.errors > 0 ? 'red' : 'gold'}
@@ -373,12 +382,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           onClick={() => setDetachOpen(true)}
           disabled={!fingerprint}
         >
-          Detach
+          {t('entries.action.detach')}
         </Button>
       </Space>
 
       {entries.length === 0 ? (
-        <Empty description="No entries yet. Create one to move content into the repository." />
+        <Empty description={t('entries.empty')} />
       ) : (
         <Collapse
           accordion={false}
@@ -387,9 +396,9 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             label: (
               <Space wrap>
                 <Text strong>{entry.repo_path}</Text>
-                <Tag>{entry.kind}</Tag>
+                <Tag>{t(`entries.kind.${entry.kind}`)}</Tag>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {entry.links.length} link(s)
+                  {t('entries.linkCount', { count: entry.links.length })}
                 </Text>
               </Space>
             ),
@@ -404,14 +413,14 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                   setRemoveEntryFor(entry);
                 }}
               >
-                Remove
+                {t('entries.action.remove')}
               </Button>
             ),
             children: (
               <div>
                 {entry.links.length === 0 ? (
                   <Paragraph type="secondary" style={{ margin: 0 }}>
-                    No links. Add one to make this content reachable at a local path.
+                    {t('entries.noLinks')}
                   </Paragraph>
                 ) : (
                   entry.links.map((l) => renderLink(entry, l))
@@ -426,7 +435,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                     setAddLinkPath('');
                   }}
                 >
-                  Add Link
+                  {t('entries.action.addLink')}
                 </Button>
               </div>
             ),
@@ -442,23 +451,24 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
       {/* 添加链接：目标路径必须空闲（不存在或为空目录），所以用自由输入 */}
       <Modal
-        title={`Add Link — ${addLinkFor?.repo_path || ''}`}
+        title={t('entries.addLink.title', { repoPath: addLinkFor?.repo_path || '' })}
         open={!!addLinkFor}
         onCancel={() => setAddLinkFor(null)}
         onOk={handleAddLink}
-        okText="Add"
+        okText={t('entries.action.add')}
+        cancelText={t('entries.action.cancel')}
       >
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="A symlink pointing at this entry's content will be created here — nothing is copied. The path must be free (missing or an empty directory)."
+          message={t('entries.addLink.info')}
         />
-        <Text>Local path</Text>
+        <Text>{t('entries.addLink.localPath')}</Text>
         <input
           className="ant-input"
           style={{ marginTop: 4 }}
-          placeholder="/Users/you/Desktop/notes.txt"
+          placeholder={t('entries.addLink.placeholder')}
           value={addLinkPath}
           onChange={(e) => setAddLinkPath(e.target.value)}
         />
@@ -466,14 +476,15 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
       {/* 移除条目 */}
       <Modal
-        title={`Remove Entry — ${removeEntryFor?.repo_path || ''}`}
+        title={t('entries.remove.title', { repoPath: removeEntryFor?.repo_path || '' })}
         open={!!removeEntryFor}
         onCancel={() => {
           setRemoveEntryFor(null);
           setPurgeConfirmText('');
         }}
         onOk={handleRemoveEntry}
-        okText="Remove"
+        okText={t('entries.action.remove')}
+        cancelText={t('entries.action.cancel')}
         okButtonProps={{
           danger: true,
           disabled: removeMode === 'purge' && purgeConfirmText.trim() !== purgeTarget,
@@ -487,15 +498,9 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           }}
         >
           <Space direction="vertical">
-            <Radio value="unlink">
-              Remove this device's links only — the entry and repository content stay
-            </Radio>
-            <Radio value="move_back">
-              Move the content back to a local path, then remove the entry
-            </Radio>
-            <Radio value="purge">
-              Delete the repository content as well — the previous commit can restore it
-            </Radio>
+            <Radio value="unlink">{t('entries.remove.mode.unlink')}</Radio>
+            <Radio value="move_back">{t('entries.remove.mode.moveBack')}</Radio>
+            <Radio value="purge">{t('entries.remove.mode.purge')}</Radio>
           </Space>
         </Radio.Group>
 
@@ -506,15 +511,19 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
               type="error"
               showIcon
               style={{ marginBottom: 12 }}
-              message="This deletes the content under data/, not just the link."
+              message={t('entries.remove.purgeWarning')}
               description={
                 otherDeviceLinks > 0
-                  ? `${otherDeviceLinks} link(s) on other devices will dangle until those machines re-apply.`
+                  ? t('entries.remove.otherDeviceLinks', { count: otherDeviceLinks })
                   : undefined
               }
             />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Type <Text code>{purgeTarget}</Text> to confirm.
+              <Trans
+                i18nKey="entries.remove.confirm"
+                values={{ repoPath: purgeTarget }}
+                components={{ code: <Text code /> }}
+              />
             </Text>
             <Input
               style={{ marginTop: 8 }}
@@ -528,13 +537,13 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
       {/* 一致性巡检结论 */}
       <Modal
-        title="Consistency Audit"
+        title={t('entries.audit.title')}
         open={auditOpen}
         onCancel={() => setAuditOpen(false)}
         width={720}
         footer={[
           <Button key="close" onClick={() => setAuditOpen(false)}>
-            Close
+            {t('entries.action.close')}
           </Button>,
           <Button
             key="repair"
@@ -543,21 +552,27 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
             disabled={!audit || (audit.findings ?? []).length === 0}
             onClick={handleRepair}
           >
-            Repair
+            {t('entries.action.repair')}
           </Button>,
         ]}
       >
         {!audit || audit.findings.length === 0 ? (
-          <Alert type="success" showIcon message="No inconsistency found" />
+          <Alert type="success" showIcon message={t('entries.audit.noInconsistency')} />
         ) : (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Text>
-              <Text type="danger">{audit.errors} error(s)</Text>
+              <Text type="danger">
+                {t('entries.audit.errorCount', { count: audit.errors })}
+              </Text>
               {' · '}
-              <Text type="warning">{audit.warnings} warning(s)</Text>
+              <Text type="warning">
+                {t('entries.audit.warningCount', { count: audit.warnings })}
+              </Text>
               {' · '}
               <Text type="secondary">
-                {audit.entry_count} entr(ies), {audit.link_count} link(s)
+                {t('entries.audit.entryCount', { count: audit.entry_count })}
+                {' · '}
+                {t('entries.audit.linkCount', { count: audit.link_count })}
               </Text>
             </Text>
             {(audit.findings ?? []).map((f, i) => (
@@ -567,17 +582,19 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
               >
                 <Space wrap size={4}>
                   <Tag color={f.severity === 'error' ? 'red' : 'gold'} style={{ margin: 0 }}>
-                    {f.severity}
+                    {t(`entries.severity.${f.severity}`)}
                   </Tag>
                   <Text code>{f.code}</Text>
-                  {f.repairable && <Tag color="blue">repairable</Tag>}
+                  {f.repairable && (
+                    <Tag color="blue">{t('entries.audit.repairable')}</Tag>
+                  )}
                 </Space>
                 <div>
                   <Text>{f.message}</Text>
                 </div>
                 {f.repo_path && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    repo: {f.repo_path}
+                    {t('entries.audit.repoPath', { path: f.repo_path })}
                   </Text>
                 )}
                 {f.local_path && (
@@ -595,55 +612,67 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
       {/* 卸载本机 */}
       <Modal
-        title={`Detach ${currentDevice?.name || 'this device'}`}
+        title={t('entries.detach.title', {
+          device: currentDevice?.name || t('entries.thisDevice'),
+        })}
         open={detachOpen}
         onCancel={() => setDetachOpen(false)}
         onOk={handleDetach}
-        okText="Detach"
+        okText={t('entries.action.detach')}
+        cancelText={t('entries.action.cancel')}
         okButtonProps={{ danger: detachMode === 'unlink' }}
       >
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="The repository content is never touched. Link definitions stay in the manifest, so Apply brings everything back."
+          message={t('entries.detach.info')}
         />
         <Radio.Group value={detachMode} onChange={(e) => setDetachMode(e.target.value)}>
           <Space direction="vertical">
-            <Radio value="unlink">Remove this device's local symlinks</Radio>
-            <Radio value="keep">Leave the filesystem alone, just stop managing</Radio>
+            <Radio value="unlink">{t('entries.detach.unlink')}</Radio>
+            <Radio value="keep">{t('entries.detach.keep')}</Radio>
           </Space>
         </Radio.Group>
       </Modal>
 
       {/* apply 计划确认 */}
       <Modal
-        title="Apply Plan"
+        title={t('entries.apply.title')}
         open={!!plan}
         onCancel={() => setPlan(null)}
         onOk={handleApply}
         confirmLoading={applying}
-        okText="Apply"
+        okText={t('entries.action.apply')}
+        cancelText={t('entries.action.cancel')}
       >
         {plan && (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Text>
-              create <b>{plan.created.length}</b> · repair <b>{plan.repaired.length}</b> · skip{' '}
-              <b>{plan.skipped.length}</b> · conflict <b>{plan.conflicts.length}</b> · orphan{' '}
-              <b>{plan.orphans.length}</b>
+              <Trans
+                i18nKey="entries.apply.summary"
+                values={{
+                  created: plan.created.length,
+                  repaired: plan.repaired.length,
+                  skipped: plan.skipped.length,
+                  conflicts: plan.conflicts.length,
+                  orphans: plan.orphans.length,
+                }}
+                components={{ strong: <b /> }}
+              />
             </Text>
             {plan.conflicts.map((a) => (
               <Text key={a.link_id} type="danger" style={{ fontSize: 12 }}>
-                conflict: {a.local_path} — {a.reason}
+                {t('entries.apply.conflict', { path: a.local_path, reason: a.reason })}
               </Text>
             ))}
             {plan.orphans.map((a) => (
               <Text key={a.link_id} type="warning" style={{ fontSize: 12 }}>
-                orphan: {a.repo_path} — repository content is missing
+                {t('entries.apply.orphan', { path: a.repo_path })}
               </Text>
             ))}
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Conflicting paths are reported, never overwritten.
+              {t('entries.apply.note')}
             </Text>
           </Space>
         )}
@@ -651,29 +680,30 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
       {/* 设备管理（FR-26 / FR-29） */}
       <Modal
-        title="Devices"
+        title={t('entries.devices.title')}
         open={devicesOpen}
         onCancel={() => setDevicesOpen(false)}
-        footer={<Button onClick={() => setDevicesOpen(false)}>Close</Button>}
+        footer={
+          <Button onClick={() => setDevicesOpen(false)}>{t('entries.action.close')}</Button>
+        }
         width={620}
       >
         <Text type="secondary" style={{ fontSize: 12 }}>
-          Devices live in the repository manifest and travel with Git. Deleting a device only
-          removes its link definitions — entries and repository content stay.
+          {t('entries.devices.description')}
         </Text>
         {!devices.some((d) => d.is_current) && (
           <Alert
             type="info"
             showIcon
             style={{ margin: '12px 0' }}
-            message="This machine has no device entry on this repository yet."
+            message={t('entries.devices.unregistered')}
             action={
               <Button
                 size="small"
                 type="primary"
                 onClick={() => registerDevice(repoId, currentDevice?.hostname)}
               >
-                Register
+                {t('entries.action.register')}
               </Button>
             }
           />
@@ -682,7 +712,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           size="small"
           style={{ marginTop: 12 }}
           dataSource={devices}
-          locale={{ emptyText: 'No device registered yet' }}
+          locale={{ emptyText: t('entries.devices.empty') }}
           renderItem={(d) => (
             <List.Item
               actions={
@@ -691,10 +721,10 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                   : [
                       <Popconfirm
                         key="delete"
-                        title="Delete this device?"
-                        description="Its link definitions are removed. Entries and repository content stay."
-                        okText="Delete"
-                        cancelText="Cancel"
+                        title={t('entries.devices.deleteTitle')}
+                        description={t('entries.devices.deleteDescription')}
+                        okText={t('entries.action.delete')}
+                        cancelText={t('entries.action.cancel')}
                         okButtonProps={{ danger: true }}
                         onConfirm={() => deleteDevice(repoId, d.fingerprint)}
                       >
@@ -714,7 +744,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                     <Text
                       strong
                       editable={{
-                        tooltip: 'Rename',
+                        tooltip: t('entries.action.rename'),
                         onChange: (value) => {
                           const name = value.trim();
                           if (name && name !== d.name) {
@@ -727,14 +757,14 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                     </Text>
                     {d.is_current && (
                       <Tag color="blue" style={{ margin: 0 }}>
-                        this device
+                        {t('entries.devices.current')}
                       </Tag>
                     )}
                   </Space>
                 }
                 description={
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {d.link_count} link(s)
+                    {t('entries.linkCount', { count: d.link_count })}
                     {d.hostname ? ` · ${d.hostname}` : ''}
                     {d.os ? ` · ${d.os}` : ''}
                   </Text>
@@ -747,11 +777,12 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
 
       {/* 批量链接（FR-9）：把多个条目一次性挂到某个本地根目录下 */}
       <Modal
-        title="Bulk Link"
+        title={t('entries.bulk.title')}
         open={bulkOpen}
         onCancel={() => setBulkOpen(false)}
         onOk={handleBulkLink}
-        okText="Create Links"
+        okText={t('entries.action.createLinks')}
+        cancelText={t('entries.action.cancel')}
         confirmLoading={bulkSubmitting}
         okButtonProps={{ disabled: !bulkRoot.trim() || bulkSelected.length === 0 }}
         width={640}
@@ -760,14 +791,14 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="One symlink is created per selected entry at <local root>/<repo_path>. Nothing is copied."
+          message={t('entries.bulk.info')}
         />
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div>
-            <Text strong>Local root</Text>
+            <Text strong>{t('entries.bulk.localRoot')}</Text>
             <Input
               style={{ marginTop: 4 }}
-              placeholder="~/Restore"
+              placeholder={t('entries.bulk.rootPlaceholder')}
               value={bulkRoot}
               onChange={(e) => setBulkRoot(e.target.value)}
               addonAfter={
@@ -782,16 +813,16 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
           </div>
           <div>
             <Space style={{ marginBottom: 4 }}>
-              <Text strong>Entries</Text>
+              <Text strong>{t('entries.bulk.entries')}</Text>
               <Button
                 size="small"
                 type="link"
                 onClick={() => setBulkSelected(entries.map((e) => e.id))}
               >
-                Select all
+                {t('entries.action.selectAll')}
               </Button>
               <Button size="small" type="link" onClick={() => setBulkSelected([])}>
-                Clear
+                {t('entries.action.clear')}
               </Button>
             </Space>
             <Checkbox.Group
@@ -807,22 +838,23 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
                         ? `${bulkRoot.replace(/\/+$/, '')}/${e.repo_path}`
                         : e.repo_path}
                     </Text>
-                    <Tag style={{ margin: 0 }}>{e.kind}</Tag>
+                    <Tag style={{ margin: 0 }}>{t(`entries.kind.${e.kind}`)}</Tag>
                   </Space>
                 ),
               }))}
             />
           </div>
         </Space>
-      </Modal>
 
-      <DirectoryPickerModal
-        open={rootPickerOpen}
-        mode="directory"
-        title="Select the local root directory"
-        onClose={() => setRootPickerOpen(false)}
-        onSelect={(path) => setBulkRoot(path)}
-      />
+        {/* Nested to inherit the parent Modal's z-index context. */}
+        <DirectoryPickerModal
+          open={rootPickerOpen}
+          mode="directory"
+          title={t('entries.bulk.pickerTitle')}
+          onClose={() => setRootPickerOpen(false)}
+          onSelect={(path) => setBulkRoot(path)}
+        />
+      </Modal>
     </div>
   );
 };

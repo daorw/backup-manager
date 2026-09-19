@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Form, Input, Checkbox, Alert, Space, Button, Typography } from 'antd';
 import { FolderOpenOutlined } from '@ant-design/icons';
+import { Trans, useTranslation } from 'react-i18next';
 import DirectoryPickerModal from '../common/DirectoryPickerModal';
 import type { AdoptRequest } from '../../types';
 
@@ -14,14 +15,18 @@ interface AdoptModalProps {
  * 校验仓库内路径：起点固定为仓库的 data/，只能是相对路径且不得出现 ".."。
  * 这是新建备份文件/目录时「不得突破 data/」的前端约束，后端还会再校验一次。
  */
-function validateRepoPath(value?: string): string | null {
+type RepoPathValidationKey =
+  | 'adopt.validation.relativePath'
+  | 'adopt.validation.insideData';
+
+function validateRepoPath(value?: string): RepoPathValidationKey | null {
   if (!value) return null;
   const v = value.replace(/\\/g, '/');
   if (v.startsWith('/')) {
-    return 'Must be a path relative to data/ (no leading "/")';
+    return 'adopt.validation.relativePath';
   }
   if (v.split('/').some((seg) => seg === '..')) {
-    return 'Must stay inside data/ (".." is not allowed)';
+    return 'adopt.validation.insideData';
   }
   return null;
 }
@@ -45,6 +50,7 @@ function normalizeRepoPath(value?: string): string | undefined {
  * 该软链接就是条目的第一条链接（所有链接等价，不存在 in/out 之分），因此这里必须明确提示用户。
  */
 const AdoptModal: React.FC<AdoptModalProps> = ({ open, onClose, onSubmit }) => {
+  const { t } = useTranslation();
   const [form] = Form.useForm();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -76,22 +82,23 @@ const AdoptModal: React.FC<AdoptModalProps> = ({ open, onClose, onSubmit }) => {
   return (
     <>
       <Modal
-        title="New Entry"
+        title={t('adopt.title')}
         open={open}
         onCancel={onClose}
         onOk={handleOk}
         confirmLoading={submitting}
-        okText="Create"
+        okText={t('adopt.action.create')}
+        cancelText={t('adopt.action.cancel')}
         destroyOnClose
       >
         <Form form={form} layout="vertical">
           <Form.Item
-            label="Local Path"
+            label={t('adopt.field.localPath')}
             name="local_path"
-            rules={[{ required: true, message: 'Please pick the file or directory to back up' }]}
+            rules={[{ required: true, message: t('adopt.validation.localPathRequired') }]}
           >
             <Input
-              placeholder="e.g. ~/.config/opencode/opencode.json"
+              placeholder={t('adopt.placeholder.localPath')}
               addonAfter={
                 <Button
                   type="text"
@@ -104,57 +111,60 @@ const AdoptModal: React.FC<AdoptModalProps> = ({ open, onClose, onSubmit }) => {
           </Form.Item>
 
           <Form.Item
-            label="Repo Path"
+            label={t('adopt.field.repoPath')}
             name="repo_path"
-            tooltip="Path of the content under the repository's data/. Defaults to the file name. Must not overlap another entry."
-            extra="Rooted at this repository's data/: relative paths only — '..' is rejected, so the content cannot escape it."
+            tooltip={t('adopt.tooltip.repoPath')}
+            extra={t('adopt.extra.repoPath')}
             rules={[
               {
                 validator: (_, value) => {
-                  const err = validateRepoPath(value);
-                  return err ? Promise.reject(new Error(err)) : Promise.resolve();
+                  const errorKey = validateRepoPath(value);
+                  return errorKey ? Promise.reject(new Error(t(errorKey))) : Promise.resolve();
                 },
               },
             ]}
           >
-            <Input placeholder="e.g. opencode/opencode.json" addonBefore="data/" />
+            <Input placeholder={t('adopt.placeholder.repoPath')} addonBefore="data/" />
           </Form.Item>
 
           <Form.Item name="follow_symlinks" valuePropName="checked">
-            <Checkbox>Follow symlinks found inside the directory</Checkbox>
+            <Checkbox>{t('adopt.followSymlinks')}</Checkbox>
           </Form.Item>
 
           <Alert
             type="warning"
             showIcon
-            message="The content will be moved into the repository"
+            message={t('adopt.warning.title')}
             description={
               <Typography.Text style={{ fontSize: 12 }}>
-                The original location will be replaced by a symlink pointing at
-                <Typography.Text code>data/&lt;repo_path&gt;</Typography.Text>. Nothing is copied, so
-                the repository becomes the single owner of the content.
+                <Trans
+                  i18nKey="adopt.warning.description"
+                  values={{ path: 'data/<repo_path>' }}
+                  components={{ code: <Typography.Text code /> }}
+                />
               </Typography.Text>
             }
           />
           <Space />
         </Form>
-      </Modal>
 
-      <DirectoryPickerModal
-        open={pickerOpen}
-        mode="both"
-        title="Select the file or directory to back up"
-        onClose={() => setPickerOpen(false)}
-        onSelect={(path) => {
-          form.setFieldsValue({ local_path: path });
-          // 默认 repo_path 取文件名
-          const base = path.split('/').filter(Boolean).pop();
-          if (base && !form.getFieldValue('repo_path')) {
-            form.setFieldsValue({ repo_path: base });
-          }
-          setPickerOpen(false);
-        }}
-      />
+        {/* Nested to inherit the parent Modal's z-index context. */}
+        <DirectoryPickerModal
+          open={pickerOpen}
+          mode="both"
+          title={t('adopt.pickerTitle')}
+          onClose={() => setPickerOpen(false)}
+          onSelect={(path) => {
+            form.setFieldsValue({ local_path: path });
+            // 默认 repo_path 取文件名
+            const base = path.split('/').filter(Boolean).pop();
+            if (base && !form.getFieldValue('repo_path')) {
+              form.setFieldsValue({ repo_path: base });
+            }
+            setPickerOpen(false);
+          }}
+        />
+      </Modal>
     </>
   );
 };

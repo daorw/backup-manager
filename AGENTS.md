@@ -48,6 +48,7 @@
 | 前端框架 | React 18 + TypeScript | — |
 | 前端构建 | Vite 5 | — |
 | UI 组件 | Ant Design 5 | — |
+| 国际化 | i18next + react-i18next | 中英文资源；Ant Design 与 dayjs 语言环境同步 |
 | 状态管理 | Zustand | 轻量级状态管理 |
 | HTTP 客户端 | axios | — |
 | 前后端一体 | Go embed.FS + Gin 静态文件服务 | 单二进制部署 |
@@ -79,8 +80,11 @@ backup-manager/
 │   │       ├── backup.go            # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go              # Git 认证管理
 │   │       ├── rollback.go          # 内容回滚 + 单文件恢复 + 提交文件预览
-│   │       ├── system.go            # 健康检查
+│   │       ├── system.go            # 健康检查 + 应用设置
 │   │       └── errors.go            # 错误码映射（respondError）
+│   │
+│   ├── appconfig/                   # config.json 加载、校验与原子持久化
+│   │   └── manager.go
 │   │
 │   ├── entry/                       # 条目与链接子系统
 │   │   ├── manifest.go              # 清单加载/保存/原子写 + R-1..R-3 校验
@@ -135,9 +139,10 @@ backup-manager/
     ├── tsconfig.json
     └── src/
         ├── main.tsx                 # React 入口
-        ├── App.tsx                  # 路由配置 + ConfigProvider
+        ├── App.tsx                  # 路由配置 + ConfigProvider 语言环境同步
         ├── App.css                  # 全局样式
         ├── api/client.ts            # axios 实例 + 所有 API 函数
+        ├── i18n/                    # i18next 中英文资源 + dayjs 语言环境同步
         ├── types/index.ts           # TypeScript 类型定义
         ├── store/appStore.ts        # Zustand 状态管理
         ├── routes/                  # 页面组件
@@ -177,7 +182,7 @@ backup-manager/
 |------|------|------|------|
 | `repos`、`repo_configs`、`repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite（单个二进制文件） | 本机私有：加密凭据、本机路径、定时任务。绝不提交进仓库 |
 | 条目、链接、设备 | `<repo-root>/.backup-manager/manifest.json` | JSON，由 Git 跟踪 | 必须随 `git clone` / `git push` 跨机器传输；SQLite 是按机器独立的 |
-| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置 |
+| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置，含默认 UI 语言 `language`（默认 `en`） |
 
 ### SQLite 数据库（本机）
 
@@ -286,6 +291,8 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET | /health | 健康检查 |
+| GET | /settings | 获取应用级默认语言；响应 `{"data":{"language":"en"}}` |
+| PUT | /settings | 持久化 `{"language":"en"}` 或 `{"language":"zh-CN"}`；响应返回相同的 `data.language` 结构 |
 
 ## 关键设计决策
 
@@ -369,6 +376,12 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - 提供"打开 UI"、"启动/停止服务器"、"退出"操作
 - HTTP 服务器通过 servermgr 管理独立启停生命周期
 
+### 12. 双语 UI 与默认语言
+- 支持语言仅为英文 `en` 与简体中文 `zh-CN`，默认 `en`
+- 侧边栏语言切换器即时更新 i18next/react-i18next 文案，并同步 Ant Design `ConfigProvider`、dayjs 与页面 `lang`
+- UI 渲染前通过 `GET /api/v1/settings` 加载；切换后通过 `PUT /api/v1/settings` 将 `language` 原子持久化到 `~/.config/backup-manager/config.json`
+- 持久化失败时恢复原语言；缺失或无效的配置值归一化为 `en`
+
 ## 文档规范
 
 - **功能变更必须同步更新文档**：所有功能新增、修改、删除，必须同步更新对应的需求文档（`REQUIREMENT.md`）、技术方案（`DESIGN.md`）、快速入门（`docs/quick-start.md`）、`README.md` 和本文件（`AGENTS.md`）
@@ -394,6 +407,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - **文件命名**: PascalCase 组件（`BackupPanel.tsx`），camelCase 工具（`client.ts`）
 - **类型定义**: 在 `types/index.ts` 中集中管理
 - **API 调用**: 在 `api/client.ts` 中集中管理，通过 axios 拦截器解包 `{data: ...}`
+- **国际化**: 所有用户可见文案经 i18next/react-i18next；切换语言时同步 Ant Design、dayjs 与文档 `lang`
 - **状态管理**: 使用 Zustand `useAppStore` 单一 store
 - **组件模式**: 函数组件 + React Hooks
 - **路由**: react-router-dom v6
@@ -420,7 +434,7 @@ cd frontend && npx tsc --noEmit
 ## 环境与配置
 
 - 应用数据目录：`~/.config/backup-manager/`
-- 配置文件：`~/.config/backup-manager/config.json`（JSON 字段：`port`, `open_browser`, `theme`）
+- 配置文件：`~/.config/backup-manager/config.json`（JSON 字段：`port`, `open_browser`, `theme`, `language`；`language` 支持 `en` / `zh-CN`，默认 `en`）
 - 加密密钥：`~/.config/backup-manager/master.key`
 - SQLite 数据库：`~/.config/backup-manager/backup-manager.db`（存 repos / repo_configs / repo_auths）
 - 仓库清单：`<repo-root>/.backup-manager/manifest.json`（存条目 / 链接 / 设备，随 Git 传输）

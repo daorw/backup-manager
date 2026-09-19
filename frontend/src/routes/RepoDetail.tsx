@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../store/appStore';
 import FilesPanel from '../components/files/FilesPanel';
 import EntriesPanel from '../components/entry/EntriesPanel';
@@ -22,6 +23,7 @@ dayjs.extend(relativeTime);
 const RepoDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('browse');
   const currentRepo = useAppStore((s) => s.currentRepo);
   const loading = useAppStore((s) => s.loading);
@@ -48,7 +50,7 @@ const RepoDetail: React.FC = () => {
         <Typography.Text type="danger">{error}</Typography.Text>
         <br />
         <Button onClick={() => navigate('/')} style={{ marginTop: 16 }}>
-          Back to Dashboard
+          {t('repo.detail.back')}
         </Button>
       </div>
     );
@@ -57,10 +59,10 @@ const RepoDetail: React.FC = () => {
   if (!currentRepo) {
     return (
       <div style={{ textAlign: 'center', padding: 80 }}>
-        <Typography.Text type="secondary">Repository not found</Typography.Text>
+        <Typography.Text type="secondary">{t('repo.detail.notFound')}</Typography.Text>
         <br />
         <Button onClick={() => navigate('/')} style={{ marginTop: 16 }}>
-          Back to Dashboard
+          {t('repo.detail.back')}
         </Button>
       </div>
     );
@@ -79,7 +81,7 @@ const RepoDetail: React.FC = () => {
       label: (
         <Space>
           <FolderOpenOutlined />
-          <span>Browse</span>
+          <span>{t('repo.detail.browse')}</span>
         </Space>
       ),
       children: <FilesPanel repoId={currentRepo.id} />,
@@ -89,7 +91,7 @@ const RepoDetail: React.FC = () => {
       label: (
         <Space>
           <LinkOutlined />
-          <span>Entries</span>
+          <span>{t('repo.detail.entries')}</span>
         </Space>
       ),
       children: <EntriesPanel repoId={currentRepo.id} />,
@@ -99,7 +101,7 @@ const RepoDetail: React.FC = () => {
       label: (
         <Space>
           <CloudUploadOutlined />
-          <span>Backup</span>
+          <span>{t('repo.detail.backup')}</span>
         </Space>
       ),
       children: <BackupPanel repoId={currentRepo.id} active={activeTab === 'backup'} />,
@@ -109,7 +111,7 @@ const RepoDetail: React.FC = () => {
       label: (
         <Space>
           <SettingOutlined />
-          <span>Config</span>
+          <span>{t('repo.detail.config')}</span>
         </Space>
       ),
       children: <ConfigPanel repoId={currentRepo.id} />,
@@ -129,7 +131,7 @@ const RepoDetail: React.FC = () => {
             <Typography.Title level={3} style={{ margin: 0 }}>
               {currentRepo.name}
             </Typography.Title>
-            <Tag color={statusColor}>{currentRepo.status}</Tag>
+            <Tag color={statusColor}>{t(`repo.status.${currentRepo.status}`)}</Tag>
           </Space>
           <div style={{ marginTop: 4 }}>
             <Typography.Text
@@ -144,7 +146,9 @@ const RepoDetail: React.FC = () => {
                 type="secondary"
                 style={{ fontSize: 12, marginLeft: 16 }}
               >
-                Last backup: {dayjs(currentRepo.last_backup_at).fromNow()}
+                {t('repo.detail.lastBackup', {
+                  time: dayjs(currentRepo.last_backup_at).fromNow(),
+                })}
               </Typography.Text>
             )}
           </div>

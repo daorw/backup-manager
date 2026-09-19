@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
+import { useTranslation } from 'react-i18next';
 import type { BackupRepo } from '../../types';
 
 dayjs.extend(relativeTime);
@@ -21,27 +22,28 @@ interface RepoCardProps {
 
 const statusConfig: Record<
   string,
-  { color: string; icon: React.ReactNode; text: string }
+  { color: string; icon: React.ReactNode; translationKey: string }
 > = {
   active: {
     color: 'green',
     icon: <CheckCircleOutlined />,
-    text: 'Active',
+    translationKey: 'repo.status.active',
   },
   error: {
     color: 'red',
     icon: <ExclamationCircleOutlined />,
-    text: 'Error',
+    translationKey: 'repo.status.error',
   },
   backing_up: {
     color: 'blue',
     icon: <SyncOutlined spin />,
-    text: 'Backing up',
+    translationKey: 'repo.status.backing_up',
   },
 };
 
 const RepoCard: React.FC<RepoCardProps> = ({ repo }) => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const status = statusConfig[repo.status] || statusConfig.active;
 
   return (
@@ -54,7 +56,7 @@ const RepoCard: React.FC<RepoCardProps> = ({ repo }) => {
           icon={<RightCircleOutlined />}
           onClick={() => navigate(`/repos/${repo.id}`)}
         >
-          Open
+          {t('repo.card.open')}
         </Button>,
       ]}
     >
@@ -66,7 +68,7 @@ const RepoCard: React.FC<RepoCardProps> = ({ repo }) => {
               {repo.name}
             </Typography.Text>
             <Tag color={status.color} icon={status.icon}>
-              {status.text}
+              {t(status.translationKey)}
             </Tag>
           </Space>
         }
@@ -83,16 +85,16 @@ const RepoCard: React.FC<RepoCardProps> = ({ repo }) => {
             <Space direction="vertical" size={2}>
               {repo.last_backup_at ? (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  <ClockCircleOutlined /> Last backup:{' '}
-                  {dayjs(repo.last_backup_at).fromNow()}
+                  <ClockCircleOutlined />{' '}
+                  {t('repo.card.lastBackup', { time: dayjs(repo.last_backup_at).fromNow() })}
                 </Typography.Text>
               ) : (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  <ClockCircleOutlined /> No backups yet
+                  <ClockCircleOutlined /> {t('repo.card.noBackups')}
                 </Typography.Text>
               )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Created {dayjs(repo.created_at).fromNow()}
+                {t('repo.card.created', { time: dayjs(repo.created_at).fromNow() })}
               </Typography.Text>
             </Space>
           </div>

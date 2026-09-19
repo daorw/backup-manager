@@ -17,6 +17,10 @@ The main interface shows the status and basic information of all backup reposito
 - Quick actions (Open, Delete)
 - Create a new repository
 
+## Interface Language
+
+Use the language switch at the bottom of the sidebar to select English (`en`) or Simplified Chinese (`zh-CN`). English is the default. The backend saves the selection app-wide in `~/.config/backup-manager/config.json` as `language`, so it is reused when the UI is opened again.
+
 ## Repository Management
 
 ### Creating a Repository

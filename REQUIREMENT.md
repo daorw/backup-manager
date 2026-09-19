@@ -92,7 +92,9 @@ A **device** is one machine referencing the repository, identified by a stable m
 |----|------|------|--------|
 | FR-19 | Git Remote Repository Config | Visually configure the Git remote repository URL and target branch | P0 |
 | FR-20 | Git Authentication Config | Configure authentication information required for Git operations (SSH private key or HTTPS username/password), stored encrypted in SQLite | P1 |
-| FR-21 | Application Global Settings | Application-level basic settings (port number, theme, whether to auto-open browser) | P1 |
+| FR-21 | Application Global Settings | Manage application-level basics (port number, theme, whether to auto-open the browser) and provide an in-UI language switch for English (`en`) and Simplified Chinese (`zh-CN`). English is the default; the selected language is persisted by the backend as an app-wide setting | P1 |
+
+Settings API contract: `GET /api/v1/settings` returns `{"data":{"language":"en"}}`; `PUT /api/v1/settings` accepts `{"language":"en"}` or `{"language":"zh-CN"}` and returns the same `data.language` shape.
 
 ### 3.7 System Management
 
@@ -119,6 +121,7 @@ A **device** is one machine referencing the repository, identified by a stable m
 | NFR-9 | **Path Safety** | Four-layer path validation (Clean→Abs→EvalSymlinks→Prefix) to prevent path traversal |
 | NFR-10 | **Concurrency Safety** | Independent mutex per repository to prevent concurrent backups; preview/edit API rate-limited (max 5 concurrent) |
 | NFR-11 | **Sensitive Information Encryption** | SSH private keys and HTTPS passwords encrypted with AES-256-GCM before storage in SQLite, key file permissions 0600 |
+| NFR-12 | **Localization Consistency** | Switching language updates application text, Ant Design components, and dayjs formatting together; a persisted app-wide choice is restored before the UI is shown |
 
 ---
 
@@ -195,7 +198,7 @@ There are **three separate stores** with different files, formats and reasons to
 |------|------|------|------|
 | `repos`, `repo_configs`, `repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite (binary) | Machine-private: encrypted credentials, local paths, schedules. Never committed |
 | entries, links, devices | `<repo-root>/.backup-manager/manifest.json` | JSON, Git-tracked | Must travel across machines. The SQLite file is per machine and cannot |
-| app settings | `~/.config/backup-manager/config.json` | JSON | Application-level settings |
+| app settings | `~/.config/backup-manager/config.json` | JSON | Application-level settings, including the app-wide `language` (`en` by default) |
 
 **SQLite database** — `~/.config/backup-manager/backup-manager.db`, three tables, unchanged:
 
@@ -248,7 +251,8 @@ Entries, links and devices live inside the repository rather than in SQLite beca
 | **Device Metadata Location** | Devices, entries and links are stored in `<repo>/.backup-manager/manifest.json` inside the repository (git-tracked), not in the per-machine SQLite database, so a new machine learns them with a plain `git clone` |
 | **Adopt Semantics** | Creating an entry **moves** the source into the repo and replaces the original location with a symlink. The original file is never left behind as a second copy |
 | Content Removal | Removing content requires a typed `repo_path` confirmation; `unlink` / `move_back` are offered as non-destructive alternatives; a commit precedes every removal so `git revert` always works |
-| Frontend Technology Stack | React 18 + TypeScript + Vite + Ant Design 5 |
+| Frontend Technology Stack | React 18 + TypeScript + Vite + Ant Design 5 + i18next/react-i18next; Ant Design and dayjs use the active UI locale |
+| UI Language | Support `en` and `zh-CN`, default to `en`, and persist the selected app-wide default in `config.json` |
 | Startup Behavior | Auto-open browser after startup |
 | Markdown Images | Support local image display in Markdown |
 | Multiple Repositories | Support parallel management of multiple repositories |

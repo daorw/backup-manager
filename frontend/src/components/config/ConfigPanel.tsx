@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Form,
@@ -35,6 +36,7 @@ interface ConfigPanelProps {
 }
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const currentRepo = useAppStore((s) => s.currentRepo);
   const currentAuth = useAppStore((s) => s.currentAuth);
@@ -100,7 +102,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
         git_user_name: values.git_user_name || undefined,
         git_user_email: values.git_user_email || undefined,
       });
-      message.success('Configuration saved');
+      message.success(t('config.messages.configurationSaved'));
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -124,7 +126,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
         authData.password = values.password;
       }
       await setAuth(repoId, authData);
-      message.success('Authentication configuration saved');
+      message.success(t('config.messages.authenticationSaved'));
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -137,7 +139,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
   const handleClearAuth = async () => {
     try {
       await clearAuth(repoId);
-      message.success('Authentication cleared');
+      message.success(t('config.messages.authenticationCleared'));
     } catch (err) {
       if (err instanceof Error) {
         message.error(err.message);
@@ -148,7 +150,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
   const handleDeleteRepo = async () => {
     try {
       await deleteRepo(repoId);
-      message.success('Repository deleted');
+      message.success(t('config.messages.repositoryDeleted'));
       navigate('/');
     } catch (err) {
       if (err instanceof Error) {
@@ -175,33 +177,39 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
         title={
           <Space>
             <LinkOutlined />
-            <span>Git Remote Configuration</span>
+            <span>{t('config.remote.title')}</span>
           </Space>
         }
         style={{ marginBottom: 16 }}
         size="small"
       >
         <Form form={configForm} layout="vertical">
-          <Form.Item name="remote_url" label="Remote URL">
+          <Form.Item name="remote_url" label={t('config.remote.urlLabel')}>
             <Input
-              placeholder="git@github.com:user/repo.git or https://github.com/user/repo.git"
+              placeholder={t('config.remote.urlPlaceholder')}
               prefix={<GithubOutlined />}
             />
           </Form.Item>
-          <Form.Item name="branch" label="Branch">
-            <Input placeholder="main" />
+          <Form.Item name="branch" label={t('config.remote.branchLabel')}>
+            <Input placeholder={t('config.remote.branchPlaceholder')} />
           </Form.Item>
           <Divider />
-          <Form.Item name="git_user_name" label="Git User Name">
-            <Input placeholder="Your Name" prefix={<UserOutlined />} />
+          <Form.Item name="git_user_name" label={t('config.remote.gitUserNameLabel')}>
+            <Input
+              placeholder={t('config.remote.gitUserNamePlaceholder')}
+              prefix={<UserOutlined />}
+            />
           </Form.Item>
-          <Form.Item name="git_user_email" label="Git User Email">
-            <Input placeholder="your@email.com" prefix={<UserOutlined />} />
+          <Form.Item name="git_user_email" label={t('config.remote.gitUserEmailLabel')}>
+            <Input
+              placeholder={t('config.remote.gitUserEmailPlaceholder')}
+              prefix={<UserOutlined />}
+            />
           </Form.Item>
           <Divider />
           <Form.Item
             name="auto_backup"
-            label="Automatic Backup"
+            label={t('config.remote.automaticBackupLabel')}
             valuePropName="checked"
           >
             <Switch />
@@ -214,12 +222,18 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
               getFieldValue('auto_backup') ? (
                 <Form.Item
                   name="auto_backup_interval"
-                  label="Backup Interval (cron expression)"
+                  label={t('config.remote.backupIntervalLabel')}
                   rules={[
-                    { required: true, message: 'Please enter a cron expression' },
+                    {
+                      required: true,
+                      message: t('config.remote.backupIntervalRequired'),
+                    },
                   ]}
                 >
-                  <Input placeholder="0 */6 * * *" prefix={<ClockCircleOutlined />} />
+                  <Input
+                    placeholder={t('config.remote.cronPlaceholder')}
+                    prefix={<ClockCircleOutlined />}
+                  />
                 </Form.Item>
               ) : null
             }
@@ -231,7 +245,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
               onClick={handleSaveConfig}
               loading={savingConfig}
             >
-              Save Configuration
+              {t('config.remote.saveButton')}
             </Button>
           </Form.Item>
         </Form>
@@ -241,33 +255,36 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
         title={
           <Space>
             <KeyOutlined />
-            <span>Git Authentication</span>
+            <span>{t('config.auth.title')}</span>
           </Space>
         }
         style={{ marginBottom: 16 }}
         size="small"
       >
         <Form form={authForm} layout="vertical">
-          <Form.Item name="auth_type" label="Authentication Type">
+          <Form.Item name="auth_type" label={t('config.auth.typeLabel')}>
             <Select
               onChange={(value: GitAuthType) => setAuthType(value)}
               options={[
-                { value: 'none', label: 'None' },
-                { value: 'ssh_key', label: 'SSH Key' },
-                { value: 'password', label: 'Password / Token' },
+                { value: 'none', label: t('config.auth.typeNone') },
+                { value: 'ssh_key', label: t('config.auth.typeSshKey') },
+                { value: 'password', label: t('config.auth.typePassword') },
               ]}
             />
           </Form.Item>
           {authType === 'ssh_key' && (
             <Form.Item
               name="ssh_private_key_path"
-              label="SSH Private Key Path"
+              label={t('config.auth.sshPrivateKeyPathLabel')}
               rules={[
-                { required: true, message: 'Please enter SSH key path' },
+                {
+                  required: true,
+                  message: t('config.auth.sshPrivateKeyPathRequired'),
+                },
               ]}
             >
               <Input
-                placeholder="~/.ssh/id_rsa"
+                placeholder={t('config.auth.sshPrivateKeyPathPlaceholder')}
                 suffix={
                   <Button
                     type="text"
@@ -276,7 +293,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
                     onClick={() => setSshPickerOpen(true)}
                     style={{ padding: '0 4px' }}
                   >
-                    Browse
+                    {t('config.auth.browseButton')}
                   </Button>
                 }
               />
@@ -286,21 +303,21 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
             <>
               <Form.Item
                 name="username"
-                label="Username"
+                label={t('config.auth.usernameLabel')}
                 rules={[
-                  { required: true, message: 'Please enter username' },
+                  { required: true, message: t('config.auth.usernameRequired') },
                 ]}
               >
-                <Input placeholder="GitHub username" />
+                <Input placeholder={t('config.auth.usernamePlaceholder')} />
               </Form.Item>
               <Form.Item
                 name="password"
-                label="Password / Token"
+                label={t('config.auth.passwordLabel')}
                 rules={[
-                  { required: true, message: 'Please enter password or token' },
+                  { required: true, message: t('config.auth.passwordRequired') },
                 ]}
               >
-                <Input.Password placeholder="Personal Access Token" />
+                <Input.Password placeholder={t('config.auth.passwordPlaceholder')} />
               </Form.Item>
             </>
           )}
@@ -312,18 +329,18 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
                 onClick={handleSaveAuth}
                 loading={savingAuth}
               >
-                Save Authentication
+                {t('config.auth.saveButton')}
               </Button>
               {currentAuth && currentAuth.auth_type !== 'none' && (
                 <Popconfirm
-                  title="Clear authentication?"
-                  description="This will remove all stored authentication data."
+                  title={t('config.auth.clearConfirmTitle')}
+                  description={t('config.auth.clearConfirmDescription')}
                   onConfirm={handleClearAuth}
-                  okText="Clear"
-                  cancelText="Cancel"
+                  okText={t('config.auth.clearButton')}
+                  cancelText={t('config.auth.cancelButton')}
                 >
                   <Button danger icon={<DeleteOutlined />}>
-                    Clear
+                    {t('config.auth.clearButton')}
                   </Button>
                 </Popconfirm>
               )}
@@ -336,34 +353,35 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
         title={
           <Space>
             <SafetyOutlined />
-            <span>Danger Zone</span>
+            <span>{t('config.danger.title')}</span>
           </Space>
         }
         size="small"
         styles={{ header: { background: '#fff2f0', borderColor: '#ffccc7' } }}
       >
         <Typography.Paragraph type="danger">
-          Deleting the repository only removes it from this app: the database record and the
-          scheduled tasks are cleared. Everything on disk —{' '}
-          <Typography.Text code>data/</Typography.Text>,{' '}
-          <Typography.Text code>.backup-manager/manifest.json</Typography.Text> and Git history — is
-          preserved, so the repository can be re-created later by pointing a new one at the same
-          directory.
+          {t('config.danger.descriptionBeforeData')}
+          <Typography.Text code>data/</Typography.Text>
+          {t('config.danger.descriptionBetweenPaths')}
+          <Typography.Text code>.backup-manager/manifest.json</Typography.Text>
+          {t('config.danger.descriptionAfterManifest')}
         </Typography.Paragraph>
         <Space>
           <Popconfirm
-            title="Delete this repository?"
-            description="Removes the repository from the app only. Files on disk are preserved."
+            title={t('config.danger.deleteConfirmTitle')}
+            description={t('config.danger.deleteConfirmDescription')}
             onConfirm={handleDeleteRepo}
-            okText="Delete"
-            cancelText="Cancel"
+            okText={t('config.danger.deleteButton')}
+            cancelText={t('config.danger.cancelButton')}
             okButtonProps={{ danger: true }}
           >
             <Button danger icon={<DeleteOutlined />}>
-              Delete Repository
+              {t('config.danger.deleteRepositoryButton')}
             </Button>
           </Popconfirm>
-          <Button onClick={handleNavigateHome}>Back to Dashboard</Button>
+          <Button onClick={handleNavigateHome}>
+            {t('config.danger.backToDashboardButton')}
+          </Button>
         </Space>
       </Card>
       <DirectoryPickerModal
@@ -373,7 +391,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ repoId }) => {
           authForm.setFieldsValue({ ssh_private_key_path: path });
         }}
         mode="file"
-        title="Select SSH Private Key"
+        title={t('config.auth.pickerTitle')}
         initialPath={authForm.getFieldValue('ssh_private_key_path') || '~/.ssh'}
       />
     </div>

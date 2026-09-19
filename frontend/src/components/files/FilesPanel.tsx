@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Tree, Typography, Space, Tag, Empty, Spin, Alert, Button, Tooltip } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import {
@@ -34,6 +35,7 @@ type TreeNode = DataNode & TreeMeta;
  * 所有链接立即反映，不存在双写与同步步骤。
  */
 const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
+  const { t } = useTranslation();
   const entries = useAppStore((s) => s.entries);
   const fetchEntries = useAppStore((s) => s.fetchEntries);
   const currentRepo = useAppStore((s) => s.currentRepo);
@@ -83,14 +85,18 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
         title: (
           <Space size={4}>
             <span>{e.name}</span>
-            {meta && <Tag color="blue" style={{ marginInlineStart: 4 }}>entry</Tag>}
+            {meta && (
+              <Tag color="blue" style={{ marginInlineStart: 4 }}>
+                {t('files.tags.entry')}
+              </Tag>
+            )}
             {notBackedUp && (
-              <Tooltip title="No entry covers this path. Create an entry to make it a backed-up member.">
-                <Tag style={{ marginInlineStart: 4 }}>not backed up</Tag>
+              <Tooltip title={t('files.tooltips.notBackedUp')}>
+                <Tag style={{ marginInlineStart: 4 }}>{t('files.tags.notBackedUp')}</Tag>
               </Tooltip>
             )}
             {meta?.drift && (
-              <Tooltip title="A link of this entry needs repair">
+              <Tooltip title={t('files.tooltips.linkNeedsRepair')}>
                 <WarningOutlined style={{ color: '#faad14' }} />
               </Tooltip>
             )}
@@ -104,7 +110,7 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
         notBackedUp,
       };
     },
-    [entryIndex, isCovered]
+    [entryIndex, isCovered, t]
   );
 
   const loadChildren = useCallback(
@@ -123,11 +129,11 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
       const list = await fetchTree(repoId, '');
       setTreeData(list.map(toNode));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load the repository content');
+      setError(err instanceof Error ? err.message : t('files.errors.loadContent'));
     } finally {
       setLoading(false);
     }
-  }, [repoId, toNode]);
+  }, [repoId, t, toNode]);
 
   useEffect(() => {
     fetchEntries(repoId);
@@ -151,7 +157,7 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
     try {
       setPreview(await previewFile(repoId, path));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to preview the file');
+      setError(err instanceof Error ? err.message : t('files.errors.previewFile'));
     } finally {
       setPreviewLoading(false);
     }
@@ -177,7 +183,7 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
       );
     }
     if (!preview || !selected) {
-      return <Empty description="Select a file to preview" />;
+      return <Empty description={t('files.empty.selectFile')} />;
     }
     const name = selected.split('/').pop() || '';
     if (!preview.text) {
@@ -213,16 +219,16 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
     <div style={{ display: 'flex', gap: 16, minHeight: 0, flex: 1 }}>
       <div style={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <Space style={{ marginBottom: 8 }}>
-          <Typography.Text strong>data/</Typography.Text>
+          <Typography.Text strong>{t('files.rootLabel')}</Typography.Text>
           <Button size="small" icon={<ReloadOutlined />} onClick={loadRoot}>
-            Refresh
+            {t('files.actions.refresh')}
           </Button>
         </Space>
         {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 8 }} />}
         {loading ? (
           <Spin />
         ) : treeData.length === 0 ? (
-          <Empty description="No content yet" />
+          <Empty description={t('files.empty.noContent')} />
         ) : (
           <Tree
             showIcon

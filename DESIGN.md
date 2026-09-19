@@ -13,6 +13,7 @@
 | HTTP Framework | Gin | Lightweight, high performance, mature middleware ecosystem |
 | Database | SQLite (modernc.org/sqlite) | No additional database service needed, single file storage, suitable for desktop-grade applications |
 | Frontend | React 18 + TypeScript + Vite + Ant Design 5 | Mature ecosystem, rich component library |
+| Localization | i18next + react-i18next | English/Simplified Chinese resources with React integration; Ant Design and dayjs locales stay synchronized |
 | Scheduling | `robfig/cron/v3` | Standard cron library in Go ecosystem |
 | Git Operations | `os/exec` calling system git | Reuses user's local git config |
 | Encryption | `crypto/aes` + `crypto/gcm` | Symmetric encryption for storing sensitive info |
@@ -65,6 +66,7 @@ Dev mode: Vite Dev Server (5173) proxies /api/* to Go backend (9800)
 | **Path Safety First** | All user-input paths must pass through SafeResolve security validation function |
 | **Single Content Owner** | Content lives only in `data/`; a local path is a symlink view onto it — no mirror directory, no sync step (§9) |
 | **Link Equality** | Links bind whole entries, never sub-paths; all links are equal — no in/out distinction (§9.3.3) |
+| **Locale Consistency** | i18next/react-i18next drives UI text while Ant Design and dayjs follow the same active locale |
 | **Auth Isolation** | Git auth info stored encrypted, only injected as environment variables during git operations |
 
 ## 3. Detailed Design
@@ -72,6 +74,9 @@ Dev mode: Vite Dev Server (5173) proxies /api/* to Go backend (9800)
 ### 3.1 Route Registration
 
 ```
+GET    /api/v1/settings                       → SystemHandler.Settings
+PUT    /api/v1/settings                       → SystemHandler.UpdateSettings
+
 POST   /api/v1/repos                          → RepoHandler.Create
 GET    /api/v1/repos                          → RepoHandler.List
 GET    /api/v1/repos/:id                      → RepoHandler.Get
@@ -127,6 +132,21 @@ POST   /api/v1/repos/:id/rollback                     → RollbackHandler.Rollba
 
 GET    /api/v1/health                                → SystemHandler.Health
 ```
+
+**Application settings contract:**
+
+```http
+GET /api/v1/settings
+200 {"data":{"language":"en"}}
+
+PUT /api/v1/settings
+Content-Type: application/json
+
+{"language":"zh-CN"}
+200 {"data":{"language":"zh-CN"}}
+```
+
+`language` is required for `PUT`; only `en` and `zh-CN` are accepted. Missing or unsupported values return `400` with `{"error":"..."}`.
 
 ### 3.2 Repo Config Editing (★ P0-1 Fix)
 
@@ -257,7 +277,7 @@ There are **three separate stores**, each with its own file and its own reason t
 |------|------|------|------|
 | `repos`, `repo_configs`, `repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite (single binary file) | Machine-private: encrypted credentials, local repo paths, schedules. Must never be committed |
 | entries, links, devices | `<repo-root>/.backup-manager/manifest.json` | JSON, tracked by Git | Must travel across machines with `git clone` / `git push`. The SQLite file is per machine and cannot |
-| app settings | `~/.config/backup-manager/config.json` | JSON | Application-level settings, unrelated to any repo |
+| app settings | `~/.config/backup-manager/config.json` | JSON | Application-level settings, including the app-wide default UI language; unrelated to any repo |
 
 ### 4.1 SQLite Database (local, per machine)
 
@@ -331,9 +351,12 @@ Why entries/links/devices are **not** in SQLite — see §9.3.6:
 {
   "port": 9800,
   "open_browser": true,
-  "theme": "light"
+  "theme": "light",
+  "language": "en"
 }
 ```
+
+`language` is the backend-persisted, app-wide UI default. Supported values are `en` and `zh-CN`; `en` is used for new, missing, or invalid values. `GET /api/v1/settings` loads it before the UI renders, and `PUT /api/v1/settings` validates and atomically persists changes.
 
 ## 5. Project Directory Structure
 
@@ -359,8 +382,10 @@ backup-manager/
 │   │       ├── backup.go
 │   │       ├── auth.go
 │   │       ├── rollback.go
-│   │       ├── system.go
+│   │       ├── system.go        # health + app settings
 │   │       └── errors.go
+│   ├── appconfig/               # config.json loading, validation and atomic persistence
+│   │   └── manager.go
 │   ├── model/
 │   │   ├── repo.go
 │   │   ├── link.go              # Entry, Link, Device, Manifest, LinkState
@@ -409,6 +434,7 @@ backup-manager/
 │       ├── routes/
 │       ├── components/
 │       ├── api/client.ts
+│       ├── i18n/                # i18next resources + dayjs locale synchronization
 │       ├── store/
 │       ├── types/
 │       └── utils/
@@ -1055,6 +1081,8 @@ type ApplyResult struct {
 ### 9.12 Frontend
 
 Repository detail tabs: **Browse** · **Entries** · **Backup** · **Config**.
+
+Localization resources are managed by i18next and exposed to React through react-i18next. On startup, the app loads `GET /api/v1/settings` before rendering; the sidebar switch applies the selected locale and persists it with `PUT /api/v1/settings`. The same change updates Ant Design's `ConfigProvider`, dayjs, and the document `lang` attribute; a failed save restores the previous locale.
 
 ```
 components/entry/

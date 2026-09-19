@@ -15,6 +15,10 @@ Backup Manager 是一个文件/目录聚合备份可视化管理工具。基于 
 - 快速操作（Open, Delete）
 - 创建新仓库
 
+## 界面语言
+
+使用侧边栏底部的语言切换器选择英文（`en`）或简体中文（`zh-CN`）。默认语言为英文。后端会把选择作为 `language` 保存到应用级配置 `~/.config/backup-manager/config.json`，因此再次打开 UI 时仍会使用该语言。
+
 ## Repository Management
 
 ### Creating a Repository

@@ -52,6 +52,7 @@
 - **Git 集成** — 远程仓库配置、SSH/HTTPS 认证管理（AES-256-GCM 加密存储）
 - **本地文件浏览** — 无根目录白名单，服务端可见的任意路径都可浏览；可显示隐藏文件，也可直接填写完整路径
 - **定时调度** — 基于 cron 的自动备份，应用启动时自动加载，配置变更时动态注册/注销
+- **双语界面** — 支持在英文（`en`）与简体中文（`zh-CN`）之间切换；默认英文，选择由后端在应用范围内持久化
 - **系统托盘** — macOS 菜单栏 / 系统托盘图标，支持启动/停止服务器控制
 - **前后端一体** — 单二进制文件，一键启动
 
@@ -123,6 +124,7 @@ go build -o backup-manager .
 |------|------|
 | 后端 | Go 1.22+ (Gin, SQLite via modernc.org/sqlite) |
 | 前端 | React 18 + TypeScript + Vite + Ant Design 5 |
+| 国际化 | i18next + react-i18next；同步 Ant Design/dayjs 语言环境 |
 | 状态管理 | Zustand |
 | 定时调度 | robfig/cron/v3 |
 | 加密 | AES-256-GCM |
@@ -135,6 +137,8 @@ go build -o backup-manager .
 
 | 分类 | 端点 | 功能 |
 |------|------|------|
+| 设置 | `GET /settings` | 读取应用级默认语言；响应 `{"data":{"language":"en"}}` |
+| 设置 | `PUT /settings` | 持久化 `{"language":"en"}` 或 `{"language":"zh-CN"}`；响应返回相同的 `data.language` 结构 |
 | 仓库 | `POST/GET/DELETE /repos` | 仓库 CRUD |
 | 仓库 | `GET /repos/:id` | 仓库详情（含配置和状态） |
 | 仓库 | `PUT /repos/:id/config` | 更新配置（部分更新） |
@@ -194,7 +198,7 @@ go build -o backup-manager .
 
 | 路径 | 说明 |
 |------|------|
-| `~/.config/backup-manager/config.json` | 应用配置（端口、主题、自动打开浏览器等）— JSON 字段：`port`, `open_browser`, `theme` |
+| `~/.config/backup-manager/config.json` | 应用配置 —— JSON 字段：`port`、`open_browser`、`theme`、`language`；`language` 是应用级 UI 默认语言（`en` 或 `zh-CN`，默认 `en`） |
 | `~/.config/backup-manager/master.key` | AES-256 加密密钥（首次启动自动生成） |
 | `~/.config/backup-manager/backup-manager.db` | SQLite 数据库（本机，按机器独立）—— 存 `repos`、`repo_configs`、`repo_auths` |
 | `<repo-root>/.backup-manager/manifest.json` | **位于仓库内**，由 Git 跟踪 —— 存条目、链接与设备。它**不是** SQLite 数据库；放在仓库里才能随 `git clone` / `git push` 传输 |
@@ -244,8 +248,9 @@ backup-manager/
 │   │       ├── backup.go       # 备份触发 + 历史查询 + Push
 │   │       ├── auth.go         # Git 认证管理
 │   │       ├── rollback.go     # 内容回滚 + 单文件恢复
-│   │       ├── system.go       # 健康检查
+│   │       ├── system.go       # 健康检查 + 应用设置
 │   │       └── errors.go       # 错误码映射
+│   ├── appconfig/              # config.json 加载与持久化
 │   ├── entry/                  # 条目与链接子系统
 │   │   ├── manifest.go         # 清单加载/保存/原子写 + R-1..R-3 校验
 │   │   ├── service.go          # Service 装配、仓库互斥锁、清单提交、公共辅助
@@ -292,6 +297,7 @@ backup-manager/
         ├── App.tsx              # 路由配置
         ├── App.css              # 全局样式
         ├── api/client.ts        # axios 实例 + 所有 API 函数
+        ├── i18n/                # 中英文资源 + 语言环境同步
         ├── types/index.ts       # TypeScript 类型定义
         ├── store/appStore.ts    # Zustand 状态管理
         ├── routes/              # 页面组件

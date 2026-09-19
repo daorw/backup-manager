@@ -11,6 +11,7 @@
 | HTTP 框架 | Gin | 轻量、高性能、中间件生态完善 |
 | 数据库 | SQLite (modernc.org/sqlite) | 无需额外数据库服务、单文件存储、适合桌面级应用 |
 | 前端 | React 18 + TypeScript + Vite + Ant Design 5 | 生态成熟，组件库丰富 |
+| 国际化 | i18next + react-i18next | 提供英文/简体中文资源及 React 集成；Ant Design 与 dayjs 语言环境保持同步 |
 | 定时调度 | `robfig/cron/v3` | Go 生态标准 cron 库 |
 | Git 操作 | `os/exec` 调用系统 git | 复用用户本地 git 配置 |
 | 加密 | `crypto/aes` + `crypto/gcm` | 对称加密存储敏感信息 |
@@ -63,6 +64,7 @@
 | **路径安全第一** | 所有用户输入的路径必须通过 SafeResolve 安全校验函数 |
 | **内容单一归属** | 内容只存在于 `data/`；本机路径只是指向它的软链接视图 —— 没有镜像目录，没有同步步骤（§9） |
 | **链接等价** | 链接只绑定完整条目，绝不绑定子路径；所有链接完全等价，没有 in/out 之分（§9.3.3） |
+| **语言环境一致性** | i18next/react-i18next 驱动 UI 文案，Ant Design 与 dayjs 跟随同一活动语言环境 |
 | **认证隔离** | Git 认证信息加密存储，仅 git 操作时注入环境变量 |
 
 ## 3. 详细设计
@@ -70,6 +72,9 @@
 ### 3.1 路由注册
 
 ```
+GET    /api/v1/settings                       → SystemHandler.Settings
+PUT    /api/v1/settings                       → SystemHandler.UpdateSettings
+
 POST   /api/v1/repos                          → RepoHandler.Create
 GET    /api/v1/repos                          → RepoHandler.List
 GET    /api/v1/repos/:id                      → RepoHandler.Get
@@ -126,6 +131,21 @@ POST   /api/v1/repos/:id/rollback                     → RollbackHandler.Rollba
 
 GET    /api/v1/health                                → SystemHandler.Health
 ```
+
+**应用设置契约：**
+
+```http
+GET /api/v1/settings
+200 {"data":{"language":"en"}}
+
+PUT /api/v1/settings
+Content-Type: application/json
+
+{"language":"zh-CN"}
+200 {"data":{"language":"zh-CN"}}
+```
+
+`PUT` 必须提供 `language`，且仅接受 `en` 与 `zh-CN`。缺失或不支持的值返回 `400` 与 `{"error":"..."}`。
 
 ### 3.2 仓库配置编辑（★ P0-1 修复）
 
@@ -256,7 +276,7 @@ type GitAuth struct {
 |------|------|------|------|
 | `repos`、`repo_configs`、`repo_auths` | `~/.config/backup-manager/backup-manager.db` | SQLite（单个二进制文件） | 本机私有：含加密凭据、本机仓库路径、定时任务。**绝不能**提交进仓库 |
 | 条目、链接、设备 | `<repo-root>/.backup-manager/manifest.json` | JSON，由 Git 跟踪 | 必须随 `git clone` / `git push` 跨机器传输。SQLite 文件是按机器独立的，传不过去 |
-| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置，与具体仓库无关 |
+| 应用设置 | `~/.config/backup-manager/config.json` | JSON | 应用级设置，包括应用范围的默认 UI 语言；与具体仓库无关 |
 
 ### 4.1 SQLite 数据库（本机，按机器独立）
 
@@ -330,9 +350,12 @@ CREATE TABLE repo_auths (
 {
   "port": 9800,
   "open_browser": true,
-  "theme": "light"
+  "theme": "light",
+  "language": "en"
 }
 ```
+
+`language` 是由后端持久化的应用级 UI 默认语言。支持值为 `en` 与 `zh-CN`；新配置、缺失值或无效值均使用 `en`。UI 渲染前通过 `GET /api/v1/settings` 加载，`PUT /api/v1/settings` 校验并原子持久化变更。
 
 ## 5. 项目目录结构
 
@@ -358,8 +381,10 @@ backup-manager/
 │   │       ├── backup.go
 │   │       ├── auth.go
 │   │       ├── rollback.go
-│   │       ├── system.go
+│   │       ├── system.go        # 健康检查 + 应用设置
 │   │       └── errors.go
+│   ├── appconfig/               # config.json 加载、校验与原子持久化
+│   │   └── manager.go
 │   ├── model/
 │   │   ├── repo.go
 │   │   ├── link.go              # Entry、Link、Device、Manifest、LinkState
@@ -408,6 +433,7 @@ backup-manager/
 │       ├── routes/
 │       ├── components/
 │       ├── api/client.ts
+│       ├── i18n/                # i18next 资源 + dayjs 语言环境同步
 │       ├── store/
 │       ├── types/
 │       └── utils/
@@ -1053,6 +1079,8 @@ type ApplyResult struct {
 ### 9.12 前端设计
 
 仓库详情页标签：**Browse** · **Entries** · **Backup** · **Config**。
+
+本地化资源由 i18next 管理，并通过 react-i18next 提供给 React。启动时，应用在渲染前调用 `GET /api/v1/settings`；侧边栏语言切换器应用所选语言，并通过 `PUT /api/v1/settings` 持久化。同一变更会同步更新 Ant Design 的 `ConfigProvider`、dayjs 与文档 `lang` 属性；保存失败时恢复原语言。
 
 ```
 components/entry/

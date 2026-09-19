@@ -649,7 +649,7 @@ R-3 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 
 | `fingerprint` | 稳定机器标识，`sha256("<GOOS>|<raw>")` 十六进制 —— 即设备主键 |
 | `name` | 用户可见名称，默认取 hostname，可重命名 |
 | `hostname`、`os` | 仅用于展示 |
-| `last_seen_at` | 每次 `apply` 更新 |
+| `last_seen_at` | `apply` 实际创建或修复至少一条链接时更新；no-op apply 保持清单不变 |
 
 指纹取值顺序：
 
@@ -842,10 +842,11 @@ POST /api/v1/repos/:id/devices/:fingerprint/apply   { dry_run: true }
      conflict—— occupied     → 报告，绝不覆盖
      orphan  —— dangling     → 仅报告（仓库内容已缺失）
 4. 返回计划（dry run）→ UI 在确认弹窗中展示
-5. 用户确认后，在仓库级互斥锁下执行，并逐条返回结果
+5. 若计划没有 create/repair 动作，UI 直接关闭弹窗而不发送执行请求；直接调用执行接口也会返回且不重写清单
+6. 否则在仓库级互斥锁下执行；至少成功创建/修复一条链接后才更新 `last_seen_at`，并逐条返回结果
 ```
 
-`apply` 是幂等的，且从不触碰内容：它只创建、修复或报告软链接。
+`apply` 是幂等的，且从不触碰内容：它只创建、修复或报告软链接。机器已完全收敛时是纯 no-op，重复 Apply 不会产生只更新时间戳的清单提交。
 
 #### 9.6.3 Detach / 移交
 

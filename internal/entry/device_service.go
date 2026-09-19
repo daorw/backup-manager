@@ -259,8 +259,9 @@ func (s *Service) Apply(repoID, deviceID string, dryRun bool) (*ApplyResult, err
 		}
 	}
 
-	// 记录本机在线时间（dry run 不落盘）
-	if !dryRun {
+	// 只有实际收敛了链接才记录在线时间。全是 skip/conflict/orphan 的 Apply
+	// 是纯 no-op，不应仅为了更新时间戳而重写并提交清单。
+	if !dryRun && (len(result.Created) > 0 || len(result.Repaired) > 0) {
 		d := ensureDevice(m, fingerprint)
 		now := time.Now().UTC()
 		d.LastSeenAt = &now

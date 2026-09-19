@@ -64,7 +64,7 @@ A **device** is one machine referencing the repository, identified by a stable m
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
 | FR-26 | Device Registration | Detect the current machine's fingerprint, register it on the repo automatically (name defaults to the hostname, renameable); list all devices with their link counts | P0 |
-| FR-27 | Apply Device | Converge this machine: show a dry-run plan (create / repair / skip / conflict / orphan) and execute it after confirmation. Never overwrites an occupied path | P0 |
+| FR-27 | Apply Device | Converge this machine: show a dry-run plan (create / repair / skip / conflict / orphan) and execute it after confirmation. Never overwrites an occupied path. A plan with no create/repair actions closes without an execution request; a no-op execution never rewrites the manifest | P0 |
 | FR-28 | Detach Device | Remove this device's local symlinks (`unlink`) or just stop managing them (`keep`). `data/` is never touched. Definitions stay, so re-attaching is a single Apply | P1 |
 | FR-29 | Delete Device | Delete a device's link definitions. Entries keep existing; one left with no links is legal | P1 |
 

@@ -110,7 +110,7 @@ Devices, entries and links are stored inside the repository in `.backup-manager/
 1. Clone the repository (or point a new repo entry at the existing directory)
 2. Open it — the current machine's device is registered automatically, and every device's links are listed
 3. Click **Apply** — a dry-run plan appears (create / repair / skip / conflict / orphan)
-4. Confirm. Missing links are created, drifted ones repaired, occupied paths are only reported
+4. Confirm when the plan contains create/repair actions. If every link is already skipped as `ok`, close the plan; no execution request or manifest write is needed. Missing links are created, drifted ones repaired, and occupied paths are only reported
 5. To put the files somewhere else, use **Bulk Link**: pick entries plus a local root directory (absolute or starting with `~`)
 
 ### Managing Devices:

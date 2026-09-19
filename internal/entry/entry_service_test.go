@@ -318,6 +318,40 @@ func TestApplyRecreatesMissingLink(t *testing.T) {
 	}
 }
 
+// TestApplyNoopDoesNotRewriteManifest 验证链接已经收敛时 Apply 是纯 no-op，
+// 不会仅为了更新时间戳而重写 manifest。
+func TestApplyNoopDoesNotRewriteManifest(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	local := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, local, "hello")
+	if _, err := svc.Adopt(repo.ID, &AdoptRequest{LocalPath: local, RepoPath: "notes.txt"}); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+
+	manifestPath := filepath.Join(repo.Path, ManifestDirName, ManifestFileName)
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest before apply: %v", err)
+	}
+
+	result, err := svc.Apply(repo.ID, "", false)
+	if err != nil {
+		t.Fatalf("no-op apply: %v", err)
+	}
+	if len(result.Created) != 0 || len(result.Repaired) != 0 || len(result.Skipped) != 1 {
+		t.Fatalf("unexpected no-op result: %+v", result)
+	}
+
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest after apply: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("no-op apply must not rewrite manifest")
+	}
+}
+
 // TestReadoptMovesReplacedContentIntoRepository 验证 replaced 状态下
 // 把本机真实文件重新纳入仓库并恢复软链接。
 func TestReadoptMovesReplacedContentIntoRepository(t *testing.T) {

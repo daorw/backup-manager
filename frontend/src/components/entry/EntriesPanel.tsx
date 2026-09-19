@@ -179,6 +179,7 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
   };
 
   const fingerprint = currentDevice?.fingerprint || '';
+  const planHasActions = !!plan && (plan.created.length > 0 || plan.repaired.length > 0);
 
   const handleAdopt = async (req: AdoptRequest) => {
     await adoptEntry(repoId, req);
@@ -729,10 +730,11 @@ const EntriesPanel: React.FC<EntriesPanelProps> = ({ repoId }) => {
         title={t('entries.apply.title')}
         open={!!plan}
         onCancel={() => setPlan(null)}
-        onOk={handleApply}
+        onOk={planHasActions ? handleApply : () => setPlan(null)}
         confirmLoading={applying}
-        okText={t('entries.action.apply')}
+        okText={t(planHasActions ? 'entries.action.apply' : 'entries.action.close')}
         cancelText={t('entries.action.cancel')}
+        cancelButtonProps={{ style: planHasActions ? undefined : { display: 'none' } }}
       >
         {plan && (
           <Space direction="vertical" style={{ width: '100%' }}>

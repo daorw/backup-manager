@@ -363,7 +363,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 
 ### 9. 链接状态诊断与收敛
 - 逐链接状态：`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled` / `not_current`
-- `apply` 幂等收敛：先出 dry-run 计划（create / repair / skip / conflict / orphan）再执行，从不覆盖已占用路径
+- `apply` 幂等收敛：先出 dry-run 计划（create / repair / skip / conflict / orphan）再执行，从不覆盖已占用路径；没有 create/repair 动作时前端只关闭计划，后端 no-op 也不更新时间戳、不重写清单
 - `replaced`（应用原子写把软链接换成真实文件）→「重新纳入」把新内容移入 `data/` 后重建链接
 - 一致性巡检覆盖 R-1..R-3，并探测 `data/` 内的软链接与未托管链接
 

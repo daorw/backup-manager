@@ -650,7 +650,7 @@ A **device** is one machine that references the repository. It is metadata; link
 | `fingerprint` | stable machine id, `sha256("<GOOS>|<raw>")` hex — the device's primary key |
 | `name` | user-visible name, defaults to the hostname, renameable |
 | `hostname`, `os` | display metadata only |
-| `last_seen_at` | updated on every `apply` |
+| `last_seen_at` | updated when `apply` actually creates or repairs at least one link; a no-op apply leaves the manifest unchanged |
 
 Fingerprint sources, in order:
 
@@ -844,10 +844,11 @@ POST /api/v1/repos/:id/devices/:fingerprint/apply   { dry_run: true }
      conflict— occupied     → report, never overwrite
      orphan  — dangling     → report only (the entry content is missing from the repo)
 4. Return the plan (dry run) → the UI shows it in a confirmation dialog
-5. On confirmation, execute under the repo-level mutex and report per-item results
+5. If the plan has no create/repair actions, the UI closes it without an execution request; a direct execution call also returns without rewriting the manifest
+6. Otherwise, execute under the repo-level mutex, update `last_seen_at` after at least one successful create/repair, and report per-item results
 ```
 
-`apply` is idempotent and never touches content: it only creates, fixes, or reports symlinks.
+`apply` is idempotent and never touches content: it only creates, fixes, or reports symlinks. A fully converged machine is a pure no-op, so repeated Apply does not create timestamp-only manifest commits.
 
 #### 9.6.3 Detach / Handover
 

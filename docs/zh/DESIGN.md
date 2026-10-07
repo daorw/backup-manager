@@ -756,7 +756,7 @@ R-3 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 
 | 步骤 7 失败 | 把 `data/<repo_path>` 移回 `local_path`，再移除新建的空父目录 |
 | 步骤 8 失败 | 删除软链接，把 `data/<repo_path>` 移回 `local_path`，再移除新建的空父目录 |
 
-#### 9.4.2 添加链接 —— 已有条目的又一个视图
+#### 9.4.2 分发 —— 已有条目的又一个视图
 
 ```
 1. 解析条目；它必须存在。**不要求**已有链接 —— 这条流程正是
@@ -773,7 +773,7 @@ R-3 是那条字面规则：`docs` 已作为目录条目跟踪在 `~/Documents` 
 
 同一个 `repo_path` 可以带多条链接，同设备或跨设备皆可 —— 这正是 Issue 所说的「把同一份备份分发到不同位置」。
 
-#### 9.4.3 批量链接 —— 把仓库落到一台机器上
+#### 9.4.3 批量分发 —— 把仓库落到一台机器上
 
 ```
 POST /api/v1/repos/:id/links/bulk  { local_root, entry_ids? }
@@ -1086,7 +1086,9 @@ type ApplyResult struct {
 
 ### 9.12 前端设计
 
-仓库详情页标签：**Browse** · **Entries** · **Backup** · **Config**。
+仓库详情页标签：**Browse** · **备份项（Backup Items）** · **Backup** · **Config**。
+
+界面术语映射：**备份项 / Backup Items**、**添加备份项 / Add Backup Item**、浏览树标记**已备份 / backed up**；分发操作使用**分发 / Distribute** 和**批量分发 / Bulk Distribute**。本次只调整展示文案，`Entry`、`EntryView`、`entries`、API 路径及组件标识保持不变。树标记表示已纳入备份范围，不表示最新改动已提交或推送。
 
 本地化资源由 i18next 管理，并通过 react-i18next 提供给 React。启动时，应用在渲染前调用 `GET /api/v1/settings`；侧边栏语言切换器应用所选语言，并通过 `PUT /api/v1/settings` 持久化。同一变更会同步更新 Ant Design 的 `ConfigProvider`、dayjs 与文档 `lang` 属性；保存失败时恢复原语言。
 
@@ -1100,24 +1102,24 @@ components/
                               # data/ 范围内的父目录浏览与待创建目录
 ```
 
-仓库父目录选择器只是路径的可视化填写方式，不会立即修改文件系统。选择父目录后，系统追加源对象名称并把完整值写回 `repo_path`；「新建目录」只在选择器状态中生成待创建路径，最终确认 Adopt、移动源内容时才创建缺失的父目录。选择器调用 `tree?include_hidden=true`，以便隐藏名称仍参与同名冲突检测；点号开头的目录默认不显示，可通过“显示隐藏文件”开关展示。选择器不能向上离开 `data/`，也不接受绝对文件系统路径。
+仓库父目录选择器只是路径的可视化填写方式，不会立即修改文件系统。选择父目录后，系统追加源对象名称并把完整值写回 `repo_path`；「新建目录」只在选择器状态中生成待创建路径，最终确认添加备份项（`adopt`）、移动源内容时才创建缺失的父目录。选择器调用 `tree?include_hidden=true`，以便隐藏名称仍参与同名冲突检测；点号开头的目录默认不显示，可通过“显示隐藏文件”开关展示。选择器不能向上离开 `data/`，也不接受绝对文件系统路径。
 
 列表以条目为中心，因为不变量本身就是条目级的：
 
 ```
-[设备: MacBook Pro（当前）]  [+ 新建条目]  [应用]  [巡检]  [卸载]
+[设备: MacBook Pro（当前）]  [添加备份项]  [批量分发]  [应用]  [巡检]  [卸载]
 ────────────────────────────────────────────────────────────────────
 ▾ opencode/opencode.json                             文件   ok
     ● ~/.config/opencode/opencode.json        MacBook Pro     [重新纳入?] [移除]
     ● ~/Desktop/opencode.json                 MacBook Pro     [移除]
     ○ ~/work/opencode/opencode.json           MacBook-Pro-2   其他设备
 ▸ docs/notes                                          目录   missing — [修复] [移除]
-▸ projects/vendor                                     目录   0 条链接 — [添加链接]
+▸ projects/vendor                                     目录   0 条链接 — [分发]
 ```
 
-链接统一展示：没有 in/out 徽标，也没有「设为跟踪」操作，因为所有链接完全等价（§9.3.3）。逐链接操作只有三个：**修复**（`missing` / `wrong_target`）、**重新纳入**（`replaced`）与**移除**。`添加链接` 始终可用，包括对没有任何链接的条目。
+链接统一展示：没有 in/out 徽标，也没有「设为跟踪」操作，因为所有链接完全等价（§9.3.3）。逐链接操作只有三个：**修复**（`missing` / `wrong_target`）、**重新纳入**（`replaced`）与**移除**。`分发` 始终可用，包括对没有任何链接的条目。
 
-`components/files/FilesPanel.tsx`（Browse）渲染 `data/` 目录树，并在每个节点显示徽标：是条目 / 不是条目 / 存在链接漂移。根目录和懒加载子目录均请求 `include_hidden=true`，因为点号开头的仓库内容本身也可能是受管条目，必须保持可见。`symlink/` 下组件全部删除。
+`components/files/FilesPanel.tsx`（Browse）渲染 `data/` 目录树，并在每个节点显示徽标：已备份 / 未备份 / 存在链接漂移。根目录和懒加载子目录均请求 `include_hidden=true`，因为点号开头的仓库内容本身也可能是受管条目，必须保持可见。`symlink/` 下组件全部删除。
 
 `frontend/src/types/index.ts` 新增类型：
 
@@ -1288,7 +1290,7 @@ export interface Entry {
 | M7 | 一致性巡检 + 修复 |
 | M8 | 拆除旧子系统：删除 `.links/`、`symlinks` 表、同步机制、resolver、软链接 API；简化 `BackupService.Trigger` |
 | M9 | 内容 API 简化（§7）+ `changes` 端点 |
-| M10 | 前端：Entries 标签页、弹窗、徽标、Browse 集成 |
+| M10 | 前端：备份项（Backup Items）标签页、弹窗、徽标、Browse 集成 |
 | M11 | 文档同步（所有文档与 README，中英双份） |
 
 ### 9.19 待办项（尚未实现）

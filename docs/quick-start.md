@@ -21,6 +21,8 @@ The main interface shows the status and basic information of all backup reposito
 
 Use the language switch at the bottom of the sidebar to select English (`en`) or Simplified Chinese (`zh-CN`). English is the default. The backend saves the selection app-wide in `~/.config/backup-manager/config.json` as `language`, so it is reused when the UI is opened again.
 
+UI terminology: **Backup Items** (备份项), **Add Backup Item** (添加备份项), and **backed up** (已备份) replace the former entry labels; the distribution actions are **Distribute** (分发) and **Bulk Distribute** (批量分发). A backup item corresponds to the technical `Entry` model; `entries` fields and API paths keep their identifiers. The Browse tree badge means the content is in the backup set, not that its latest changes have been committed or pushed.
+
 ## Repository Management
 
 ### Creating a Repository
@@ -31,7 +33,7 @@ Use the language switch at the bottom of the sidebar to select English (`en`) or
 
 ### Repository Detail View
 
-After opening a repository, you can see four main tabs: **Browse**, **Entries**, **Backup**, **Config**.
+After opening a repository, you can see four main tabs: **Browse**, **Backup Items**, **Backup**, **Config**.
 
 ## Browse Tab
 
@@ -41,7 +43,7 @@ The Browse tab shows the repository's real content under `data/`, and lets you p
 
 ### Features:
 - Browse the complete `data/` tree, including dot-prefixed files and directories
-- Each node carries a badge: is an entry / not backed up / has link drift
+- Each node carries a badge: backed up / not backed up / has link drift
 - Preview file content
 - Click "Edit" to edit, "Save" to write in place
 - View file metadata
@@ -52,7 +54,7 @@ The Browse tab shows the repository's real content under `data/`, and lets you p
 3. Click "Edit" to enter edit mode
 4. Click "Save" — because every link is a symlink to this same file, all of the entry's local paths update instantly
 
-## Entries Tab
+## Backup Items Tab
 
 Every backed-up file or directory is an **entry**. An **entry** is a whitelist member: its existence in the manifest is what makes it backed up. A **link** binds a local path to that entry as a symlink into `data/<repo_path>`. An entry may have **0..N links**, and all of them are **completely equal** — same target, same semantics.
 
@@ -70,22 +72,22 @@ An entry with no links is perfectly valid: the content is in the repository, the
 - Link status per device, marking the links that belong to the current machine
 - Consistency audit with one-click repair
 
-### Creating an Entry (adopt):
+### Adding a Backup Item (adopt):
 
-Click "+ New Entry" in the Entries tab:
+Click "Add Backup Item" in the Backup Items tab:
 
-![Add Entry Dialog](assets/add-symlink.jpeg)
+![Add Backup Item Dialog](assets/add-symlink.jpeg)
 
 1. **Source Path**: Enter or browse to the file or directory you want to back up (e.g. `~/.config/opencode/opencode.json`).
 2. **Target Repo Path**: Type the complete path under `data/`, or use the folder button to browse and choose its parent directory. The picker appends the original file/directory name and writes the complete result back to this input (e.g. choosing `data/opencode/` produces `opencode/opencode.json`).
 3. Turn on **Show hidden files** when you need to choose a dot-prefixed parent directory; it is off by default.
 4. In the repository picker, **New Directory** adds a pending subdirectory beneath the current directory. It is not written to disk until you finish the Adopt operation, so cancelling leaves the repository unchanged.
 5. Read the warning: **the content will be moved into the repository and this location replaced by a symlink.**
-6. Click **Create**. Missing target parents are created, the content is moved, and the original location now holds the entry's first link.
+6. Click **Add**. Missing target parents are created, the content is moved, and the original location now holds the entry's first link.
 
-### Distributing an Entry (add a link):
+### Distributing a Backup Item (add a link):
 
-Select an entry → "Add Link" → enter the complete local path, or use the folder button to choose its parent directory. Parent selection appends the entry's file/directory name automatically. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Add Link` is available even for an entry that has none. The path may be absolute or start with `~` (expanded to your home directory), and it must be free — a missing entry or an empty directory.
+Select a backup item → "Distribute" → enter the complete local path, or use the folder button to choose its parent directory. Parent selection appends the entry's file/directory name automatically. A symlink to `data/<repo_path>` is created there; nothing is copied. The same entry may have several links, on this machine or on others, and `Distribute` is available even for an entry that has none. The path may be absolute or start with `~` (expanded to your home directory), and it must be free — a missing entry or an empty directory.
 
 ### All Links Are Equal:
 
@@ -111,11 +113,11 @@ Devices, entries and links are stored inside the repository in `.backup-manager/
 2. Open it — the current machine's device is registered automatically, and every device's links are listed
 3. Click **Apply** — a dry-run plan appears (create / repair / skip / conflict / orphan)
 4. Confirm when the plan contains create/repair actions. If every link is already skipped as `ok`, close the plan; no execution request or manifest write is needed. Missing links are created, drifted ones repaired, and occupied paths are only reported
-5. To put the files somewhere else, use **Bulk Link**: pick entries plus a local root directory (absolute or starting with `~`)
+5. To put the files somewhere else, use **Bulk Distribute**: pick entries plus a local root directory (absolute or starting with `~`)
 
 ### Managing Devices:
 
-**Devices** in the Entries tab lists every registered machine with its link count. Rename a device inline, or delete a device whose link definitions should go away — entries left without links stay legal, and a device's filesystem is never touched by its deletion.
+**Devices** in the Backup Items tab lists every registered machine with its link count. Rename a device inline, or delete a device whose link definitions should go away — entries left without links stay legal, and a device's filesystem is never touched by its deletion.
 
 ### Handing an Entry Over:
 1. On the new machine, add a link wherever you want the files
@@ -201,7 +203,7 @@ Configure Git authentication information, and the danger zone.
 1. **Install & Run**: Download and start Backup Manager — a system tray icon appears
 2. **Open UI**: Click the tray icon and select "Open UI" to open the web interface
 3. **Create Repository**: Set up your first backup repository
-4. **Create Entries**: Specify the files/directories to back up — their content moves into the repository and the original locations become their first links
+4. **Add Backup Item**: Specify the files/directories to back up — their content moves into the repository and the original locations become their first links
 5. **Distribute (optional)**: Add more links to make the same content available at further local paths
 6. **Configure Git**: Set up remote repository and authentication information
 7. **Run Backup**: Execute the first backup
@@ -228,7 +230,7 @@ Configure Git authentication information, and the danger zone.
 - **A Link Shows `dangling`**: The content is missing from the repository. Restore it from Git history via the Backup tab, or remove the link
 - **"Entry overlaps another entry"**: Two entries cannot nest. Pick a non-overlapping repo path (e.g. `projects/vendor` instead of `docs/vendor`)
 - **"Local path is inside a directory entry"**: A link may not point inside a tracked directory. Move the target outside it, or track it as its own entry
-- **An entry shows 0 links**: Legal — the content is in the repository with no local view. Click **Add Link** to bind it to a local path
+- **An entry shows 0 links**: Legal — the content is in the repository with no local view. Click **Distribute** to bind it to a local path
 - **You removed the last link**: No content is lost. Add a link again, or use an entry-level action (`unlink` / `move_back` / `purge`) to stop tracking the content itself
 - **Remote Push Failed**: Ensure the remote repository exists and credentials are correct
 

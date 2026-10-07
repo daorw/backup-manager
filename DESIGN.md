@@ -758,7 +758,7 @@ Failure rollback:
 | 7 fails | move `data/<repo_path>` back to `local_path`, then remove newly created empty parents |
 | 8 fails | remove the symlink, move `data/<repo_path>` back to `local_path`, then remove newly created empty parents |
 
-#### 9.4.2 Add Link — an additional view of an existing entry
+#### 9.4.2 Distribute — an additional view of an existing entry
 
 ```
 1. Resolve the entry; it must exist. Having a link already is NOT required — this
@@ -775,7 +775,7 @@ Failure rollback:
 
 The same `repo_path` may carry many links, on the same device or on different ones — that is the Issue's "distribute one backup to many locations".
 
-#### 9.4.3 Bulk Link — bringing a repository onto a machine
+#### 9.4.3 Bulk Distribute — bringing a repository onto a machine
 
 ```
 POST /api/v1/repos/:id/links/bulk  { local_root, entry_ids? }
@@ -1088,7 +1088,9 @@ type ApplyResult struct {
 
 ### 9.12 Frontend
 
-Repository detail tabs: **Browse** · **Entries** · **Backup** · **Config**.
+Repository detail tabs: **Browse** · **Backup Items** · **Backup** · **Config**.
+
+UI terminology maps **Backup Items** to 备份项, **Add Backup Item** to 添加备份项, and the Browse tree badge **backed up** to 已备份. The distribution actions are **Distribute** / 分发 and **Bulk Distribute** / 批量分发. This is a presentation change: `Entry`, `EntryView`, `entries`, API paths, and component identifiers remain unchanged. The badge indicates membership in the backup set, not whether the latest changes have been committed or pushed.
 
 Localization resources are managed by i18next and exposed to React through react-i18next. On startup, the app loads `GET /api/v1/settings` before rendering; the sidebar switch applies the selected locale and persists it with `PUT /api/v1/settings`. The same change updates Ant Design's `ConfigProvider`, dayjs, and the document `lang` attribute; a failed save restores the previous locale.
 
@@ -1102,24 +1104,24 @@ components/
                               # data/-scoped parent browser with pending directories
 ```
 
-The repository parent picker is a visual input method, not a filesystem mutation. Selecting a parent appends the source basename and writes the complete value back to `repo_path`. "New Directory" creates a pending path in picker state; only the final Adopt action creates missing parent directories while moving the source. The picker calls `tree?include_hidden=true` so hidden names remain collision-safe, hides dot-prefixed directories by default, and exposes a Show Hidden switch to display them. It cannot navigate above `data/` and never accepts an absolute filesystem path.
+The repository parent picker is a visual input method, not a filesystem mutation. Selecting a parent appends the source basename and writes the complete value back to `repo_path`. "New Directory" creates a pending path in picker state; only confirming Add Backup Item (`adopt`) creates missing parent directories while moving the source. The picker calls `tree?include_hidden=true` so hidden names remain collision-safe, hides dot-prefixed directories by default, and exposes a Show Hidden switch to display them. It cannot navigate above `data/` and never accepts an absolute filesystem path.
 
 The list view is entry-centric, because that is what the invariants are about:
 
 ```
-[Device: MacBook Pro (current)]  [+ New Entry]  [Apply]  [Audit]  [Detach]
+[Device: MacBook Pro (current)]  [Add Backup Item]  [Bulk Distribute]  [Apply]  [Audit]  [Detach]
 ────────────────────────────────────────────────────────────────────
 ▾ opencode/opencode.json                             file   ok
     ● ~/.config/opencode/opencode.json        MacBook Pro     [re-adopt?] [remove]
     ● ~/Desktop/opencode.json                 MacBook Pro     [remove]
     ○ ~/work/opencode/opencode.json           MacBook-Pro-2   other device
 ▸ docs/notes                                          dir   missing — [repair] [remove]
-▸ projects/vendor                                     dir   0 links — [add link]
+▸ projects/vendor                                     dir   0 links — [Distribute]
 ```
 
-Links are listed uniformly: there is no in/out badge and no "set as tracked" action, because all links are equal (§9.3.3). The only per-link actions are **repair** (for `missing` / `wrong_target`), **re-adopt** (for `replaced`) and **remove**. `Add Link` is always available, including for an entry with no links.
+Links are listed uniformly: there is no in/out badge and no "set as tracked" action, because all links are equal (§9.3.3). The only per-link actions are **repair** (for `missing` / `wrong_target`), **re-adopt** (for `replaced`) and **remove**. `Distribute` is always available, including for an entry with no links.
 
-`components/files/FilesPanel.tsx` (Browse) renders the `data/` tree and badges each node: has entry / not an entry / has link drift. Both root and lazy child loads request `include_hidden=true`, because dot-prefixed repository content may itself be a managed entry and must remain visible. The `symlink/` components are deleted.
+`components/files/FilesPanel.tsx` (Browse) renders the `data/` tree and badges each node: backed up / not backed up / has link drift. Both root and lazy child loads request `include_hidden=true`, because dot-prefixed repository content may itself be a managed entry and must remain visible. The `symlink/` components are deleted.
 
 Type additions in `frontend/src/types/index.ts`:
 
@@ -1290,7 +1292,7 @@ Because backward compatibility is explicitly out of scope:
 | M7 | Consistency audit + repair |
 | M8 | Strip the old subsystem: delete `.links/`, `symlinks` table, sync machinery, resolver, symlink API; simplify `BackupService.Trigger` |
 | M9 | Content API simplification (§7) + `changes` endpoint |
-| M10 | Frontend: Entries tab, modals, badges, Browse integration |
+| M10 | Frontend: Backup Items tab, modals, badges, Browse integration |
 | M11 | Docs sync (all docs and READMEs, EN + ZH) |
 
 ### 9.19 Deferred Items (not yet implemented)

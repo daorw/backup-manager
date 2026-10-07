@@ -321,7 +321,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - 链接的 `local_path`：拒绝位于 `repo.Path` 内部的自引用；拒绝把 `/`、`$HOME`、仓库根目录本身作为目标
 - **新建备份文件/目录时内容必须落在 `<repo>/data/`**：条目 `repo_path` 起点固定为 `data/`，拒绝绝对路径与任何 `..`，并在解析软链接后校验仍在 `data/` 内（`resolveRepoPathIn`）；仓库内容的浏览/预览/保存同样以 `data/` 为根
 - Browse 标签页始终请求 `include_hidden=true`，确保点号开头的已备份文件/目录不会从 `data/` 内容树中消失
-- 新建条目的仓库父目录选择器只浏览 `data/`，选择后追加源对象原名并回填完整 `repo_path`；“显示隐藏文件”开关控制点号目录展示；选择器内的新目录仅为前端待创建路径，确认 adopt 时才随内容移动创建
+- 添加备份项的仓库父目录选择器只浏览 `data/`，选择后追加源对象原名并回填完整 `repo_path`；“显示隐藏文件”开关控制点号目录展示；选择器内的新目录仅为前端待创建路径，确认 adopt 时才随内容移动创建
 - 添加链接的 `local_path` 可手动输入完整路径，也可通过本机目录选择器选择父目录并自动追加条目名称
 - 建链接前用 `util.ResolveNestedSymlink` 解析候选链，检测到环即拒绝
 
@@ -382,6 +382,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - HTTP 服务器通过 servermgr 管理独立启停生命周期
 
 ### 12. 双语 UI 与默认语言
+- 界面术语固定为：备份项 / Backup Items（标签页）、添加备份项 / Add Backup Item（创建按钮）、已备份 / backed up（浏览树标记）；分发 / Distribute（原添加链接 / Add Link）、批量分发 / Bulk Distribute（原批量创建链接 / Bulk Link）。技术文档中的条目（`Entry`）、`entries` 字段、API 路径及模型/组件标识不随界面改名。树标记表示已纳入备份范围，不表示最新改动已提交或推送。
 - 支持语言仅为英文 `en` 与简体中文 `zh-CN`，默认 `en`
 - 侧边栏语言切换器即时更新 i18next/react-i18next 文案，并同步 Ant Design `ConfigProvider`、dayjs 与页面 `lang`
 - UI 渲染前通过 `GET /api/v1/settings` 加载；切换后通过 `PUT /api/v1/settings` 将 `language` 原子持久化到 `~/.config/backup-manager/config.json`

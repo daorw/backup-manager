@@ -10,10 +10,12 @@ A visual management tool for file/directory aggregated backup. Based on Git's re
 Specify what to back up → content moves into the repository → local paths become symlink views → Git version control
 ```
 
+UI terminology: **Backup Items** (备份项) names the tab, **Add Backup Item** (添加备份项) adds a file/directory, and **backed up** (已备份) marks managed content in the Browse tree. The distribution actions are **Distribute** (分发) and **Bulk Distribute** (批量分发). Technical `Entry` models, `entries` fields, and API paths retain their existing identifiers; the tree badge indicates membership in the backup set, not whether the latest changes have been committed or pushed.
+
 ### How It Works
 
 1. **Create a backup repo** — Initialize a repo at a local path (contains `data/`, `.backup-manager/` and `.git/`)
-2. **Create an entry** — Select a local file/directory to track. Its content is **moved** into `data/<repo_path>` and the original location is replaced by a symlink — the entry's **`in`** link
+2. **Add Backup Item** — Select a local file/directory to track. Its content is **moved** into `data/<repo_path>` and the original location is replaced by a symlink — the entry's **`in`** link
 3. **Distribute (optional)** — Add **`out`** links to make the same entry available at further local paths. `in` is a special case of `out`: both are symlinks to `data/<repo_path>`
 4. **Run backup** — Flush the manifest → `git add -A` → `git commit` → (optional) `git push`. There is no incremental sync step, because the content already lives in `data/`
 
@@ -42,7 +44,7 @@ The system refuses anything else at creation time and reports drift in the consi
 ## Features
 
 - **Repo Management** — Create/delete/view backup repos, visual config (remote URL, branch, Git user)
-- **Entry & Link Management** — Each backed-up file/directory is an entry with **0..N links, all equal**; view, distribute, add links, repair, re-adopt, and remove (unlink / move_back / purge)
+- **Backup Item & Link Management** — Each backed-up file/directory is an entry with **0..N links, all equal**; view, Distribute, Bulk Distribute, repair, re-adopt, and remove (unlink / move_back / purge)
 - **Link State Diagnosis** — Per-link states (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`) with one-click repair and re-adopt
 - **Consistency Audit** — Verifies the invariants (links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`; no link referencing an unregistered device) and reports unmanaged links
 - **Multi-Device** — Machine fingerprint detection, device registration, dry-run `apply` to recreate a machine's links, and detach; a fully converged apply is a no-op and does not rewrite the manifest; deleting a device removes only its link definitions, and entries left with no links stay legal
@@ -186,8 +188,8 @@ All endpoints prefixed with `/api/v1`, unified response format `{"data": ...}` o
 2. Click tray icon → "Open UI" to open browser
 3. Dashboard shows repo list
 4. Click "Create Repo" → Enter name, select path
-5. Enter repo detail → Entries tab → "+ New Entry" → choose a local source and either type its target path or visually choose/create a pending parent under `data/`; enable Show Hidden when selecting a dot-prefixed directory (the content moves only after confirmation; the original location becomes its first link)
-6. Optionally add more links by typing a complete local path or visually choosing its parent directory; the entry name is appended automatically
+5. Enter repo detail → Backup Items tab → "Add Backup Item" → choose a local source and either type its target path or visually choose/create a pending parent under `data/`; enable Show Hidden when selecting a dot-prefixed directory (the content moves only after confirmation; the original location becomes its first link)
+6. Optionally click "Distribute" and type a complete local path or visually choose its parent directory; the entry name is appended automatically
 7. Browse, preview and edit content in the Browse tab
 8. Switch to Backup tab → Click "Trigger Backup"
 9. Configure remote repo and auth (optional)

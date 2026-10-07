@@ -41,19 +41,21 @@
 | FR-3 | Delete Backup Repository | Delete an existing backup repository (only removes database records, preserves filesystem data) | P1 |
 | FR-4 | Edit Repository Config | Visually edit repository configuration: remote URL, branch, Git username/email, scheduled backup toggle and interval | P0 |
 
-### 3.2 Entry & Link Management (data/)
+### 3.2 Backup Item & Link Management (data/)
+
+UI terminology: the tab is **Backup Items** (备份项), the creation action is **Add Backup Item** (添加备份项), and the Browse tree badge is **backed up** (已备份). The distribution actions are **Distribute** (分发) and **Bulk Distribute** (批量分发). Technical `Entry` models, `entries` fields, and API paths retain their identifiers. The badge indicates membership in the backup set, not whether the latest changes have been committed or pushed.
 
 An **entry** is one backed-up file/directory at `data/<repo_path>`. A **link** binds a local path to an entry; an entry may have **0..N links**. Because every link is a symlink to the same `data/<repo_path>`, all links are equal — there is no primary link, no tracked link, and nothing to switch. An entry with no links is legal: the content is in the repository, there is just no local view of it.
 
 | ID | Feature | Description | Priority |
 |----|------|------|--------|
-| FR-5 | Create Entry (Adopt) | User selects a local file/directory and a target path under `data/`. The target may be typed or filled by a visual parent-directory picker restricted to `data/`; when the picker is used, the source basename is appended unchanged. A Show Hidden switch controls whether dot-prefixed directories are displayed. The picker may add pending subdirectories, which are created only when Adopt is confirmed. The content is then **moved** to `data/<repo_path>`, the original location is replaced by a symlink, and the entry and link are created together | P0 |
-| FR-6 | View Entry & Link List | Display all entries grouped by `repo_path`, each expandable to show its links, the owning device, and each link's state | P0 |
-| FR-7 | Add Link | Distribute an entry to another local path by creating a symlink to `data/<repo_path>`. The complete local path may be typed, or a visual directory picker may select its parent and append the entry basename. Any number of links per entry is allowed, including for an entry that has none yet (this is how a new device binds content that already exists in the repository) | P0 |
-| FR-9 | Bulk Link | Pick multiple entries plus one local root directory and create one link per entry at `<local_root>/<repo_path>` | P1 |
+| FR-5 | Add Backup Item (adopt) | User selects a local file/directory and a target path under `data/`. The target may be typed or filled by a visual parent-directory picker restricted to `data/`; when the picker is used, the source basename is appended unchanged. A Show Hidden switch controls whether dot-prefixed directories are displayed. The picker may add pending subdirectories, which are created only when Add Backup Item is confirmed. The content is then **moved** to `data/<repo_path>`, the original location is replaced by a symlink, and the entry and link are created together | P0 |
+| FR-6 | View Backup Item & Link List | Display all backup items grouped by `repo_path`, each expandable to show its links, the owning device, and each link's state | P0 |
+| FR-7 | Distribute | Distribute an entry to another local path by creating a symlink to `data/<repo_path>`. The complete local path may be typed, or a visual directory picker may select its parent and append the entry basename. Any number of links per entry is allowed, including for an entry that has none yet (this is how a new device binds content that already exists in the repository) | P0 |
+| FR-9 | Bulk Distribute | Pick multiple entries plus one local root directory and create one link per entry at `<local_root>/<repo_path>` | P1 |
 | FR-10 | Link State Diagnosis & Repair | Diagnose each link (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied` / `disabled`) and offer repair / re-adopt | P0 |
 | FR-11 | Consistency Audit | Verify the invariants (links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`, no link referencing an unregistered device) and report unmanaged links; one-click repair for everything convergable | P1 |
-| FR-25 | Remove Link / Entry | Remove a single link (safe; the entry and its content stay), or remove an entry via `unlink` (this device's links only) / `move_back` (content returns to a chosen local path) / `purge` (delete the content) | P0 |
+| FR-25 | Remove Link / Backup Item | Remove a single link (safe; the entry and its content stay), or remove an entry via `unlink` (this device's links only) / `move_back` (content returns to a chosen local path) / `purge` (delete the content) | P0 |
 
 **Consistency rule (must hold)**: links stay completely consistent with the backed-up file/directory. If a directory is tracked, no link may point at a single file inside it. Consequently entries never overlap, and a link is always bound to a whole entry.
 

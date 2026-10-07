@@ -46,7 +46,7 @@ The system refuses anything else at creation time and reports drift in the consi
 - **Link State Diagnosis** — Per-link states (`ok` / `missing` / `wrong_target` / `replaced` / `dangling` / `occupied`) with one-click repair and re-adopt
 - **Consistency Audit** — Verifies the invariants (links bind whole entries, never sub-paths; entries never overlap; no link inside a directory entry; no symlink inside `data/`; no link referencing an unregistered device) and reports unmanaged links
 - **Multi-Device** — Machine fingerprint detection, device registration, dry-run `apply` to recreate a machine's links, and detach; a fully converged apply is a no-op and does not rewrite the manifest; deleting a device removes only its link definitions, and entries left with no links stay legal
-- **File Preview & Edit** — Browse all `data/` content including dot-prefixed files/directories; plain text/code syntax highlighting, Markdown rendering, and binary file identification; edits write straight into `data/` and every link reflects them immediately
+- **File Preview & Edit** — Browse all `data/` content including dot-prefixed files/directories; plain text/code syntax highlighting, Markdown rendering, and binary file identification; edits write straight into `data/` and every link reflects them immediately. Plain text and Markdown preview/edit areas expand to fill the remaining available height in the Browse tab.
 - **Backup Execution** — Manual trigger or scheduled auto-backup (second-precision cron), optional Git push
 - **Backup History** — View Git commit history with pagination, plus the uncommitted change count
 - **Content Rollback** — Select a historical commit and restore `data/` to that version (full, per-entry, or single file)

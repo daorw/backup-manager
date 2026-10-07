@@ -356,6 +356,7 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - 回滚需要 repo 级互斥锁，禁止与备份并发
 
 ### 8. 文件编辑与保存
+- 普通文本和 Markdown 的预览/编辑区随浏览（Browse）标签页的剩余可用高度展开。
 - 预览和编辑的目标就是 `data/<repo_path>` —— 只写一次，不存在双写
 - `path` 参数始终是仓库相对路径，一律经 `util.SafeJoin` 校验
 - 保留原始文件权限（os.Stat → origMode → os.Chmod）

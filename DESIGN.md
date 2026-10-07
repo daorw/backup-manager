@@ -467,6 +467,8 @@ The mount model (§9) removes the source-vs-copy duality: content lives in `<rep
 | Save | `<repo>/data/<repo_path>` | Written in place; the local mount reflects it immediately, because it is a symlink to the same inode |
 | Backup | `data/` | `git add -A` picks the edit up — no incremental sync involved |
 
+The right preview container in `FilesPanel` uses a flex column layout so the existing `flex: 1` on `TextPreview` and `MarkdownPreview` expands the plain text and Markdown preview/edit areas to fill the remaining available height in the Browse tab.
+
 ### 7.1 API Contract
 
 ```

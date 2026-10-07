@@ -466,6 +466,8 @@ backup-manager/
 | 保存 | `<repo>/data/<repo_path>` | 就地写入；本机挂载是同一 inode 的软链接，会立即反映变更 |
 | 备份 | `data/` | `git add -A` 直接收录改动 —— 不涉及任何增量同步 |
 
+`FilesPanel` 右侧预览容器采用 flex column 布局，使 `TextPreview` 和 `MarkdownPreview` 已有的 `flex: 1` 生效，让普通文本和 Markdown 的预览/编辑区随浏览（Browse）标签页的剩余可用高度展开。
+
 ### 7.1 API 契约
 
 ```

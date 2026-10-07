@@ -273,6 +273,8 @@ repo_auths    — 认证: repo_id(FK), auth_type, ssh_private_key(BLOB), ssh_pri
 - **Markdown 文件**：在渲染预览模式与原始文本编辑模式之间切换，编辑后保存
 - **二进制文件**：仅显示文件类型信息，不可编辑
 
+普通文本和 Markdown 的预览/编辑区随浏览（Browse）标签页的剩余可用高度展开。
+
 ### 7.2 操作对象说明
 
 | 操作 | 对象 | 说明 |

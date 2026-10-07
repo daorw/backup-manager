@@ -242,7 +242,10 @@ const FilesPanel: React.FC<FilesPanelProps> = ({ repoId }) => {
           />
         )}
       </div>
-      <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>{renderPreview()}</div>
+      {/* 接通预览器的 flex 高度链，让文本和 Markdown 编辑区撑满剩余空间。 */}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        {renderPreview()}
+      </div>
     </div>
   );
 };

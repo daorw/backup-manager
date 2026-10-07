@@ -33,7 +33,7 @@ Backup Manager 是一个文件/目录聚合备份可视化管理工具。基于 
 
 ## Browse 标签页
 
-Browse 标签页展示仓库在 `data/` 下的真实内容，并允许预览与编辑。
+Browse 标签页展示仓库在 `data/` 下的真实内容，并允许预览与编辑。普通文本和 Markdown 的预览/编辑区随浏览（Browse）标签页的剩余可用高度展开。
 
 ![Browse Tab](../assets/preview.png)
 

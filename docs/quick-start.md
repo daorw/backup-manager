@@ -35,7 +35,7 @@ After opening a repository, you can see four main tabs: **Browse**, **Entries**,
 
 ## Browse Tab
 
-The Browse tab shows the repository's real content under `data/`, and lets you preview and edit it.
+The Browse tab shows the repository's real content under `data/`, and lets you preview and edit it. Plain text and Markdown preview/edit areas expand to fill the remaining available height in the Browse tab.
 
 ![Browse Tab](assets/preview.png)
 

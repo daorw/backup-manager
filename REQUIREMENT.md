@@ -275,6 +275,8 @@ In the Browse tab of the repository detail page, the `data/` tree includes dot-p
 - **Markdown files**: Toggle between rendered preview mode and raw text edit mode, then save
 - **Binary files**: Only display file type information, not editable
 
+Plain text and Markdown preview/edit areas expand to fill the remaining available height in the Browse tab.
+
 ### 7.2 Operation Target Description
 
 | Operation | Target | Description |
